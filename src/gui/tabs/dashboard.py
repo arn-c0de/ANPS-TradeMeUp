@@ -31,7 +31,14 @@ def create_layout():
                 dbc.Card([
                     dbc.CardHeader(html.H5("📰 Recent News (Last 24h)")),
                     dbc.CardBody([
-                        html.Div(id="recent-news-table")
+                        html.Div(
+                            id="recent-news-table",
+                            style={
+                                'maxHeight': '400px',
+                                'overflowY': 'auto',
+                                'overflowX': 'hidden'
+                            }
+                        )
                     ])
                 ])
             ], width=8),
