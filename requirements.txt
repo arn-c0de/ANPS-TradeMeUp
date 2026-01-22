@@ -4,7 +4,7 @@
 # Web Framework
 fastapi==0.128.0
 uvicorn[standard]==0.27.0
-python-multipart==0.0.6
+python-multipart==0.0.17
 
 # Database
 sqlalchemy==2.0.25
@@ -51,7 +51,7 @@ dash==3.4.0
 dash-bootstrap-components==2.0.4
 
 # Security
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]==3.4.0
 passlib[bcrypt]==1.7.4
 
 # Testing
