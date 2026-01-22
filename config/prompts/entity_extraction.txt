@@ -1,0 +1,55 @@
+You are a financial entity extraction specialist. Extract companies, sectors, and people mentioned in this news article.
+
+Article Title: {title}
+Article Content: {content}
+
+Please identify and extract entities in JSON format:
+
+{{
+  "entities": [
+    {{
+      "text": "Apple Inc.",
+      "type": "company",
+      "ticker": "AAPL",
+      "confidence": 0.98,
+      "exposure_type": "direct",
+      "mention_count": 5
+    }},
+    {{
+      "text": "Technology Sector",
+      "type": "sector",
+      "ticker": "TECH",
+      "confidence": 0.90,
+      "exposure_type": "indirect",
+      "mention_count": 2
+    }},
+    {{
+      "text": "Tim Cook",
+      "type": "person",
+      "role": "CEO",
+      "company": "AAPL",
+      "confidence": 0.95,
+      "mention_count": 3
+    }}
+  ]
+}}
+
+Entity Types:
+- company: Public companies (provide ticker if known)
+- sector: Industry sectors (Technology, Finance, Healthcare, etc.)
+- person: Executives, analysts, officials
+- location: Countries, cities, regions (if relevant to markets)
+
+Exposure Types:
+- direct: Company explicitly discussed
+- indirect: Sector or related companies affected
+- supply_chain: Supply chain relationships
+
+Instructions:
+1. Extract all relevant entities mentioned in the article
+2. Provide stock ticker symbols when available (US markets: AAPL, MSFT, etc.)
+3. Count how many times each entity is mentioned
+4. Classify exposure type (direct/indirect/supply_chain)
+5. Assign confidence based on clarity of mention
+
+Respond ONLY with the JSON object, no additional text.

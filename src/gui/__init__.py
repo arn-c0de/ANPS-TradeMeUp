@@ -1,0 +1,3 @@
+"""
+GUI Package - TradeMeUp Dashboard
+"""
