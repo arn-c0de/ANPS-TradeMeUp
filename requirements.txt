@@ -60,3 +60,4 @@ httpx==0.28.1
 
 # Utilities
 tenacity==9.1.2
+psutil==7.2.1

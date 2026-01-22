@@ -65,13 +65,14 @@ def create_layout():
 
 def get_predictions_table(engine):
     """Get predictions table"""
-    with Session(engine) as db:
-        predictions = db.query(Prediction).order_by(
-            desc(Prediction.created_at)
-        ).limit(20).all()
-        
-        if not predictions:
-            return dbc.Alert("No predictions available yet. Run the pipeline to generate predictions.", color="info")
+    try:
+        with Session(engine) as db:
+            predictions = db.query(Prediction).order_by(
+                desc(Prediction.created_at)
+            ).limit(20).all()
+            
+            if not predictions:
+                return dbc.Alert("No predictions available yet. Run the pipeline to generate predictions.", color="info")
         
         rows = []
         for pred in predictions:
@@ -90,7 +91,7 @@ def get_predictions_table(engine):
                 html.Td(entity.entity_name if entity else "Unknown", className="text-primary"),
                 html.Td([direction_emoji, " ", direction.upper()]),
                 html.Td(f"{pred.confidence:.2%}" if pred.confidence else "N/A", className=conf_color),
-                html.Td(pred.forecast_horizon if pred.forecast_horizon else "N/A")
+                html.Td(pred.horizon if pred.horizon else "N/A")
             ]))
         
         return dbc.Table([
@@ -103,3 +104,8 @@ def get_predictions_table(engine):
             ])),
             html.Tbody(rows)
         ], bordered=True, hover=True, striped=True, className="table-dark")
+    except Exception as e:
+        return dbc.Alert(
+            "⚠️ Unable to load predictions. Database may be empty. Run the pipeline to generate predictions.",
+            color="warning"
+        )

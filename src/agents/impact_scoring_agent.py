@@ -283,7 +283,7 @@ class ImpactScoringAgent:
         current_regime = self._get_current_regime()
         regime_sensitivity = self._calculate_regime_sensitivity(current_regime)
 
-        sector_code = entity.metadata.get('sector') if entity.metadata else None
+        sector_code = entity.metadata_.get('sector') if entity.metadata_ else None
         sector_sensitivity = self._get_sector_sensitivity(sector_code or 'default')
 
         historical_reaction = self._calculate_historical_reaction(

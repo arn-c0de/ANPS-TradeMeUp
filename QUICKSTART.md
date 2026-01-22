@@ -63,6 +63,28 @@ python scripts/run_mvp_pipeline.py
 # Nur einzelne Agents testen:
 python scripts/run_ingestion.py  # Nur News holen
 python scripts/run_full_pipeline.py  # Agents 1-3
+
+# Live Logging testen (für Dashboard):
+python test_live_logging.py
+```
+
+## Dashboard starten (NEU!)
+
+```bash
+# Starte das GUI Dashboard
+.\start_gui.bat  # Windows
+# python run_dashboard.py  # Alternative
+
+# Dashboard öffnen im Browser:
+# http://localhost:8050
+
+# Features:
+# - 🔴 Live Agent Activity Monitor
+# - 📋 Real-time Server Logs
+# - 📊 Metrics & Statistics
+# - 📰 News Feed
+# - 🎯 Predictions
+# - 🎮 Agent Control Panel
 ```
 
 ## API starten

@@ -1,0 +1,150 @@
+{
+  "feeds": [
+    {
+      "name": "Reuters Business (via Google News)",
+      "url": "https://news.google.com/rss/search?q=site:reuters.com+business&hl=en-US&gl=US&ceid=US:en",
+      "category": "business",
+      "enabled": true
+    },
+    {
+      "name": "Reuters Markets (via Google News)",
+      "url": "https://news.google.com/rss/search?q=site:reuters.com+markets&hl=en-US&gl=US&ceid=US:en",
+      "category": "markets",
+      "enabled": true
+    },
+    {
+      "name": "Reuters Economy (via Google News)",
+      "url": "https://news.google.com/rss/search?q=site:reuters.com+economy&hl=en-US&gl=US&ceid=US:en",
+      "category": "macro",
+      "enabled": true
+    },
+
+    {
+      "name": "Yahoo Finance",
+      "url": "https://finance.yahoo.com/news/rssindex",
+      "category": "finance",
+      "enabled": true
+    },
+    {
+      "name": "Yahoo Finance Earnings",
+      "url": "https://finance.yahoo.com/rss/earnings",
+      "category": "earnings",
+      "enabled": true
+    },
+
+    {
+      "name": "MarketWatch Top Stories",
+      "url": "http://feeds.marketwatch.com/marketwatch/topstories/",
+      "category": "markets",
+      "enabled": true
+    },
+    {
+      "name": "MarketWatch Real-Time Headlines",
+      "url": "http://feeds.marketwatch.com/marketwatch/realtimeheadlines/",
+      "category": "markets",
+      "enabled": true
+    },
+
+    {
+      "name": "Financial Times",
+      "url": "https://www.ft.com/news-feed?format=rss",
+      "category": "finance",
+      "enabled": true
+    },
+
+    {
+      "name": "CNBC Top News",
+      "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+      "category": "business",
+      "enabled": true
+    },
+    {
+      "name": "CNBC World News",
+      "url": "https://www.cnbc.com/id/100727362/device/rss/rss.html",
+      "category": "business",
+      "enabled": true
+    },
+
+    {
+      "name": "Wall Street Journal Markets",
+      "url": "https://feeds.wsj.com/public/resources/MWP_WSJ_3_0_Main",
+      "category": "markets",
+      "enabled": false
+    },
+
+    {
+      "name": "Seeking Alpha Market News",
+      "url": "https://seekingalpha.com/market_currents.xml",
+      "category": "analysis",
+      "enabled": false
+    },
+
+    {
+      "name": "Benzinga News",
+      "url": "https://www.benzinga.com/feed",
+      "category": "markets",
+      "enabled": true
+    },
+
+    {
+      "name": "Federal Reserve Press Releases",
+      "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "category": "macro",
+      "enabled": true
+    },
+
+    {
+      "name": "ECB Press Releases",
+      "url": "https://www.ecb.europa.eu/rss/press.html",
+      "category": "macro",
+      "enabled": false
+    },
+
+    {
+      "name": "Bloomberg Markets",
+      "url": "https://feeds.bloomberg.com/markets/news.rss",
+      "category": "markets",
+      "enabled": true
+    },
+    {
+      "name": "Bloomberg Economics",
+      "url": "https://feeds.bloomberg.com/economics/news.rss",
+      "category": "macro",
+      "enabled": true
+    },
+    {
+      "name": "Bloomberg Politics",
+      "url": "https://feeds.bloomberg.com/politics/news.rss",
+      "category": "macro",
+      "enabled": true
+    },
+
+    {
+      "name": "TechCrunch",
+      "url": "https://techcrunch.com/feed/",
+      "category": "technology",
+      "enabled": false
+    },
+
+    {
+      "name": "Semiconductor Engineering",
+      "url": "https://semiengineering.com/feed/",
+      "category": "semiconductors",
+      "enabled": false
+    },
+
+    {
+      "name": "OilPrice",
+      "url": "https://oilprice.com/rss/main",
+      "category": "energy",
+      "enabled": false
+    },
+
+    {
+      "name": "FDA Press Releases",
+      "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml",
+      "category": "healthcare",
+      "enabled": false
+    }
+  ]
+}
