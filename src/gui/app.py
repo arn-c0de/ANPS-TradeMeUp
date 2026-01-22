@@ -313,7 +313,7 @@ app.layout = html.Div([
             dbc.Tab(testing.create_layout(), label="🧪 Testing", tab_id="testing", className="text-light"),
             dbc.Tab(system.create_layout(), label="🔧 System Health", tab_id="system", className="text-light"),
             dbc.Tab(settings_tab.create_layout(), label="⚙️ Settings", tab_id="settings", className="text-light")
-        ], id="tabs", active_tab="dashboard")
+        ], id="tabs", active_tab="dashboard", persistence=True, persistence_type="local")
     ], fluid=True)
 ], className="bg-dark text-light min-vh-100")
 
