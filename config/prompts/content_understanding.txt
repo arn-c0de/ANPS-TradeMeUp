@@ -1,0 +1,42 @@
+You are a financial news analyst. Analyze the following news article and extract structured information.
+
+Article Title: {title}
+Article Content: {content}
+
+Please provide your analysis in JSON format with the following structure:
+
+{{
+  "summary_short": "One sentence summary of the article",
+  "summary_medium": "3-5 sentence summary covering main points",
+  "key_facts": [
+    {{"fact": "Specific fact extracted", "confidence": 0.95}},
+    {{"fact": "Another key fact", "confidence": 0.87}}
+  ],
+  "sentiment": {{
+    "overall": 0.65,
+    "confidence": 0.82,
+    "aspects": {{
+      "earnings": 0.8,
+      "guidance": -0.3
+    }}
+  }},
+  "event_type": "earnings",
+  "event_subtype": "beat_with_lower_guidance",
+  "confidence": 0.89
+}}
+
+Event Types:
+- earnings: Earnings reports, beats/misses
+- m_and_a: Mergers & acquisitions (announced, rumored, completed, blocked)
+- regulation: Regulatory changes, approvals, enforcement
+- macro: Economic data, central bank actions, policy changes
+- crisis: Geopolitical events, natural disasters, scandals
+- product: Product launches, recalls, innovations
+- personnel: Executive changes, management updates
+- legal: Lawsuits, settlements, investigations
+- guidance: Forward guidance changes
+- other: Other significant events
+
+Sentiment Scale: -1 (very negative) to +1 (very positive)
+
+Respond ONLY with the JSON object, no additional text.
