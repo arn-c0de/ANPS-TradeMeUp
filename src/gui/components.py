@@ -33,11 +33,40 @@ def create_navbar():
                         html.Small("AI Trading Intelligence Platform", className="text-muted")
                     ])
                 ], width="auto"),
-            ], align="center", className="g-0"),
+                dbc.Col([
+                    dbc.ButtonGroup([
+                        dbc.Button(
+                            [html.I(className="bi bi-play-fill me-2"), "Start Auto"],
+                            id="btn-start-continuous",
+                            color="success",
+                            size="sm",
+                            className="me-2"
+                        ),
+                        dbc.Button(
+                            [html.I(className="bi bi-stop-fill me-2"), "Stop Auto"],
+                            id="btn-stop-continuous",
+                            color="danger",
+                            size="sm",
+                            disabled=True,
+                            className="me-2"
+                        ),
+                        dbc.Button(
+                            [html.I(className="bi bi-gear-fill me-2"), "Settings"],
+                            id="btn-open-settings",
+                            color="secondary",
+                            size="sm",
+                            outline=True
+                        )
+                    ])
+                ], width="auto", className="ms-auto"),
+            ], align="center", className="g-0 w-100"),
             dbc.Row([
                 dbc.Col([
-                    html.Div(id="live-status", className="text-end")
-                ], width="auto")
+                    html.Div([
+                        html.Div(id="continuous-status", className="me-3"),
+                        html.Div(id="live-status")
+                    ], className="d-flex align-items-center")
+                ], className="text-end")
             ], align="center")
         ], fluid=True),
         color="dark",

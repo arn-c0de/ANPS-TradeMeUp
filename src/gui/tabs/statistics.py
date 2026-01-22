@@ -63,61 +63,72 @@ def create_layout():
 
 def get_statistics_metrics(engine):
     """Get overall statistics"""
-    with Session(engine) as db:
-        total_news = db.query(func.count(RawNews.news_id)).scalar() or 0
-        total_processed = db.query(func.count(ProcessedNews.news_id)).scalar() or 0
-        total_entities = db.query(func.count(Entity.entity_id)).scalar() or 0
-        total_predictions = db.query(func.count(Prediction.prediction_id)).scalar() or 0
-        total_impacts = db.query(func.count(ImpactScore.impact_id)).scalar() or 0
+    try:
+        with Session(engine) as db:
+            total_news = db.query(func.count(RawNews.news_id)).scalar() or 0
+            total_processed = db.query(func.count(ProcessedNews.news_id)).scalar() or 0
+            total_entities = db.query(func.count(Entity.entity_id)).scalar() or 0
+            total_predictions = db.query(func.count(Prediction.prediction_id)).scalar() or 0
+            total_impacts = db.query(func.count(ImpactScore.impact_id)).scalar() or 0
+            
+            avg_quality = db.query(func.avg(DataQualityScore.quality_score)).scalar()
+            avg_quality = round(avg_quality, 2) if avg_quality else 0
         
-        avg_quality = db.query(func.avg(DataQualityScore.quality_score)).scalar()
-        avg_quality = round(avg_quality, 2) if avg_quality else 0
-    
-    return dbc.Row([
-        dbc.Col([
-            html.Div([
-                html.H3(f"{total_news:,}", className="text-primary"),
-                html.P("Total Articles", className="text-muted mb-0")
-            ], className="text-center")
-        ], width=2),
-        dbc.Col([
-            html.Div([
-                html.H3(f"{total_processed:,}", className="text-success"),
-                html.P("Processed", className="text-muted mb-0")
-            ], className="text-center")
-        ], width=2),
-        dbc.Col([
-            html.Div([
-                html.H3(f"{total_entities:,}", className="text-info"),
-                html.P("Entities", className="text-muted mb-0")
-            ], className="text-center")
-        ], width=2),
-        dbc.Col([
-            html.Div([
-                html.H3(f"{total_predictions:,}", className="text-warning"),
-                html.P("Predictions", className="text-muted mb-0")
-            ], className="text-center")
-        ], width=2),
-        dbc.Col([
-            html.Div([
-                html.H3(f"{total_impacts:,}", className="text-danger"),
-                html.P("Impact Scores", className="text-muted mb-0")
-            ], className="text-center")
-        ], width=2),
-        dbc.Col([
-            html.Div([
-                html.H3(f"{avg_quality:.2f}", className="text-primary"),
-                html.P("Avg Quality", className="text-muted mb-0")
-            ], className="text-center")
-        ], width=2)
-    ])
+        return dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.H3(f"{total_news:,}", className="text-primary"),
+                    html.P("Total Articles", className="text-muted mb-0")
+                ], className="text-center")
+            ], width=2),
+            dbc.Col([
+                html.Div([
+                    html.H3(f"{total_processed:,}", className="text-success"),
+                    html.P("Processed", className="text-muted mb-0")
+                ], className="text-center")
+            ], width=2),
+            dbc.Col([
+                html.Div([
+                    html.H3(f"{total_entities:,}", className="text-info"),
+                    html.P("Entities", className="text-muted mb-0")
+                ], className="text-center")
+            ], width=2),
+            dbc.Col([
+                html.Div([
+                    html.H3(f"{total_predictions:,}", className="text-warning"),
+                    html.P("Predictions", className="text-muted mb-0")
+                ], className="text-center")
+            ], width=2),
+            dbc.Col([
+                html.Div([
+                    html.H3(f"{total_impacts:,}", className="text-danger"),
+                    html.P("Impact Scores", className="text-muted mb-0")
+                ], className="text-center")
+            ], width=2),
+            dbc.Col([
+                html.Div([
+                    html.H3(f"{avg_quality:.2f}", className="text-primary"),
+                    html.P("Avg Quality", className="text-muted mb-0")
+                ], className="text-center")
+            ], width=2)
+        ])
+    except Exception as e:
+        return dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.P("⚠️ Unable to load statistics", className="text-warning mb-2"),
+                    html.Small("Database may be empty. Run the pipeline to generate data.", className="text-muted")
+                ], className="text-center")
+            ], width=12)
+        ])
 
 
 def get_event_distribution_chart(engine):
     """Get event type distribution chart"""
-    with Session(engine) as db:
-        event_data = db.query(
-            ProcessedNews.event_type,
+    try:
+        with Session(engine) as db:
+            event_data = db.query(
+                ProcessedNews.event_type,
             func.count(ProcessedNews.news_id).label('count')
         ).group_by(ProcessedNews.event_type).all()
         
@@ -138,12 +149,31 @@ def get_event_distribution_chart(engine):
             yaxis_title="Count"
         )
         return fig
+    except Exception as e:
+        # Return empty figure with message
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No data available yet<br>Run the pipeline to see event distribution",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color="gray")
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False)
+        )
+        return fig
 
 
 def get_quality_distribution_chart(engine):
     """Get quality distribution chart"""
-    with Session(engine) as db:
-        quality_data = db.query(DataQualityScore.quality_score).all()
+    try:
+        with Session(engine) as db:
+            quality_data = db.query(DataQualityScore.quality_score).all()
         
         if not quality_data:
             return {}
@@ -159,5 +189,23 @@ def get_quality_distribution_chart(engine):
             plot_bgcolor='rgba(0,0,0,0)',
             xaxis_title="Quality Score",
             yaxis_title="Count"
+        )
+        return fig
+    except Exception as e:
+        # Return empty figure with message
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No data available yet<br>Run the pipeline to see quality distribution",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color="gray")
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False)
         )
         return fig

@@ -10,5 +10,6 @@ from . import charts
 from . import system
 from . import control
 from . import testing
+from . import settings
 
-__all__ = ['dashboard', 'predictions', 'news', 'statistics', 'charts', 'system', 'control', 'testing']
+__all__ = ['dashboard', 'predictions', 'news', 'statistics', 'charts', 'system', 'control', 'testing', 'settings']

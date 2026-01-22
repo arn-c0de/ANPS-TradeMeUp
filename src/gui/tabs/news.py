@@ -108,21 +108,26 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
             
             card = dbc.Card([
                 dbc.CardBody([
-                    html.H5([
-                        html.A(raw_news.title, href=raw_news.url, target="_blank", className="text-decoration-none"),
-                        sentiment_badge,
-                        event_badge
-                    ]),
-                    html.P([
-                        dbc.Badge(raw_news.source, color="secondary", className="me-2"),
-                        html.Small(raw_news.fetched_at.strftime("%Y-%m-%d %H:%M") if raw_news.fetched_at else "N/A", className="text-muted")
-                    ]),
-                    html.P(
-                        processed.summary_short[:200] + "..." if processed and processed.summary_short else "No summary available.",
-                        className="text-muted"
-                    )
-                ])
-            ], className="mb-3")
+                    html.Div([
+                        html.Div([
+                            html.A(
+                                raw_news.title, 
+                                href=raw_news.url, 
+                                target="_blank", 
+                                className="text-light text-decoration-none news-title"
+                            ),
+                            html.Span([sentiment_badge, event_badge], className="ms-2")
+                        ], className="d-flex align-items-start mb-1"),
+                        html.Div([
+                            dbc.Badge(raw_news.source, color="secondary", className="me-2 badge-sm"),
+                            html.Small(
+                                raw_news.fetched_at.strftime("%H:%M") if raw_news.fetched_at else "N/A", 
+                                className="text-muted"
+                            )
+                        ], className="d-flex align-items-center")
+                    ])
+                ], className="py-2 px-3")
+            ], className="mb-2 news-card-compact")
             
             cards.append(card)
         

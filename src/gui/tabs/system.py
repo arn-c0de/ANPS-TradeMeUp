@@ -81,38 +81,50 @@ def get_agent_status():
 
 def get_db_statistics(engine):
     """Get database statistics"""
-    with Session(engine) as db:
-        stats = {
-            "📰 Raw News": db.query(func.count(RawNews.news_id)).scalar() or 0,
-            "🧠 Processed News": db.query(func.count(ProcessedNews.news_id)).scalar() or 0,
-            "🏢 Entities": db.query(func.count(Entity.entity_id)).scalar() or 0,
-            "🎯 Predictions": db.query(func.count(Prediction.prediction_id)).scalar() or 0,
-            "⚡ Impact Scores": db.query(func.count(ImpactScore.impact_id)).scalar() or 0
-        }
-    
-    items = []
-    for key, value in stats.items():
-        items.append(html.Div([
-            html.Strong(f"{key}: "),
-            html.Span(f"{value:,}", className="text-primary")
-        ], className="mb-2"))
-    
-    return html.Div(items)
+    try:
+        with Session(engine) as db:
+            stats = {
+                "📰 Raw News": db.query(func.count(RawNews.news_id)).scalar() or 0,
+                "🧠 Processed News": db.query(func.count(ProcessedNews.news_id)).scalar() or 0,
+                "🏢 Entities": db.query(func.count(Entity.entity_id)).scalar() or 0,
+                "🎯 Predictions": db.query(func.count(Prediction.prediction_id)).scalar() or 0,
+                "⚡ Impact Scores": db.query(func.count(ImpactScore.impact_id)).scalar() or 0
+            }
+        
+        items = []
+        for key, value in stats.items():
+            items.append(html.Div([
+                html.Strong(f"{key}: "),
+                html.Span(f"{value:,}", className="text-primary")
+            ], className="mb-2"))
+        
+        return html.Div(items)
+    except Exception as e:
+        return html.Div([
+            html.P("⚠️ Unable to load database statistics", className="text-warning mb-2"),
+            html.Small("Database may be empty. Run the pipeline to generate data.", className="text-muted")
+        ])
 
 
 def get_pipeline_stats(engine):
     """Get pipeline processing stats"""
-    with Session(engine) as db:
-        total_news = db.query(func.count(RawNews.news_id)).scalar() or 0
-        processed = db.query(func.count(ProcessedNews.news_id)).scalar() or 0
+    try:
+        with Session(engine) as db:
+            total_news = db.query(func.count(RawNews.news_id)).scalar() or 0
+            processed = db.query(func.count(ProcessedNews.news_id)).scalar() or 0
+            
+            processing_rate = (processed / total_news * 100) if total_news > 0 else 0
         
-        processing_rate = (processed / total_news * 100) if total_news > 0 else 0
-    
-    return html.Div([
-        html.Div([
-            html.H4(f"{processing_rate:.1f}%", className="text-success"),
-            html.P("Processing Completion Rate", className="text-muted")
-        ], className="text-center mb-3"),
-        dbc.Progress(value=processing_rate, color="success", className="mb-2"),
-        html.Small(f"{processed:,} of {total_news:,} articles processed", className="text-muted")
-    ])
+        return html.Div([
+            html.Div([
+                html.H4(f"{processing_rate:.1f}%", className="text-success"),
+                html.P("Processing Completion Rate", className="text-muted")
+            ], className="text-center mb-3"),
+            dbc.Progress(value=processing_rate, color="success", className="mb-2"),
+            html.Small(f"{processed:,} of {total_news:,} articles processed", className="text-muted")
+        ])
+    except Exception as e:
+        return html.Div([
+            html.P("⚠️ Unable to load pipeline stats", className="text-warning mb-2"),
+            html.Small("Database may be empty. Run the pipeline to generate data.", className="text-muted")
+        ])

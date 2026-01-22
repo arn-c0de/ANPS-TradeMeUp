@@ -282,9 +282,10 @@ def run_agent_specific_test(agent, agent_key):
     """Run agent-specific tests"""
     try:
         if agent_key == "agent_1":
-            # Test RSS feed connection
-            if hasattr(agent, 'rss_feeds') and len(agent.rss_feeds) > 0:
-                return {"success": True, "message": f"Found {len(agent.rss_feeds)} RSS feeds configured"}
+            # Test RSS feed connection - check class attribute
+            rss_feeds = getattr(agent, 'RSS_FEEDS', None) or getattr(agent, 'rss_feeds', None)
+            if rss_feeds and len(rss_feeds) > 0:
+                return {"success": True, "message": f"Found {len(rss_feeds)} RSS feeds configured"}
             return {"success": False, "message": "No RSS feeds configured"}
             
         elif agent_key == "agent_1_5":

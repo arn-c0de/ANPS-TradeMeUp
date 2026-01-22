@@ -2,6 +2,11 @@
 Quick start script for TradeMeUp Dashboard
 """
 
+import warnings
+# Suppress pandas deprecation warnings from yfinance library
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='yfinance')
+warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
+
 import sys
 import os
 
@@ -9,8 +14,14 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from src.gui.app import app
+from src.utils.activity_logger import activity_logger
 
 if __name__ == "__main__":
+    # Initialize activity logger with startup message
+    activity_logger.log_activity("Dashboard starting...", "INFO")
+    activity_logger.log_activity("System ready for pipeline execution", "SUCCESS")
+    activity_logger.log_activity("Waiting for user action...", "INFO")
+    
     print("=" * 80)
     print("🚀 TradeMeUp Dashboard - AI Trading Intelligence")
     print("=" * 80)

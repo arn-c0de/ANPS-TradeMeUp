@@ -1,6 +1,8 @@
 """Agent 1: Feed & Data Ingestion Agent - Fetches news from RSS feeds and APIs."""
 import hashlib
 import logging
+import json
+from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional
 from dataclasses import dataclass
@@ -12,6 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from src.models.raw_news import RawNews
+from src.utils.activity_logger import activity_logger
 
 logger = logging.getLogger(__name__)
 
@@ -40,29 +43,14 @@ class IngestionAgent:
     - Store raw articles in database
     """
 
-    # RSS Feed sources
-    RSS_FEEDS = [
-        {
-            "name": "Reuters Business",
-            "url": "https://www.reutersagency.com/feed/?taxonomy=best-topics&post_type=best",
-        },
-        {
-            "name": "Yahoo Finance",
-            "url": "https://finance.yahoo.com/news/rssindex",
-        },
-        {
-            "name": "MarketWatch",
-            "url": "http://feeds.marketwatch.com/marketwatch/topstories/",
-        },
-    ]
-
-    def __init__(self, db: Session, rate_limit_delay: float = 2.0):
+    def __init__(self, db: Session, rate_limit_delay: float = 0.5, feeds_config: str = None):
         """
         Initialize the ingestion agent.
 
         Args:
             db: Database session
             rate_limit_delay: Delay between requests in seconds
+            feeds_config: Path to RSS feeds JSON config file
         """
         self.db = db
         self.rate_limit_delay = rate_limit_delay
@@ -70,6 +58,50 @@ class IngestionAgent:
         self.session.headers.update({
             'User-Agent': 'TradeMeUp/0.1.0 (Educational Research)'
         })
+        
+        # Load RSS feeds from JSON config
+        self.RSS_FEEDS = self._load_rss_feeds(feeds_config)
+
+    def _load_rss_feeds(self, config_path: str = None) -> List[Dict]:
+        """Load RSS feeds from JSON configuration file."""
+        if config_path is None:
+            # Default path
+            project_root = Path(__file__).parent.parent.parent
+            config_path = project_root / "config" / "rss_feeds.json"
+        else:
+            config_path = Path(config_path)
+        
+        try:
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    # Filter only enabled feeds
+                    feeds = [feed for feed in config.get('feeds', []) if feed.get('enabled', True)]
+                    logger.info(f"Loaded {len(feeds)} RSS feeds from {config_path}")
+                    return feeds
+            else:
+                logger.warning(f"RSS feeds config not found at {config_path}, using defaults")
+                return self._get_default_feeds()
+        except Exception as e:
+            logger.error(f"Error loading RSS feeds config: {e}, using defaults")
+            return self._get_default_feeds()
+    
+    def _get_default_feeds(self) -> List[Dict]:
+        """Get default RSS feeds if config file is not available."""
+        return [
+            {
+                "name": "Yahoo Finance",
+                "url": "https://finance.yahoo.com/news/rssindex",
+                "category": "finance",
+                "enabled": True
+            },
+            {
+                "name": "MarketWatch",
+                "url": "http://feeds.marketwatch.com/marketwatch/topstories/",
+                "category": "markets",
+                "enabled": True
+            }
+        ]
 
     def _calculate_content_hash(self, text: str) -> str:
         """Calculate SHA-256 hash of content for duplicate detection."""
@@ -189,7 +221,7 @@ class IngestionAgent:
         except IntegrityError as e:
             self.db.rollback()
             # Duplicate article (URL or content_hash already exists)
-            logger.debug(f"Duplicate article detected: {article.url}")
+            logger.info(f"Duplicate article skipped: {article.title[:50]} (already in DB)")
             return None
 
         except Exception as e:
@@ -221,11 +253,14 @@ class IngestionAgent:
                     saved_count += 1
 
             results[source_name] = saved_count
+            logger.info(f"{source_name}: {saved_count} new articles saved (from {len(articles)} fetched)")
 
             # Rate limiting
             sleep(self.rate_limit_delay)
 
-        logger.info(f"Ingestion complete. Total results: {results}")
+        total_new = sum(results.values())
+        logger.info(f"Ingestion complete. Total NEW articles: {total_new}, Results by source: {results}")
+        activity_logger.log_activity(f"Ingestion: {total_new} new articles saved", "INFO" if total_new > 0 else "WARNING")
         return results
 
     def fetch_news_api(self, api_key: str, query: str = "stocks OR markets") -> int:

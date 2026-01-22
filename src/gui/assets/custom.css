@@ -1,0 +1,346 @@
+/* TradeMeUp Dashboard - Enhanced Dark Theme */
+
+/* Main Background */
+body {
+    background-color: #060606 !important;
+    color: #ffffff !important;
+}
+
+/* Container Backgrounds */
+.bg-dark {
+    background-color: #0a0a0a !important;
+}
+
+.container-fluid {
+    background-color: #060606 !important;
+}
+
+.min-vh-100 {
+    background-color: #060606 !important;
+}
+
+/* Cards */
+.card {
+    background-color: #1a1a1a !important;
+    border: 1px solid #333 !important;
+    color: #ffffff !important;
+}
+
+.card-header {
+    background-color: #222 !important;
+    border-bottom: 1px solid #444 !important;
+    color: #ffffff !important;
+}
+
+.card-body {
+    background-color: #1a1a1a !important;
+    color: #ffffff !important;
+}
+
+/* Text Colors */
+.text-muted {
+    color: #aaaaaa !important;
+}
+
+.text-light {
+    color: #ffffff !important;
+}
+
+p, span, small, label, h1, h2, h3, h4, h5, h6 {
+    color: inherit;
+}
+
+/* Enhanced Color Scheme */
+.text-primary { color: #00d9ff !important; }
+.text-success { color: #00ff88 !important; }
+.text-warning { color: #ffaa00 !important; }
+.text-danger { color: #ff4444 !important; }
+.text-info { color: #00aaff !important; }
+
+/* Tables */
+.table-dark {
+    background-color: #1a1a1a !important;
+    color: #ffffff !important;
+}
+
+.table-dark th,
+.table-dark td {
+    border-color: #333 !important;
+    color: #ffffff !important;
+}
+
+.table-dark thead th {
+    background-color: #222 !important;
+    color: #00d9ff !important;
+}
+
+.table-hover tbody tr:hover {
+    background-color: #252525 !important;
+}
+
+/* Navigation Tabs */
+.nav-tabs {
+    border-bottom: 1px solid #444 !important;
+}
+
+.nav-tabs .nav-link {
+    color: #aaaaaa !important;
+    background-color: transparent !important;
+    border: none !important;
+}
+
+.nav-tabs .nav-link:hover {
+    color: #ffffff !important;
+    background-color: #1a1a1a !important;
+}
+
+.nav-tabs .nav-link.active {
+    background-color: #1a1a1a !important;
+    border-color: #444 !important;
+    color: #00d9ff !important;
+    border-bottom: 2px solid #00d9ff !important;
+}
+
+/* Form Controls */
+.form-control {
+    background-color: #1a1a1a !important;
+    border: 1px solid #444 !important;
+    color: #ffffff !important;
+}
+
+.form-control:focus {
+    background-color: #222 !important;
+    border-color: #00d9ff !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 0 0.2rem rgba(0, 217, 255, 0.25) !important;
+}
+
+.form-control::placeholder {
+    color: #666 !important;
+}
+
+/* Textarea (Logs) */
+textarea {
+    background-color: #0a0a0a !important;
+    color: #00ff00 !important;
+    border: 1px solid #333 !important;
+    font-family: 'Courier New', monospace !important;
+}
+
+/* Dropdowns */
+.dropdown-menu {
+    background-color: #1a1a1a !important;
+    border: 1px solid #444 !important;
+}
+
+.dropdown-item {
+    color: #ffffff !important;
+}
+
+.dropdown-item:hover {
+    background-color: #252525 !important;
+    color: #00d9ff !important;
+}
+
+/* Buttons */
+.btn-primary {
+    background-color: #00d9ff !important;
+    border-color: #00d9ff !important;
+    color: #000 !important;
+}
+
+.btn-primary:hover {
+    background-color: #00b8d9 !important;
+    border-color: #00b8d9 !important;
+}
+
+.btn-success {
+    background-color: #00ff88 !important;
+    border-color: #00ff88 !important;
+    color: #000 !important;
+}
+
+.btn-danger {
+    background-color: #ff4444 !important;
+    border-color: #ff4444 !important;
+}
+
+.btn-warning {
+    background-color: #ffaa00 !important;
+    border-color: #ffaa00 !important;
+    color: #000 !important;
+}
+
+.btn-info {
+    background-color: #00aaff !important;
+    border-color: #00aaff !important;
+    color: #000 !important;
+}
+
+/* Alerts */
+.alert {
+    color: #ffffff !important;
+    border: 1px solid !important;
+}
+
+.alert-info {
+    background-color: #1a3a4a !important;
+    border-color: #00aaff !important;
+}
+
+.alert-warning {
+    background-color: #4a3a1a !important;
+    border-color: #ffaa00 !important;
+}
+
+.alert-danger {
+    background-color: #4a1a1a !important;
+    border-color: #ff4444 !important;
+}
+
+.alert-success {
+    background-color: #1a4a2a !important;
+    border-color: #00ff88 !important;
+}
+
+/* Badges */
+.badge {
+    font-weight: 500 !important;
+}
+
+/* Progress Bars */
+.progress {
+    background-color: #1a1a1a !important;
+    border: 1px solid #333 !important;
+}
+
+/* Navbar */
+.navbar {
+    background-color: #0a0a0a !important;
+    border-bottom: 1px solid #333 !important;
+}
+
+.navbar-brand {
+    color: #00d9ff !important;
+}
+
+/* Modals */
+.modal-content {
+    background-color: #1a1a1a !important;
+    border: 1px solid #444 !important;
+    color: #ffffff !important;
+}
+
+.modal-header {
+    border-bottom: 1px solid #444 !important;
+}
+
+.modal-footer {
+    border-top: 1px solid #444 !important;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+::-webkit-scrollbar-track {
+    background: #0a0a0a;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Links */
+a {
+    color: #00d9ff !important;
+}
+
+a:hover {
+    color: #00b8d9 !important;
+}
+
+/* Code Blocks */
+code {
+    background-color: #1a1a1a !important;
+    color: #00ff88 !important;
+    padding: 2px 6px !important;
+    border-radius: 3px !important;
+}
+
+pre {
+    background-color: #0a0a0a !important;
+    color: #ffffff !important;
+    border: 1px solid #333 !important;
+    padding: 10px !important;
+    border-radius: 4px !important;
+}
+
+/* Loading Indicators */
+._dash-loading {
+    color: #00d9ff !important;
+}
+
+/* News Feed - Compact Modern Design */
+.news-card-compact {
+    background-color: #1a1a1a !important;
+    border: 1px solid #2a2a2a !important;
+    transition: all 0.2s ease !important;
+}
+
+.news-card-compact:hover {
+    background-color: #222 !important;
+    border-color: #00d9ff !important;
+    box-shadow: 0 2px 8px rgba(0, 217, 255, 0.1) !important;
+}
+
+.news-card-compact .card-body {
+    padding: 0.75rem !important;
+}
+
+.news-title {
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    line-height: 1.4 !important;
+    display: block !important;
+}
+
+.news-title:hover {
+    color: #00d9ff !important;
+}
+
+.badge-sm {
+    font-size: 10px !important;
+    padding: 2px 6px !important;
+}
+
+/* Recent News Table - Dark Background */
+.table-dark tbody tr {
+    background-color: #1a1a1a !important;
+}
+
+.table-dark tbody tr:hover {
+    background-color: #222 !important;
+}
+
+/* Fix any remaining light backgrounds */
+.bg-light {
+    background-color: #1a1a1a !important;
+}
+
+.bg-white {
+    background-color: #1a1a1a !important;
+}
+
+/* Ensure all card backgrounds are dark */
+.card, .card-body, .card-header {
+    background-color: #1a1a1a !important;
+    color: #ffffff !important;
+}
