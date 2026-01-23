@@ -2,9 +2,10 @@
 
 **AI Multi-Agent News-Based Market Prediction System**
 
-![Live Charts](images/screenshots/trademeup-1.0.2-livecharts.png)
 ![Main Dashboard](images/screenshots/trademeup-1.0.2-maindash.png)
+![Live Charts](images/screenshots/trademeup-1.0.2-livecharts.png)
 ![Statistics](images/screenshots/trademeup-1.0.2-statistics.png)
+![Testing](images/screenshots/trademeup-1.0.2-testingsuite.png)
 
 ---
 
