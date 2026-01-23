@@ -52,6 +52,32 @@ def create_layout():
         dbc.Row([
             dbc.Col([
                 dbc.Card([
+                    dbc.CardHeader(html.H5("🎭 Sentiment Distribution")),
+                    dbc.CardBody([
+                        dcc.Graph(id="sentiment-distribution-chart")
+                    ])
+                ])
+            ], width=4),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader(html.H5("💥 Impact Score Distribution")),
+                    dbc.CardBody([
+                        dcc.Graph(id="impact-distribution-chart")
+                    ])
+                ])
+            ], width=4),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader(html.H5("🏢 Top Entities")),
+                    dbc.CardBody([
+                        html.Div(id="top-entities-list")
+                    ])
+                ])
+            ], width=4)
+        ], className="mb-3"),
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
                     dbc.CardHeader(html.H5("📰 News Volume Over Time")),
                     dbc.CardBody([
                         dcc.Graph(id="news-volume-chart")
@@ -83,66 +109,52 @@ def get_statistics_metrics(engine):
             dbc.Row([
                 dbc.Col([
                     html.Div([
-                        html.H3(f"{total_news:,}", className="text-primary"),
-                        html.P("Total Articles", className="text-muted mb-0")
+                        html.H4(f"{total_news:,}", className="text-primary mb-1"),
+                        html.Small("Total Articles", className="text-muted")
                     ], className="text-center")
                 ], width=2),
                 dbc.Col([
                     html.Div([
-                        html.H3(f"{total_processed:,}", className="text-success"),
-                        html.P("Processed", className="text-muted mb-0")
+                        html.H4(f"{total_processed:,}", className="text-success mb-1"),
+                        html.Small("Processed", className="text-muted")
                     ], className="text-center")
                 ], width=2),
                 dbc.Col([
                     html.Div([
-                        html.H3(f"{total_entities:,}", className="text-info"),
-                        html.P("Entities", className="text-muted mb-0")
+                        html.H4(f"{total_entities:,}", className="text-info mb-1"),
+                        html.Small("Entities", className="text-muted")
+                    ], className="text-center")
+                ], width=1),
+                dbc.Col([
+                    html.Div([
+                        html.H4(f"{total_predictions:,}", className="text-warning mb-1"),
+                        html.Small("Predictions", className="text-muted")
                     ], className="text-center")
                 ], width=2),
                 dbc.Col([
                     html.Div([
-                        html.H3(f"{total_predictions:,}", className="text-warning"),
-                        html.P("Predictions", className="text-muted mb-0")
+                        html.H4(f"{total_impacts:,}", className="text-danger mb-1"),
+                        html.Small("Impact Scores", className="text-muted")
                     ], className="text-center")
                 ], width=2),
                 dbc.Col([
                     html.Div([
-                        html.H3(f"{total_impacts:,}", className="text-danger"),
-                        html.P("Impact Scores", className="text-muted mb-0")
+                        html.H4(f"{total_surprises:,}", className="text-warning mb-1"),
+                        html.Small("Surprises", className="text-muted")
                     ], className="text-center")
-                ], width=2),
+                ], width=1),
                 dbc.Col([
                     html.Div([
-                        html.H3(f"{avg_quality:.2f}", className="text-primary"),
-                        html.P("Avg Quality", className="text-muted mb-0")
+                        html.H4(f"{total_fact_checks:,}", className="text-success mb-1"),
+                        html.Small("Fact Checks", className="text-muted")
                     ], className="text-center")
-                ], width=2)
-            ], className="mb-3"),
-            dbc.Row([
+                ], width=1),
                 dbc.Col([
                     html.Div([
-                        html.H4(f"{total_surprises:,}", className="text-warning"),
-                        html.P("Surprise Scores", className="text-muted mb-0 small")
+                        html.H4(f"{avg_quality:.2f}", className="text-primary mb-1"),
+                        html.Small("Avg Quality", className="text-muted")
                     ], className="text-center")
-                ], width=3),
-                dbc.Col([
-                    html.Div([
-                        html.H4(f"{total_regimes:,}", className="text-info"),
-                        html.P("Market Regimes", className="text-muted mb-0 small")
-                    ], className="text-center")
-                ], width=3),
-                dbc.Col([
-                    html.Div([
-                        html.H4(f"{total_fact_checks:,}", className="text-success"),
-                        html.P("Fact Checks", className="text-muted mb-0 small")
-                    ], className="text-center")
-                ], width=3),
-                dbc.Col([
-                    html.Div([
-                        html.H4("-", className="text-secondary"),
-                        html.P("Reserved", className="text-muted mb-0 small")
-                    ], className="text-center")
-                ], width=3)
+                ], width=1)
             ])
         ])
     except Exception as e:
@@ -244,6 +256,196 @@ def get_quality_distribution_chart(engine):
             yaxis=dict(visible=False)
         )
         return fig
+
+
+def get_sentiment_distribution_chart(engine):
+    """Get sentiment distribution chart"""
+    try:
+        with Session(engine) as db:
+            sentiments_data = db.query(ProcessedNews.sentiment).filter(
+                ProcessedNews.sentiment.isnot(None)
+            ).all()
+        
+        if not sentiments_data:
+            import plotly.graph_objects as go
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No sentiment data yet<br>Run content analysis",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False)
+            )
+            return fig
+        
+        # Extract overall sentiment scores
+        import json
+        sentiment_scores = []
+        for s in sentiments_data:
+            if s[0]:
+                try:
+                    sent_dict = s[0] if isinstance(s[0], dict) else json.loads(s[0])
+                    if 'overall' in sent_dict:
+                        sentiment_scores.append(sent_dict['overall'])
+                except:
+                    pass
+        
+        if not sentiment_scores:
+            import plotly.graph_objects as go
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No valid sentiment scores",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
+            )
+            return fig
+        
+        # Categorize sentiments
+        positive = sum(1 for s in sentiment_scores if s > 0.3)
+        neutral = sum(1 for s in sentiment_scores if -0.3 <= s <= 0.3)
+        negative = sum(1 for s in sentiment_scores if s < -0.3)
+        
+        fig = px.pie(
+            names=['Positive', 'Neutral', 'Negative'],
+            values=[positive, neutral, negative],
+            color_discrete_sequence=['#28a745', '#6c757d', '#dc3545'],
+            template="plotly_dark"
+        )
+        fig.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=20, r=20, t=20, b=20)
+        )
+        return fig
+    except Exception as e:
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"Error: {str(e)[:30]}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=12, color="gray")
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        return fig
+
+
+def get_impact_distribution_chart(engine):
+    """Get impact score distribution chart"""
+    try:
+        with Session(engine) as db:
+            impact_scores = db.query(ImpactScore.impact_score).all()
+        
+        if not impact_scores:
+            import plotly.graph_objects as go
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No impact scores yet<br>Run impact analysis",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False)
+            )
+            return fig
+        
+        scores = [s[0] for s in impact_scores if s[0] is not None]
+        
+        # Categorize
+        high = sum(1 for s in scores if s >= 0.7)
+        medium = sum(1 for s in scores if 0.4 <= s < 0.7)
+        low = sum(1 for s in scores if s < 0.4)
+        
+        fig = px.bar(
+            x=['Low (<0.4)', 'Medium (0.4-0.7)', 'High (≥0.7)'],
+            y=[low, medium, high],
+            color=['Low', 'Medium', 'High'],
+            color_discrete_sequence=['#6c757d', '#ffc107', '#dc3545'],
+            template="plotly_dark"
+        )
+        fig.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            showlegend=False,
+            xaxis_title="Impact Level",
+            yaxis_title="Count",
+            margin=dict(l=40, r=20, t=20, b=40)
+        )
+        return fig
+    except Exception as e:
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"Error: {str(e)[:30]}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=12, color="gray")
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        return fig
+
+
+def get_top_entities_list(engine):
+    """Get top entities by mentions"""
+    try:
+        with Session(engine) as db:
+            top_entities = db.query(
+                Entity.entity_name,
+                Entity.ticker,
+                func.count(NewsEntityMapping.mapping_id).label('mentions')
+            ).join(
+                NewsEntityMapping,
+                Entity.entity_id == NewsEntityMapping.entity_id
+            ).group_by(
+                Entity.entity_name,
+                Entity.ticker
+            ).order_by(
+                func.count(NewsEntityMapping.mapping_id).desc()
+            ).limit(10).all()
+        
+        if not top_entities:
+            return html.P("No entities tracked yet", className="text-muted")
+        
+        rows = []
+        for i, (name, ticker, mentions) in enumerate(top_entities, 1):
+            badge_color = "danger" if i <= 3 else "warning" if i <= 6 else "secondary"
+            rows.append(
+                html.Div([
+                    dbc.Badge(f"#{i}", color=badge_color, className="me-2"),
+                    html.Span(name, className="text-light"),
+                    html.Small(f" ({ticker})" if ticker else "", className="text-muted ms-1"),
+                    dbc.Badge(f"{mentions}", color="info", className="ms-auto")
+                ], className="d-flex align-items-center mb-2")
+            )
+        
+        return html.Div(rows)
+    except Exception as e:
+        return html.P(f"Error loading entities: {str(e)[:50]}", className="text-danger")
 
 
 def get_news_volume_chart(engine):

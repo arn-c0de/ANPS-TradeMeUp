@@ -93,6 +93,86 @@ AGENT_TESTS = {
         "test_method": "test_prediction_generation",
         "expected_output": "prediction generated",
         "tier": "TIER 4: Prediction"
+    },
+    "agent_7": {
+        "id": "7",
+        "name": "Fact Verification Agent",
+        "description": "Verify news claims and detect misinformation",
+        "module": "src.agents.fact_verification_agent",
+        "class": "FactVerificationAgent",
+        "test_method": "test_fact_check",
+        "expected_output": "fact check completed",
+        "tier": "TIER 3: Analysis"
+    },
+    "agent_8": {
+        "id": "8",
+        "name": "Correlation Analysis Agent",
+        "description": "Analyze correlations between news and market movements",
+        "module": "src.agents.correlation_analysis_agent",
+        "class": "CorrelationAnalysisAgent",
+        "test_method": "test_correlation_calculation",
+        "expected_output": "correlation calculated",
+        "tier": "TIER 3: Analysis"
+    },
+    "agent_9": {
+        "id": "9",
+        "name": "Signal Decay Agent",
+        "description": "Track news impact decay over time",
+        "module": "src.agents.signal_decay_agent",
+        "class": "SignalDecayAgent",
+        "test_method": "test_decay_calculation",
+        "expected_output": "decay calculated",
+        "tier": "TIER 3: Analysis"
+    },
+    "agent_10": {
+        "id": "10",
+        "name": "Scenario Generation Agent",
+        "description": "Generate market scenarios based on news",
+        "module": "src.agents.scenario_generation_agent",
+        "class": "ScenarioGenerationAgent",
+        "test_method": "test_scenario_generation",
+        "expected_output": "scenarios generated",
+        "tier": "TIER 4: Prediction"
+    },
+    "agent_11": {
+        "id": "11",
+        "name": "Confidence Calibration Agent",
+        "description": "Calibrate prediction confidence levels",
+        "module": "src.agents.confidence_calibration_agent",
+        "class": "ConfidenceCalibrationAgent",
+        "test_method": "test_calibration",
+        "expected_output": "confidence calibrated",
+        "tier": "TIER 4: Prediction"
+    },
+    "agent_12": {
+        "id": "12",
+        "name": "Meta Strategy Agent",
+        "description": "Optimize strategy selection and weighting",
+        "module": "src.agents.meta_strategy_agent",
+        "class": "MetaStrategyAgent",
+        "test_method": "test_strategy_selection",
+        "expected_output": "strategy selected",
+        "tier": "TIER 5: Optimization"
+    },
+    "agent_13": {
+        "id": "13",
+        "name": "Model Performance Monitor",
+        "description": "Monitor and analyze model performance",
+        "module": "src.agents.model_performance_monitor",
+        "class": "ModelPerformanceMonitor",
+        "test_method": "test_performance_tracking",
+        "expected_output": "performance tracked",
+        "tier": "TIER 5: Optimization"
+    },
+    "agent_14": {
+        "id": "14",
+        "name": "A/B Testing Agent",
+        "description": "Run A/B tests on strategies and models",
+        "module": "src.agents.ab_testing_agent",
+        "class": "ABTestingAgent",
+        "test_method": "test_ab_testing",
+        "expected_output": "A/B test executed",
+        "tier": "TIER 5: Optimization"
     }
 }
 

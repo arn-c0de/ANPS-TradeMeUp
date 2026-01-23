@@ -70,7 +70,10 @@ def create_layout():
         ], className="mb-3"),
         dbc.Row([
             dbc.Col([
-                html.Div(id="news-feed")
+                html.Div(
+                    id="news-feed",
+                    style={"maxHeight": "1200px", "overflowY": "auto"}
+                )
             ], width=12)
         ])
     ], fluid=True)
@@ -99,7 +102,7 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
                 (RawNews.full_text.ilike(search_term))
             )
         
-        query = query.order_by(desc(RawNews.fetched_at)).limit(100)
+        query = query.order_by(desc(RawNews.fetched_at)).limit(500)
         results = query.all()
         
         # Apply sentiment filter in Python
@@ -114,9 +117,10 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
                         filtered_results.append((raw_news, processed))
                     elif sentiment == "neutral" and -0.3 <= sent_val <= 0.3:
                         filtered_results.append((raw_news, processed))
-            results = filtered_results[:50]
-        else:
-            results = results[:50]
+            results = filtered_results
+        
+        # Limit results after filtering
+        results = results[:100]
         
         if not results:
             return dbc.Alert("No news articles match your filters.", color="info")
