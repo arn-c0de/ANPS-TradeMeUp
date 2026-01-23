@@ -34,6 +34,7 @@ class Prediction(Base):
     __table_args__ = (
         Index('idx_predictions_entity_time', 'entity_id', 'timestamp'),
         Index('idx_predictions_created', 'created_at'),
+        Index('idx_predictions_horizon', 'horizon', 'created_at'),  # For filtering by horizon + date
     )
 
     def __repr__(self):

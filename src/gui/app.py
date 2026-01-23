@@ -16,10 +16,13 @@ from pathlib import Path
 import plotly.graph_objects as go
 import pandas as pd
 from sqlalchemy import create_engine
+import logging
 
 from src.config.settings import settings
 from src.gui.components import create_navbar
 from src.utils.activity_logger import activity_logger
+
+logger = logging.getLogger(__name__)
 
 # Import tab modules
 from src.gui.tabs import dashboard, predictions, news, statistics, charts, system, control, testing
@@ -582,31 +585,43 @@ def update_predictions_table(n, entities, start_date, end_date, horizon, min_con
 
 @app.callback(
     [Output("prediction-modal", "is_open"),
-     Output("prediction-detail-cache", "data")],
+     Output("prediction-detail-cache", "data"),
+     Output("current-prediction-id", "data")],
     [Input({"type": "pred-detail-btn", "index": ALL}, "n_clicks"),
-     Input("close-prediction-modal", "n_clicks")],
+     Input("close-prediction-modal", "n_clicks"),
+     Input("refresh-prediction-detail", "n_clicks")],
     [State("prediction-modal", "is_open"),
      State({"type": "pred-detail-btn", "index": ALL}, "id"),
-     State("prediction-detail-cache", "data")],
+     State("prediction-detail-cache", "data"),
+     State("current-prediction-id", "data")],
     prevent_initial_call=True
 )
-def toggle_prediction_modal(detail_clicks, close_click, is_open, button_ids, cached_data):
+def toggle_prediction_modal(detail_clicks, close_click, refresh_click, is_open, button_ids, cached_data, current_pred_id):
     """Open/close prediction detail modal and cache prediction_id"""
+    logger.info(f"=== MODAL TOGGLE CALLBACK === details: {detail_clicks}, close: {close_click}, refresh: {refresh_click}")
+    
     from dash import callback_context
 
     if not callback_context.triggered:
-        return dash.no_update, dash.no_update
+        logger.info("No trigger context for modal")
+        return dash.no_update, dash.no_update, dash.no_update
 
     trigger_id = callback_context.triggered[0]["prop_id"]
+    logger.info(f"Modal trigger: {trigger_id}")
 
     # Only process if the trigger value changed (not just a re-render)
     trigger_value = callback_context.triggered[0].get("value")
     if trigger_value is None or trigger_value == 0:
-        return dash.no_update, dash.no_update
+        logger.info(f"Trigger value is None or 0: {trigger_value}")
+        return dash.no_update, dash.no_update, dash.no_update
 
     # Close button clicked
     if "close-prediction-modal" in trigger_id:
-        return False, dash.no_update
+        return False, dash.no_update, dash.no_update
+    
+    # Refresh button clicked - keep modal open, trigger reload with performance
+    if "refresh-prediction-detail" in trigger_id and current_pred_id:
+        return True, {"prediction_id": current_pred_id, "load_performance": True}, current_pred_id
 
     # Detail button clicked - parse the prop_id to get the index
     if "pred-detail-btn" in trigger_id and ".n_clicks" in trigger_id:
@@ -618,10 +633,139 @@ def toggle_prediction_modal(detail_clicks, close_click, is_open, button_ids, cac
         prediction_id = id_dict.get("index")
 
         if prediction_id:
-            return True, {"prediction_id": prediction_id}
+            # First load without performance for speed
+            return True, {"prediction_id": prediction_id, "load_performance": False}, prediction_id
 
     # No actual button was clicked (just re-render), don't update
-    return dash.no_update, dash.no_update
+    return dash.no_update, dash.no_update, dash.no_update
+
+
+# Note: Inline performance buttons removed for performance reasons
+# Performance data is shown in the modal when clicking Details button
+
+
+@app.callback(
+    [Output("predictions-table", "children", allow_duplicate=True),
+     Output("refresh-toast", "is_open"),
+     Output("refresh-toast", "children"),
+     Output("refresh-toast", "icon")],
+    [Input({"type": "pred-refresh-btn", "index": ALL}, "n_clicks")],
+    [State({"type": "pred-refresh-btn", "index": ALL}, "id"),
+     State("pred-horizon-filter", "value")],
+    prevent_initial_call=True
+)
+def refresh_prediction_performance(refresh_clicks, button_ids, horizon):
+    """Load and save performance data for a specific prediction"""
+    logger.info(f"=== REFRESH CALLBACK TRIGGERED === clicks: {refresh_clicks}, ids: {button_ids}, horizon: {horizon}")
+    
+    from dash import callback_context
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from src.services.prediction_performance_service import prediction_performance_service
+    from src.models.predictions import Prediction
+    from src.models.entities import Entity
+    import json
+    
+    if not callback_context.triggered:
+        logger.info("No trigger context")
+        return dash.no_update, False, "", "info"
+    
+    trigger_id = callback_context.triggered[0]["prop_id"]
+    trigger_value = callback_context.triggered[0].get("value")
+    
+    logger.info(f"Trigger ID: {trigger_id}, Value: {trigger_value}")
+    
+    # Check if button was actually clicked (value should be > 0)
+    if trigger_value is None:
+        logger.info("Trigger value is None")
+        return dash.no_update, False, "", "info"
+    
+    # Extract prediction_id from the clicked button
+    if "pred-refresh-btn" in trigger_id and ".n_clicks" in trigger_id:
+        id_str = trigger_id.split('.')[0]
+        id_dict = json.loads(id_str)
+        prediction_id = id_dict.get("index")
+        
+        if prediction_id:
+            # Create DB session
+            db_engine = create_engine(app.server.config.get('DATABASE_URI', 'sqlite:///trademeup.db'))
+            Session = sessionmaker(bind=db_engine)
+            db_session = Session()
+            
+            toast_msg = ""
+            toast_icon = "info"
+            
+            try:
+                # Load prediction and entity
+                pred = db_session.query(Prediction).filter(
+                    Prediction.prediction_id == prediction_id
+                ).first()
+                
+                if not pred:
+                    logger.error(f"Prediction {prediction_id} not found in database")
+                    db_session.close()
+                    toast_msg = "❌ Prediction not found"
+                    toast_icon = "danger"
+                    table = predictions.get_predictions_table(db_engine, entity_filter=None, date_range=None, min_confidence=0, horizon=horizon or '5d')
+                    return table, True, toast_msg, toast_icon
+                
+                entity = db_session.query(Entity).filter(
+                    Entity.entity_id == pred.entity_id
+                ).first()
+                
+                if not entity:
+                    logger.error(f"Entity {pred.entity_id} not found for prediction {prediction_id}")
+                    db_session.close()
+                    toast_msg = "❌ Entity not found"
+                    toast_icon = "danger"
+                    table = predictions.get_predictions_table(db_engine, entity_filter=None, date_range=None, min_confidence=0, horizon=horizon or '5d')
+                    return table, True, toast_msg, toast_icon
+                
+                logger.info(f"Loading performance for {entity.entity_id} ({entity.entity_name}), prediction {prediction_id}")
+                
+                # Calculate performance
+                perf_data = prediction_performance_service.get_prediction_performance(pred, entity)
+                
+                if perf_data:
+                    # Save to database
+                    prediction_performance_service.save_prediction_performance(
+                        prediction_id, perf_data, db_session
+                    )
+                    logger.info(f"✅ Saved performance for {prediction_id}: {perf_data.get('total_return_pct')}%")
+                    
+                    # Success toast
+                    toast_msg = f"✅ {entity.entity_name}: {perf_data.get('total_return_pct'):+.2f}%"
+                    toast_icon = "success"
+                else:
+                    logger.warning(f"⚠️ Could not calculate performance for {prediction_id} - ticker: {entity.entity_id}")
+                    
+                    # Check if it's an invalid ticker
+                    invalid_tickers = ['OTHER', 'UNKNOWN', 'N/A', 'NONE', 'TEST', 'HEALTH', 'TAO']
+                    if entity.entity_id.upper() in invalid_tickers:
+                        toast_msg = f"⚠️ {entity.entity_name}: No market ticker"
+                    else:
+                        toast_msg = f"⚠️ {entity.entity_name}: Market data unavailable"
+                    toast_icon = "warning"
+                    
+            except Exception as e:
+                logger.error(f"Error refreshing prediction performance: {e}", exc_info=True)
+                toast_msg = f"❌ Error: {str(e)[:50]}"
+                toast_icon = "danger"
+            finally:
+                db_session.close()
+            
+            # Refresh the table with proper parameters
+            table = predictions.get_predictions_table(
+                db_engine,
+                entity_filter=None,
+                date_range=None,
+                min_confidence=0,
+                horizon=horizon or '5d'
+            )
+            
+            return table, True, toast_msg, toast_icon
+    
+    return dash.no_update, False, "", "info"
 
 
 @app.callback(
@@ -639,7 +783,8 @@ def update_modal_content(cached_data, is_open):
 
     # Load fresh data from DB using cached prediction_id
     prediction_id = cached_data["prediction_id"]
-    title, body = predictions.get_prediction_details(engine, prediction_id)
+    load_performance = cached_data.get("load_performance", False)
+    title, body = predictions.get_prediction_details(engine, prediction_id, load_performance=load_performance)
     return title, body
 
 
@@ -751,21 +896,59 @@ def update_entity_sentiment_chart(n, timeframe):
 
 
 @app.callback(
-    Output("top-positive-entities", "children"),
-    Input("interval-component", "n_intervals")
+    [Output("top-positive-entities", "children"),
+     Output("positive-entities-toggle", "children"),
+     Output("positive-entities-toggle", "style"),
+     Output("positive-entities-expanded", "data")],
+    [Input("interval-component", "n_intervals"),
+     Input("positive-entity-search-input", "value"),
+     Input("positive-entities-toggle", "n_clicks")],
+    [State("positive-entities-expanded", "data")]
 )
-def update_top_positive_entities(n):
-    """Update top positive entities"""
-    return statistics.get_top_positive_entities(engine)
+def update_top_positive_entities(n, search_term, n_clicks, is_expanded):
+    """Update top positive entities with optional search filter and expand/collapse"""
+    from dash import callback_context
+    
+    # Toggle expanded state if button was clicked
+    if callback_context.triggered and "positive-entities-toggle" in callback_context.triggered[0]["prop_id"]:
+        is_expanded = not is_expanded
+    
+    # Get entities with appropriate limit
+    entities = statistics.get_top_positive_entities(engine, search_term or "", show_all=is_expanded)
+    
+    # Update button text and visibility
+    button_text = "Show Less" if is_expanded else "Show More"
+    button_style = {"display": "none" if search_term else "inline-block"}
+    
+    return entities, button_text, button_style, is_expanded
 
 
 @app.callback(
-    Output("top-negative-entities", "children"),
-    Input("interval-component", "n_intervals")
+    [Output("top-negative-entities", "children"),
+     Output("negative-entities-toggle", "children"),
+     Output("negative-entities-toggle", "style"),
+     Output("negative-entities-expanded", "data")],
+    [Input("interval-component", "n_intervals"),
+     Input("negative-entity-search-input", "value"),
+     Input("negative-entities-toggle", "n_clicks")],
+    [State("negative-entities-expanded", "data")]
 )
-def update_top_negative_entities(n):
-    """Update top negative entities"""
-    return statistics.get_top_negative_entities(engine)
+def update_top_negative_entities(n, search_term, n_clicks, is_expanded):
+    """Update top negative entities with optional search filter and expand/collapse"""
+    from dash import callback_context
+    
+    # Toggle expanded state if button was clicked
+    if callback_context.triggered and "negative-entities-toggle" in callback_context.triggered[0]["prop_id"]:
+        is_expanded = not is_expanded
+    
+    # Get entities with appropriate limit
+    entities = statistics.get_top_negative_entities(engine, search_term or "", show_all=is_expanded)
+    
+    # Update button text and visibility
+    button_text = "Show Less" if is_expanded else "Show More"
+    button_style = {"display": "none" if search_term else "inline-block"}
+    
+    return entities, button_text, button_style, is_expanded
 
 
 @app.callback(

@@ -3,14 +3,39 @@ Live Market Data Provider
 Fetches real-time stock market data from various sources
 """
 import warnings
+import os
 warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='yfinance')
+warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
+try:
+    from pandas.errors import Pandas4Warning
+    warnings.filterwarnings('ignore', category=Pandas4Warning)
+except ImportError:
+    pass
+# Suppress yfinance's own logging
+import logging as yf_logging
+yf_logging.getLogger('yfinance').setLevel(yf_logging.ERROR)
+
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import logging
+import time
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = logging.getLogger(__name__)
+
+
+# Retry decorator for network failures
+def retry_on_network_error(func):
+    """Decorator to retry on network-related errors"""
+    return retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True
+    )(func)
 
 
 class MarketDataProvider:
@@ -19,6 +44,10 @@ class MarketDataProvider:
     def __init__(self):
         self.cache = {}
         self.cache_timeout = 60  # seconds
+        self.cache_max_age = 3600  # 1 hour max for fallback
+        
+        # Suppress yfinance logging
+        yf_logging.getLogger('yfinance').setLevel(yf_logging.CRITICAL)
 
         # Common stock symbols for quick search
         self.common_symbols = {
@@ -44,6 +73,24 @@ class MarketDataProvider:
             '^GSPC': 'S&P 500', '^DJI': 'Dow Jones', '^IXIC': 'NASDAQ', '^RUT': 'Russell 2000'
         }
     
+    def _get_cached_data(self, symbol: str) -> Optional[Dict]:
+        """
+        Get cached data if available and not too old
+        
+        Args:
+            symbol: Stock ticker
+            
+        Returns:
+            Cached data dict or None
+        """
+        if symbol in self.cache:
+            cached_data = self.cache[symbol]
+            age = (datetime.now() - cached_data.get('timestamp', datetime.min)).seconds
+            if age < self.cache_max_age:
+                logger.info(f"Returning cached data for {symbol} (age: {age}s)")
+                return cached_data
+        return None
+    
     def get_live_price(self, symbol: str) -> Optional[Dict]:
         """
         Get current live price for a symbol
@@ -54,11 +101,19 @@ class MarketDataProvider:
         Returns:
             Dict with price data or None
         """
+        # Skip obviously invalid tickers
+        if not symbol or len(symbol) > 10 or symbol.startswith('$'):
+            return None
+        
         try:
             ticker = yf.Ticker(symbol)
             info = ticker.info
             
-            return {
+            # Check if info is valid (not empty dict or None)
+            if not info or not isinstance(info, dict):
+                return self._get_cached_data(symbol)
+            
+            data = {
                 'symbol': symbol,
                 'price': info.get('currentPrice', info.get('regularMarketPrice', 0)),
                 'change': info.get('regularMarketChange', 0),
@@ -72,9 +127,14 @@ class MarketDataProvider:
                 'name': info.get('longName', symbol),
                 'timestamp': datetime.now()
             }
+            # Cache successful data
+            self.cache[symbol] = data
+            return data
         except Exception as e:
-            logger.error(f"Error fetching price for {symbol}: {e}")
-            return None
+            # Only log if it's not a simple "not found" error
+            if "404" not in str(e) and "Not Found" not in str(e):
+                logger.debug(f"Error fetching price for {symbol}: {e}")
+            return self._get_cached_data(symbol)
     
     def get_historical_data(
         self, 
@@ -93,12 +153,23 @@ class MarketDataProvider:
         Returns:
             DataFrame with OHLCV data
         """
+        # Skip obviously invalid tickers
+        if not symbol or len(symbol) > 10 or symbol.startswith('$'):
+            return None
+            
         try:
             ticker = yf.Ticker(symbol)
             df = ticker.history(period=period, interval=interval)
+            
+            # Check if DataFrame is valid and not empty
+            if df is None or df.empty:
+                return None
+                
             return df
         except Exception as e:
-            logger.error(f"Error fetching historical data for {symbol}: {e}")
+            # Only log if it's not a simple "not found" error
+            if "404" not in str(e) and "Not Found" not in str(e) and "delisted" not in str(e):
+                logger.debug(f"Error fetching historical data for {symbol}: {e}")
             return None
     
     def get_intraday_data(self, symbol: str, days: int = 1) -> Optional[pd.DataFrame]:
