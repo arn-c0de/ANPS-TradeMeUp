@@ -568,9 +568,10 @@ def update_entity_filter_options(n):
      Input("pred-date-filter", "start_date"),
      Input("pred-date-filter", "end_date"),
      Input("pred-horizon-filter", "value"),
+     Input("pred-surprise-filter", "value"),
      Input("pred-confidence-filter", "value")]
 )
-def update_predictions_table(entities, start_date, end_date, horizon, min_conf):
+def update_predictions_table(entities, start_date, end_date, horizon, surprise_filter, min_conf):
     """Update predictions table with filters (removed interval for performance)"""
     date_range = (start_date, end_date) if start_date or end_date else None
     return predictions.get_predictions_table(
@@ -578,7 +579,8 @@ def update_predictions_table(entities, start_date, end_date, horizon, min_conf):
         entity_filter=entities,
         date_range=date_range,
         min_confidence=min_conf or 0,
-        horizon=horizon or '5d'
+        horizon=horizon or '5d',
+        surprise_filter=surprise_filter or 'all'
     )
 
 
@@ -650,10 +652,15 @@ def toggle_prediction_modal(detail_clicks, close_click, refresh_click, is_open, 
      Output("refresh-toast", "icon")],
     [Input({"type": "pred-refresh-btn", "index": ALL}, "n_clicks")],
     [State({"type": "pred-refresh-btn", "index": ALL}, "id"),
-     State("pred-horizon-filter", "value")],
+     State("pred-horizon-filter", "value"),
+     State("pred-entity-filter", "value"),
+     State("pred-date-filter", "start_date"),
+     State("pred-date-filter", "end_date"),
+     State("pred-surprise-filter", "value"),
+     State("pred-confidence-filter", "value")],
     prevent_initial_call=True
 )
-def refresh_prediction_performance(refresh_clicks, button_ids, horizon):
+def refresh_prediction_performance(refresh_clicks, button_ids, horizon, entities, start_date, end_date, surprise_filter, min_conf):
     """Load and save performance data for a specific prediction"""
     logger.info(f"=== REFRESH CALLBACK TRIGGERED === clicks: {refresh_clicks}, ids: {button_ids}, horizon: {horizon}")
     
@@ -717,7 +724,15 @@ def refresh_prediction_performance(refresh_clicks, button_ids, horizon):
                     db_session.close()
                     toast_msg = "❌ Entity not found"
                     toast_icon = "danger"
-                    table = predictions.get_predictions_table(db_engine, entity_filter=None, date_range=None, min_confidence=0, horizon=horizon or '5d')
+                    date_range = (start_date, end_date) if start_date or end_date else None
+                    table = predictions.get_predictions_table(
+                        db_engine, 
+                        entity_filter=entities, 
+                        date_range=date_range, 
+                        min_confidence=min_conf or 0, 
+                        horizon=horizon or '5d',
+                        surprise_filter=surprise_filter or 'all'
+                    )
                     return table, True, toast_msg, toast_icon
                 
                 logger.info(f"Loading performance for {entity.entity_id} ({entity.entity_name}), prediction {prediction_id}")
@@ -753,13 +768,15 @@ def refresh_prediction_performance(refresh_clicks, button_ids, horizon):
             finally:
                 db_session.close()
             
-            # Refresh the table with proper parameters
+            # Refresh the table with proper parameters (preserve filters)
+            date_range = (start_date, end_date) if start_date or end_date else None
             table = predictions.get_predictions_table(
                 db_engine,
-                entity_filter=None,
-                date_range=None,
-                min_confidence=0,
-                horizon=horizon or '5d'
+                entity_filter=entities,
+                date_range=date_range,
+                min_confidence=min_conf or 0,
+                horizon=horizon or '5d',
+                surprise_filter=surprise_filter or 'all'
             )
             
             return table, True, toast_msg, toast_icon

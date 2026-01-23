@@ -44,7 +44,7 @@ def create_layout():
                                     start_date=(datetime.now() - timedelta(days=7)).date(),
                                     end_date=datetime.now().date(),
                                 )
-                            ], width=3),
+                            ], width=2),
                             dbc.Col([
                                 dbc.Label("Horizon:"),
                                 dcc.Dropdown(
@@ -57,7 +57,21 @@ def create_layout():
                                     value='5d',
                                     clearable=False
                                 )
-                            ], width=3),
+                            ], width=2),
+                            dbc.Col([
+                                dbc.Label("🎯 Surprise Score:"),
+                                dcc.Dropdown(
+                                    id="pred-surprise-filter",
+                                    options=[
+                                        {'label': 'All', 'value': 'all'},
+                                        {'label': 'High (>0.7)', 'value': 'high'},
+                                        {'label': 'Medium (0.4-0.7)', 'value': 'medium'},
+                                        {'label': 'Low (<0.4)', 'value': 'low'}
+                                    ],
+                                    value='all',
+                                    clearable=False
+                                )
+                            ], width=2),
                             dbc.Col([
                                 dbc.Label("Min Confidence:"),
                                 dcc.Slider(
@@ -112,7 +126,16 @@ def create_layout():
             dismissable=True,
             icon="info",
             duration=3000,
-            style={"position": "fixed", "top": 66, "right": 10, "width": 350, "zIndex": 9999}
+            style={
+                "position": "fixed", 
+                "top": 66, 
+                "right": 10, 
+                "width": 350, 
+                "zIndex": 9999,
+                "backgroundColor": "#1e1e1e",
+                "border": "1px solid #444",
+                "boxShadow": "0 4px 8px rgba(0,0,0,0.3)"
+            }
         ),
 
         # Hidden stores
@@ -122,7 +145,7 @@ def create_layout():
     ], fluid=True)
 
 
-def get_predictions_table(engine, entity_filter=None, date_range=None, min_confidence=0, horizon='5d'):
+def get_predictions_table(engine, entity_filter=None, date_range=None, min_confidence=0, horizon='5d', surprise_filter='all'):
     """Get predictions table with filters
 
     Args:
@@ -131,6 +154,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
         date_range: Tuple of (start_date, end_date)
         min_confidence: Minimum confidence threshold (0-1)
         horizon: Prediction horizon (1d, 5d, 20d)
+        surprise_filter: Filter by surprise score ('all', 'high', 'medium', 'low')
     """
     try:
         with Session(engine) as db:
@@ -168,6 +192,31 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                 query = query.filter(Prediction.confidence >= min_confidence / 100)
 
             predictions = query.limit(200).all()
+            
+            # Filter by surprise score if needed
+            if surprise_filter and surprise_filter != 'all':
+                filtered_preds = []
+                for pred in predictions:
+                    # Get related news IDs
+                    news_ids = pred.related_news_ids if pred.related_news_ids else []
+                    if news_ids:
+                        # Check surprise scores for related news
+                        surprise_scores = db.query(SurpriseScore).filter(
+                            SurpriseScore.news_id.in_(news_ids)
+                        ).all()
+                        
+                        if surprise_scores:
+                            # Get average surprise score (use surprise_normalized field)
+                            avg_surprise = sum(abs(s.surprise_normalized) for s in surprise_scores if s.surprise_normalized) / len(surprise_scores)
+                            
+                            # Apply filter
+                            if surprise_filter == 'high' and avg_surprise > 0.7:
+                                filtered_preds.append(pred)
+                            elif surprise_filter == 'medium' and 0.4 <= avg_surprise <= 0.7:
+                                filtered_preds.append(pred)
+                            elif surprise_filter == 'low' and avg_surprise < 0.4:
+                                filtered_preds.append(pred)
+                predictions = filtered_preds
 
             if not predictions:
                 return dbc.Alert("No predictions match the current filters.", color="info")
