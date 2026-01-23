@@ -323,9 +323,12 @@ class ContinuousPipeline:
     
     def _run_pipeline_iteration(self):
         """Run one complete pipeline iteration with dynamic batch sizes
-        
+
         Returns:
             Number of new articles ingested
+
+        NOTE: Agents now create their own scoped sessions for isolation.
+        No shared session is passed to agents.
         """
         try:
             # Phase 1: Data Ingestion
@@ -334,96 +337,107 @@ class ContinuousPipeline:
             rss_results = ingestion.fetch_all_rss_feeds()
             new_articles = sum(rss_results.values())
             logger.info(f"Ingested: {rss_results}")
-            
+
             # Phase 2: Quality Check (process unassessed articles) - DYNAMIC BATCH SIZE
+            # ✅ REFACTORED: Uses scoped sessions internally
             activity_logger.log_phase(2, "Quality Assessment")
-            quality = DataQualityAgent(self.db)
+            quality = DataQualityAgent()  # ✅ No db parameter!
             quality_results = quality.process_batch(limit=self.batch_sizes['quality'])
             logger.info(f"Quality check: {quality_results}")
-            
-            # Phase 3: Content Understanding (process unanalyzed high-quality articles) - DYNAMIC BATCH SIZE
+
+            # Phase 3: Content Understanding - ✅ OPTIMIZED with scoped sessions
             activity_logger.log_phase(3, "Content Analysis")
-            content = ContentUnderstandingAgent(self.db)
+            content = ContentUnderstandingAgent()  # ✅ No db parameter!
             content_results = content.process_batch(limit=self.batch_sizes['content'])
             logger.info(f"NLP Analysis: {content_results}")
             
-            # Phase 4: Entity Mapping - DYNAMIC BATCH SIZE
+            # Phase 4: Entity Mapping - ✅ OPTIMIZED with scoped sessions
             activity_logger.log_phase(4, "Entity Mapping")
-            entities = EntityMappingAgent(self.db)
+            entities = EntityMappingAgent()  # ✅ No db parameter!
             entity_results = entities.process_batch(limit=self.batch_sizes['entity'])
             logger.info(f"Entities: {entity_results}")
-            
+
             # Phase 5: Market Regime (single update, no batch)
+            # TODO: Refactor RegimeDetectionAgent to use scoped sessions
             activity_logger.log_phase(5, "Market Regime")
             regime = RegimeDetectionAgent(self.db)
             regime_result = regime.update_regime()
             logger.info(f"Regime: {regime_result}")
-            
+
             # Phase 6: Surprise Quantification - DYNAMIC BATCH SIZE
+            # ✅ REFACTORED: Uses scoped sessions internally
             activity_logger.log_phase(6, "Surprise Quantification")
-            surprise = SurpriseQuantificationAgent(self.db)
+            surprise = SurpriseQuantificationAgent()  # ✅ No db parameter!
             surprise_results = surprise.process_batch(limit=self.batch_sizes['surprise'])
             logger.info(f"Surprises: {surprise_results}")
-            
-            # Phase 7: Impact Scoring - DYNAMIC BATCH SIZE
+
+            # Phase 7: Impact Scoring - ✅ OPTIMIZED with scoped sessions
             activity_logger.log_phase(7, "Impact Scoring")
-            impact = ImpactScoringAgent(self.db)
+            impact = ImpactScoringAgent()  # ✅ No db parameter!
             impact_results = impact.process_batch(limit=self.batch_sizes['impact'])
             logger.info(f"Impact: {impact_results}")
 
-            # Phase 7.5: Signal Decay Modeling (apply to impact scores)
-            activity_logger.log_phase(7.5, "Signal Decay Modeling")
-            signal_decay = SignalDecayAgent(self.db)
+            # Phase 8: Signal Decay Modeling (apply to impact scores)
+            # ✅ REFACTORED: Uses scoped sessions internally
+            activity_logger.log_phase(8, "Signal Decay Modeling")
+            signal_decay = SignalDecayAgent()  # ✅ No db parameter!
             decay_stats = signal_decay.get_statistics()
             logger.info(f"Signal Decay: {decay_stats}")
 
-            # Phase 7.6: Correlation Analysis (between entities)
-            activity_logger.log_phase(7.6, "Correlation Analysis")
-            correlation = CorrelationAnalysisAgent(self.db)
+            # Phase 9: Correlation Analysis (between entities)
+            # ✅ REFACTORED: Uses scoped sessions internally
+            activity_logger.log_phase(9, "Correlation Analysis")
+            correlation = CorrelationAnalysisAgent()  # ✅ No db parameter!
             corr_stats = correlation.get_statistics()
             logger.info(f"Correlation: {corr_stats}")
             
-            # Phase 8: Predictions - DYNAMIC BATCH SIZE
-            activity_logger.log_phase(8, "Predictions")
-            predictions = PredictionAgent(self.db)
+            # Phase 10: Predictions - ✅ OPTIMIZED with scoped sessions
+            activity_logger.log_phase(10, "Predictions")
+            predictions = PredictionAgent()  # ✅ No db parameter!
             pred_results = predictions.process_batch(limit=self.batch_sizes['prediction'])
             logger.info(f"Predictions: {pred_results}")
 
             # ===== NEW PHASES (Phase 2 Agents) =====
 
-            # Phase 8.5: Scenario Generation (stress test predictions)
-            activity_logger.log_phase(8.5, "Scenario Generation")
+            # Phase 11: Scenario Generation (stress test predictions)
+            # TODO: Refactor when needed
+            activity_logger.log_phase(11, "Scenario Generation")
             scenario_gen = ScenarioGenerationAgent(self.db)
             scenario_stats = scenario_gen.get_statistics()
             logger.info(f"Scenarios: {scenario_stats}")
 
-            # Phase 9: Fact Verification
-            activity_logger.log_phase(9, "Fact Verification")
-            fact_verifier = FactVerificationAgent(self.db)
+            # Phase 12: Fact Verification
+            # ✅ REFACTORED: Uses scoped sessions internally
+            activity_logger.log_phase(12, "Fact Verification")
+            fact_verifier = FactVerificationAgent()  # ✅ No db parameter!
             fact_results = fact_verifier.process_batch(limit=self.batch_sizes['fact_verification'])
             logger.info(f"Fact Verification: {fact_results}")
 
-            # Phase 10: Confidence Calibration (for predictions)
-            activity_logger.log_phase(10, "Confidence Calibration")
+            # Phase 13: Confidence Calibration (for predictions)
+            # TODO: Refactor when needed (mainly read-only)
+            activity_logger.log_phase(13, "Confidence Calibration")
             calibrator = ConfidenceCalibrationAgent(self.db)
             calibration_stats = calibrator.get_statistics()
             logger.info(f"Calibration: {calibration_stats}")
 
-            # Phase 11: Meta-Strategy (Ensemble Predictions)
-            activity_logger.log_phase(11, "Meta-Strategy Ensemble")
+            # Phase 14: Meta-Strategy (Ensemble Predictions)
+            # TODO: Refactor when needed (mainly read-only)
+            activity_logger.log_phase(14, "Meta-Strategy Ensemble")
             meta_strategy = MetaStrategyAgent(self.db)
             # Get entities that have multiple predictions for ensemble
             ensemble_results = meta_strategy.get_statistics()
             logger.info(f"Meta-Strategy: {ensemble_results}")
 
-            # Phase 12: Model Performance Monitoring
-            activity_logger.log_phase(12, "Performance Monitoring")
+            # Phase 15: Model Performance Monitoring
+            # TODO: Refactor when needed
+            activity_logger.log_phase(15, "Performance Monitoring")
             monitor = ModelPerformanceMonitor(self.db)
             perf_stats = monitor.get_statistics()
             logger.info(f"Performance: {perf_stats}")
 
-            # Phase 13: A/B Testing (compare model versions)
-            activity_logger.log_phase(13, "A/B Testing")
+            # Phase 16: A/B Testing (compare model versions)
+            # TODO: Refactor when needed
+            activity_logger.log_phase(16, "A/B Testing")
             ab_testing = ABTestingAgent(self.db)
             ab_stats = ab_testing.get_statistics()
             logger.info(f"A/B Testing: {ab_stats}")

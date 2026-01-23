@@ -37,14 +37,13 @@ class SignalDecayAgent:
         'default': 7.0  # Default half-life
     }
 
-    def __init__(self, db: Session):
+    def __init__(self):
         """
         Initialize signal decay agent.
-
-        Args:
-            db: Database session
+        
+        Note: Uses scoped sessions internally for better isolation.
         """
-        self.db = db
+        pass
 
     def calculate_decay(
         self,
@@ -86,21 +85,22 @@ class SignalDecayAgent:
 
         return max(0.0, decayed_impact)  # Ensure non-negative
 
-    def model_decay(self, news_id: str, impact_score: float) -> SignalDecayModel:
+    def _model_decay_no_commit(self, db: Session, news_id: str, impact_score: float) -> SignalDecayModel:
         """
-        Create signal decay model for a news article.
+        Create signal decay model without committing (for batch operations).
 
         Args:
+            db: Database session
             news_id: UUID of news article
             impact_score: Initial impact score
 
         Returns:
-            SignalDecayModel object
+            SignalDecayModel object (not yet committed)
         """
         # Fetch article to get event type
         from src.models.processed_news import ProcessedNews
 
-        processed = self.db.query(ProcessedNews).filter(
+        processed = db.query(ProcessedNews).filter(
             ProcessedNews.news_id == news_id
         ).first()
 
@@ -125,15 +125,32 @@ class SignalDecayAgent:
             created_at=datetime.utcnow()
         )
 
-        self.db.merge(decay_model)  # Use merge for upsert
-        self.db.commit()
-
         logger.info(
             f"Created decay model for {news_id}: "
             f"half_life={half_life_days:.1f}d, window={effective_window_days}d"
         )
 
         return decay_model
+
+    def model_decay(self, news_id: str, impact_score: float) -> SignalDecayModel:
+        """
+        Create signal decay model for a news article.
+        
+        DEPRECATED: Use process_batch() for better performance.
+
+        Args:
+            news_id: UUID of news article
+            impact_score: Initial impact score
+
+        Returns:
+            SignalDecayModel object
+        """
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            decay_model = self._model_decay_no_commit(db, news_id, impact_score)
+            db.merge(decay_model)  # Use merge for upsert
+            return decay_model
 
     def get_current_impact(self, news_id: str) -> Optional[float]:
         """
@@ -145,40 +162,43 @@ class SignalDecayAgent:
         Returns:
             Current impact score or None
         """
-        # Fetch decay model
-        decay_model = self.db.query(SignalDecayModel).filter(
-            SignalDecayModel.news_id == news_id
-        ).first()
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            # Fetch decay model
+            decay_model = db.query(SignalDecayModel).filter(
+                SignalDecayModel.news_id == news_id
+            ).first()
 
-        if not decay_model:
-            logger.warning(f"No decay model found for {news_id}")
-            return None
+            if not decay_model:
+                logger.warning(f"No decay model found for {news_id}")
+                return None
 
-        # Fetch news to get published time
-        article = self.db.query(RawNews).filter(
-            RawNews.news_id == news_id
-        ).first()
+            # Fetch news to get published time
+            article = db.query(RawNews).filter(
+                RawNews.news_id == news_id
+            ).first()
 
-        if not article:
-            return None
+            if not article:
+                return None
 
-        # Calculate time elapsed
-        now = datetime.utcnow()
-        time_elapsed = now - article.published_at
-        hours_elapsed = time_elapsed.total_seconds() / 3600
+            # Calculate time elapsed
+            now = datetime.utcnow()
+            time_elapsed = now - article.published_at
+            hours_elapsed = time_elapsed.total_seconds() / 3600
 
-        # Calculate decayed impact
-        current_impact = self.calculate_decay(
-            initial_impact=decay_model.initial_impact,
-            time_elapsed_hours=hours_elapsed,
-            model_type=decay_model.model_type
-        )
+            # Calculate decayed impact
+            current_impact = self.calculate_decay(
+                initial_impact=decay_model.initial_impact,
+                time_elapsed_hours=hours_elapsed,
+                model_type=decay_model.model_type
+            )
 
-        return current_impact
+            return current_impact
 
     def process_batch(self, limit: int = 50) -> Dict:
         """
-        Process batch of impact scores and create decay models.
+        Process batch of impact scores and create decay models with optimized single transaction.
 
         Args:
             limit: Maximum number to process
@@ -186,78 +206,92 @@ class SignalDecayAgent:
         Returns:
             Statistics dictionary
         """
-        # Find impact scores without decay models
-        impact_scores = self.db.query(ImpactScore).outerjoin(
-            SignalDecayModel,
-            ImpactScore.news_id == SignalDecayModel.news_id
-        ).filter(
-            SignalDecayModel.news_id.is_(None)
-        ).order_by(
-            ImpactScore.created_at.desc()
-        ).limit(limit).all()
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            # Find impact scores without decay models
+            impact_scores = db.query(ImpactScore).outerjoin(
+                SignalDecayModel,
+                ImpactScore.news_id == SignalDecayModel.news_id
+            ).filter(
+                SignalDecayModel.news_id.is_(None)
+            ).order_by(
+                ImpactScore.created_at.desc()
+            ).limit(limit).all()
 
-        logger.info(f"Creating decay models for {len(impact_scores)} impact scores")
+            logger.info(f"Creating decay models for {len(impact_scores)} impact scores")
 
-        stats = {
-            'processed': 0,
-            'avg_half_life': 0.0,
-            'avg_window': 0.0,
-            'errors': 0
-        }
+            stats = {
+                'processed': 0,
+                'avg_half_life': 0.0,
+                'avg_window': 0.0,
+                'errors': 0
+            }
 
-        half_lives = []
-        windows = []
+            half_lives = []
+            windows = []
+            decay_models = []
 
-        for score in impact_scores:
-            try:
-                model = self.model_decay(
-                    news_id=str(score.news_id),
-                    impact_score=score.impact_score
-                )
-                stats['processed'] += 1
-                half_lives.append(model.half_life_days)
-                windows.append(model.effective_window_days)
+            for score in impact_scores:
+                try:
+                    model = self._model_decay_no_commit(
+                        db,
+                        news_id=str(score.news_id),
+                        impact_score=score.impact_score
+                    )
+                    decay_models.append(model)
+                    stats['processed'] += 1
+                    half_lives.append(model.half_life_days)
+                    windows.append(model.effective_window_days)
 
-            except Exception as e:
-                stats['errors'] += 1
-                logger.error(f"Error creating decay model for {score.news_id}: {e}")
-                continue
+                except Exception as e:
+                    stats['errors'] += 1
+                    logger.error(f"Error creating decay model for {score.news_id}: {e}")
+                    continue
 
-        if half_lives:
-            stats['avg_half_life'] = sum(half_lives) / len(half_lives)
-            stats['avg_window'] = sum(windows) / len(windows)
+            # Bulk save all decay models (using merge for upsert behavior)
+            if decay_models:
+                for model in decay_models:
+                    db.merge(model)
 
-        logger.info(f"Signal decay modeling complete. Stats: {stats}")
-        return stats
+            if half_lives:
+                stats['avg_half_life'] = sum(half_lives) / len(half_lives)
+                stats['avg_window'] = sum(windows) / len(windows)
+
+            logger.info(f"Signal decay modeling complete. Stats: {stats}")
+            return stats
 
     def get_statistics(self) -> Dict:
         """Get signal decay statistics."""
-        total_models = self.db.query(SignalDecayModel).count()
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            total_models = db.query(SignalDecayModel).count()
 
-        if total_models == 0:
+            if total_models == 0:
+                return {
+                    'total_models': 0,
+                    'avg_half_life': 0.0,
+                    'avg_window': 0.0,
+                    'by_event_type': {}
+                }
+
+            # Average half-life
+            avg_half_life = db.query(
+                func.avg(SignalDecayModel.half_life_days)
+            ).scalar() or 0.0
+
+            # Average effective window
+            avg_window = db.query(
+                func.avg(SignalDecayModel.effective_window_days)
+            ).scalar() or 0.0
+
             return {
-                'total_models': 0,
-                'avg_half_life': 0.0,
-                'avg_window': 0.0,
-                'by_event_type': {}
+                'total_models': total_models,
+                'avg_half_life': float(avg_half_life),
+                'avg_window': float(avg_window),
+                'configured_half_lives': self.EVENT_HALF_LIVES
             }
-
-        # Average half-life
-        avg_half_life = self.db.query(
-            func.avg(SignalDecayModel.half_life_days)
-        ).scalar() or 0.0
-
-        # Average effective window
-        avg_window = self.db.query(
-            func.avg(SignalDecayModel.effective_window_days)
-        ).scalar() or 0.0
-
-        return {
-            'total_models': total_models,
-            'avg_half_life': float(avg_half_life),
-            'avg_window': float(avg_window),
-            'configured_half_lives': self.EVENT_HALF_LIVES
-        }
 
     def cleanup_stale_signals(self, threshold_days: int = 90) -> int:
         """
@@ -269,13 +303,15 @@ class SignalDecayAgent:
         Returns:
             Number of records removed
         """
-        cutoff = datetime.utcnow() - timedelta(days=threshold_days)
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            cutoff = datetime.utcnow() - timedelta(days=threshold_days)
 
-        deleted = self.db.query(SignalDecayModel).filter(
-            SignalDecayModel.created_at < cutoff
-        ).delete()
+            deleted = db.query(SignalDecayModel).filter(
+                SignalDecayModel.created_at < cutoff
+            ).delete()
 
-        self.db.commit()
-        logger.info(f"Cleaned up {deleted} stale signal decay models")
+            logger.info(f"Cleaned up {deleted} stale signal decay models")
 
-        return deleted
+            return deleted
