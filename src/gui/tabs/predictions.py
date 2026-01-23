@@ -6,14 +6,18 @@ from dash import dcc, html, dash_table
 import dash_bootstrap_components as dbc
 from datetime import datetime, timedelta
 from sqlalchemy import desc
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 import json
+import logging
 
-from src.models.predictions import Prediction
+from src.models.predictions import Prediction, PredictionOutcome
 from src.models.entities import Entity
 from src.models.raw_news import RawNews
 from src.models.processed_news import ProcessedNews
 from src.models.analysis import ImpactScore, SurpriseScore, FactVerification
+from src.services.prediction_performance_service import prediction_performance_service
+
+logger = logging.getLogger(__name__)
 
 
 def create_layout():
@@ -73,9 +77,13 @@ def create_layout():
                     dbc.CardHeader(html.H5("🎯 Active Predictions")),
                     dbc.CardBody([
                         html.P("Click on a prediction to see details", className="text-muted mb-3"),
-                        html.Div(
-                            id="predictions-table",
-                            style={"maxHeight": "800px", "overflowY": "auto"}
+                        dcc.Loading(
+                            id="predictions-loading",
+                            type="circle",
+                            children=html.Div(
+                                id="predictions-table",
+                                style={"maxHeight": "800px", "overflowY": "auto"}
+                            )
                         )
                     ])
                 ])
@@ -84,15 +92,33 @@ def create_layout():
 
         # Modal for prediction details
         dbc.Modal([
-            dbc.ModalHeader(dbc.ModalTitle(id="prediction-modal-title")),
+            dbc.ModalHeader([
+                dbc.ModalTitle(id="prediction-modal-title"),
+                dbc.Button("🔄", id="refresh-prediction-detail", 
+                          size="sm", color="light", outline=True,
+                          className="ms-2", title="Refresh live data")
+            ], className="d-flex justify-content-between align-items-center"),
             dbc.ModalBody(id="prediction-modal-body"),
             dbc.ModalFooter(
                 dbc.Button("Close", id="close-prediction-modal", className="ms-auto", n_clicks=0)
             )
         ], id="prediction-modal", size="xl", is_open=False),
 
-        # Hidden store for cached prediction details
-        dcc.Store(id="prediction-detail-cache", data={})
+        # Toast notifications
+        dbc.Toast(
+            id="refresh-toast",
+            header="Performance Update",
+            is_open=False,
+            dismissable=True,
+            icon="info",
+            duration=3000,
+            style={"position": "fixed", "top": 66, "right": 10, "width": 350, "zIndex": 9999}
+        ),
+
+        # Hidden stores
+        dcc.Store(id="prediction-detail-cache", data={}),
+        dcc.Store(id="current-prediction-id", data=None),
+        dcc.Store(id="refresh-loading-state", data={})
     ], fluid=True)
 
 
@@ -108,7 +134,11 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
     """
     try:
         with Session(engine) as db:
-            query = db.query(Prediction).join(
+            # Use eager loading to fetch entity and outcome in single query (fixes N+1 problem)
+            query = db.query(Prediction).options(
+                joinedload(Prediction.entity),
+                joinedload(Prediction.outcome)
+            ).join(
                 Entity, Prediction.entity_id == Entity.entity_id
             ).order_by(desc(Prediction.created_at))
 
@@ -118,7 +148,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
             # Apply filters
             if entity_filter:
                 query = query.filter(Prediction.entity_id.in_(entity_filter))
-            
+
             if date_range and len(date_range) == 2:
                 start, end = date_range
                 if start:
@@ -133,10 +163,10 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                         end = datetime.fromisoformat(end).date()
                     # End of day (23:59:59)
                     query = query.filter(Prediction.created_at <= datetime.combine(end, datetime.max.time()))
-            
+
             if min_confidence > 0:
                 query = query.filter(Prediction.confidence >= min_confidence / 100)
-            
+
             predictions = query.limit(200).all()
 
             if not predictions:
@@ -144,7 +174,8 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
 
             rows = []
             for pred in predictions:
-                entity = db.query(Entity).filter(Entity.entity_id == pred.entity_id).first()
+                # Access entity from eager-loaded relationship (no separate query!)
+                entity = pred.entity
 
                 # Get direction from probabilities
                 probs = pred.direction_probabilities or {}
@@ -154,16 +185,65 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                 # Get confidence color
                 conf_color = "text-success" if pred.confidence and pred.confidence > 0.7 else "text-warning"
 
+                # Access outcome from eager-loaded relationship (no separate query!)
+                outcome = pred.outcome[0] if pred.outcome else None
+
+                if outcome and outcome.actual_return is not None:
+                    # Show saved performance data with last update time
+                    return_val = outcome.actual_return
+                    
+                    # Format last update time
+                    if outcome.evaluation_timestamp:
+                        from datetime import datetime as dt
+                        time_ago = dt.now() - outcome.evaluation_timestamp
+                        if time_ago.days > 0:
+                            time_str = f"{time_ago.days}d ago"
+                        elif time_ago.seconds > 3600:
+                            time_str = f"{time_ago.seconds // 3600}h ago"
+                        else:
+                            time_str = f"{time_ago.seconds // 60}m ago"
+                        update_info = html.Small(f"({time_str})", className="text-muted", style={"fontSize": "0.7rem"})
+                    else:
+                        update_info = ""
+                    
+                    perf_display = html.Td([
+                        html.Div(
+                            f"{return_val:+.2f}%",
+                            className="text-success" if return_val > 0 else "text-danger" if return_val < 0 else "text-muted"
+                        ),
+                        update_info
+                    ])
+                    result_display = html.Td(
+                        "✅" if outcome.direction_correct else "❌",
+                        className="text-center"
+                    )
+                    return_24h_display = html.Td("—", className="text-muted text-center")
+                else:
+                    # Not yet loaded
+                    perf_display = html.Td("—", className="text-muted text-center", 
+                                          title="Click 🔄 to load")
+                    result_display = html.Td("—", className="text-muted text-center")
+                    return_24h_display = html.Td("—", className="text-muted text-center")
+
                 rows.append(html.Tr([
                     html.Td(pred.created_at.strftime("%Y-%m-%d %H:%M") if pred.created_at else "N/A"),
                     html.Td(entity.entity_name if entity else "Unknown", className="text-primary"),
                     html.Td([direction_emoji, " ", direction.upper()]),
                     html.Td(f"{pred.confidence:.2%}" if pred.confidence else "N/A", className=conf_color),
+                    perf_display,  # Live Return
+                    result_display,  # Strategy Result
+                    return_24h_display,  # 24h Return
                     html.Td(pred.horizon if pred.horizon else "N/A"),
-                    html.Td(
+                    html.Td([
+                        dbc.Button(
+                            "🔄",
+                            id={"type": "pred-refresh-btn", "index": str(pred.prediction_id)},
+                            size="sm", color="success", outline=True, className="me-1",
+                            title="Load & Save Performance"
+                        ),
                         dbc.Button("Details", id={"type": "pred-detail-btn", "index": str(pred.prediction_id)},
                                    size="sm", color="info", outline=True)
-                    )
+                    ])
                 ], style={"cursor": "pointer"}))
 
             return dbc.Table([
@@ -172,6 +252,9 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     html.Th("Entity"),
                     html.Th("Direction"),
                     html.Th("Confidence"),
+                    html.Th("📊 Performance", title="Click 🔄 to load live data"),
+                    html.Th("✓/✗ Result", title="Strategy outcome"),
+                    html.Th("📈 24h", title="24h performance"),
                     html.Th("Horizon"),
                     html.Th("Actions")
                 ])),
@@ -200,12 +283,81 @@ def get_entity_options(engine):
         return []
 
 
-def get_prediction_details(engine, prediction_id):
+def _format_saved_performance(pred, entity, outcome):
+    """Format saved PredictionOutcome for display
+    
+    Args:
+        pred: Prediction object
+        entity: Entity object
+        outcome: PredictionOutcome object from database
+        
+    Returns:
+        dict: Performance data in same format as prediction_performance_service
+    """
+    from src.gui.charts.market_data import MarketDataProvider
+    
+    # Get direction from prediction
+    probs = pred.direction_probabilities or {}
+    predicted_direction = max(probs, key=probs.get) if probs else "flat"
+    
+    # Determine actual direction from return
+    actual_return = outcome.actual_return or 0
+    if actual_return > 0.001:
+        actual_direction = "up"
+    elif actual_return < -0.001:
+        actual_direction = "down"
+    else:
+        actual_direction = "flat"
+    
+    # Get current price for 24h comparison
+    market_data = MarketDataProvider()
+    # Entity ID is the ticker (e.g., "TSLA")
+    ticker = entity.entity_id if entity else None
+    current_price = 0
+    return_24h = 0
+    
+    if ticker:
+        try:
+            price_data = market_data.get_live_price(ticker)
+            if price_data and 'current_price' in price_data:
+                current_price = price_data['current_price']
+                # Get 24h data
+                hist_data = market_data.get_historical_data(ticker, period="2d", interval="1d")
+                if hist_data is not None and len(hist_data) >= 2:
+                    price_24h_ago = hist_data.iloc[-2]['close'] if len(hist_data) > 1 else hist_data.iloc[-1]['close']
+                    return_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
+        except Exception as e:
+            logger.warning(f"Could not get current price for {ticker}: {e}")
+    
+    # Calculate days since prediction
+    days_since = (datetime.now() - pred.timestamp.replace(tzinfo=None)).days if pred.timestamp else 0
+    
+    # Build strategy result message
+    strategy_result = "✅ CORRECT" if outcome.direction_correct else "❌ WRONG"
+    
+    return {
+        'total_return_pct': (outcome.actual_return or 0) * 100,
+        'is_correct': outcome.direction_correct or False,
+        'strategy_result': strategy_result,
+        'return_24h_pct': return_24h,
+        'days_since_prediction': days_since,
+        'prediction_price': 0,  # Not stored in outcome
+        'current_price': current_price,
+        'high_since_prediction': 0,  # Not stored in outcome
+        'low_since_prediction': 0,  # Not stored in outcome
+        'volatility': 0,  # Not stored in outcome
+        'predicted_direction': predicted_direction,
+        'actual_direction': actual_direction
+    }
+
+
+def get_prediction_details(engine, prediction_id, load_performance=False):
     """Get detailed information about a prediction
 
     Args:
         engine: Database engine
         prediction_id: UUID of prediction to show details for
+        load_performance: Whether to load live performance data (slow)
 
     Returns:
         Tuple of (title, body_content)
@@ -228,6 +380,37 @@ def get_prediction_details(engine, prediction_id):
             probs = pred.direction_probabilities or {}
             direction = max(probs, key=probs.get) if probs else "unknown"
             direction_emoji = {"up": "🔼", "down": "🔽", "flat": "➡️"}.get(direction, "❓")
+
+            # Check for saved performance first
+            performance = None
+            saved_outcome = db.query(PredictionOutcome).filter(
+                PredictionOutcome.prediction_id == prediction_id
+            ).first()
+            
+            logger.info(f"🔍 Checking saved performance for {prediction_id}")
+            logger.info(f"   Found outcome: {saved_outcome is not None}")
+            if saved_outcome:
+                logger.info(f"   Actual return: {saved_outcome.actual_return}")
+                logger.info(f"   Direction correct: {saved_outcome.direction_correct}")
+                logger.info(f"   Timestamp: {saved_outcome.evaluation_timestamp}")
+            
+            if saved_outcome and saved_outcome.actual_return is not None:
+                # Use saved performance data
+                try:
+                    # Convert saved outcome to performance format
+                    logger.info(f"✅ Using saved performance for modal")
+                    performance = _format_saved_performance(pred, entity, saved_outcome)
+                except Exception as e:
+                    logger.warning(f"Could not format saved performance: {e}")
+            elif load_performance:
+                # Load live performance (and save it)
+                try:
+                    logger.info(f"🔄 Loading live performance (load_performance=True)")
+                    performance = prediction_performance_service.get_prediction_performance(pred, entity)
+                except Exception as e:
+                    logger.warning(f"Could not load performance: {e}")
+            else:
+                logger.info(f"ℹ️ No saved performance and load_performance=False")
 
             # Get related news
             news_ids = pred.related_news_ids or []
@@ -325,7 +508,114 @@ def get_prediction_details(engine, prediction_id):
             # Build modal content
             title = f"{direction_emoji} {entity_name} - {direction.upper()} Prediction"
 
+            # Performance section
+            performance_section = None
+            if performance:
+                total_return = performance['total_return_pct']
+                return_color = "success" if total_return > 0 else "danger" if total_return < 0 else "secondary"
+                
+                performance_section = dbc.Row([
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardHeader(html.H6("📊 Live Performance vs Chart", className="mb-0")),
+                            dbc.CardBody([
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.H3(f"{total_return:+.2f}%", className=f"text-{return_color} text-center mb-1"),
+                                                html.P("Return Since Prediction", className="text-center text-muted mb-0", style={"fontSize": "0.85em"})
+                                            ])
+                                        ], color=return_color, outline=True)
+                                    ], width=3),
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.H3(performance['strategy_result'].split()[0], className="text-center mb-1"),
+                                                html.P(performance['strategy_result'], className="text-center mb-0", style={"fontSize": "0.85em"})
+                                            ])
+                                        ], color="light")
+                                    ], width=3),
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.H3(f"{performance['return_24h_pct']:+.2f}%", 
+                                                       className=f"text-{'success' if performance['return_24h_pct'] > 0 else 'danger' if performance['return_24h_pct'] < 0 else 'secondary'} text-center mb-1"),
+                                                html.P("Last 24h Return", className="text-center text-muted mb-0", style={"fontSize": "0.85em"})
+                                            ])
+                                        ], color="light")
+                                    ], width=3),
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.H3(f"{performance['days_since_prediction']}d", className="text-center mb-1"),
+                                                html.P("Days Active", className="text-center text-muted mb-0", style={"fontSize": "0.85em"})
+                                            ])
+                                        ], color="light")
+                                    ], width=3)
+                                ]),
+                                html.Hr(),
+                                dbc.Row([
+                                    dbc.Col([
+                                        html.P([
+                                            html.Strong("Entry Price: "),
+                                            f"${performance['prediction_price']:.2f}",
+                                            html.Br(),
+                                            html.Strong("Current Price: "),
+                                            f"${performance['current_price']:.2f}",
+                                            html.Br(),
+                                            html.Strong("Price Change: "),
+                                            html.Span(f"${performance['current_price'] - performance['prediction_price']:+.2f}",
+                                                     className=f"text-{return_color}")
+                                        ])
+                                    ], width=4),
+                                    dbc.Col([
+                                        html.P([
+                                            html.Strong("High Since Entry: "),
+                                            f"${performance['high_since_prediction']:.2f}",
+                                            html.Br(),
+                                            html.Strong("Low Since Entry: "),
+                                            f"${performance['low_since_prediction']:.2f}",
+                                            html.Br(),
+                                            html.Strong("Volatility: "),
+                                            f"{performance['volatility']:.2f}%"
+                                        ])
+                                    ], width=4),
+                                    dbc.Col([
+                                        html.P([
+                                            html.Strong("Predicted: "),
+                                            f"{performance['predicted_direction'].upper()}",
+                                            html.Br(),
+                                            html.Strong("Actual: "),
+                                            f"{performance['actual_direction'].upper()}",
+                                            html.Br(),
+                                            html.Strong("Accuracy: "),
+                                            html.Span("✅ Correct" if performance['is_correct'] else "❌ Wrong",
+                                                     className=f"text-{'success' if performance['is_correct'] else 'danger'}")
+                                        ])
+                                    ], width=4)
+                                ])
+                            ])
+                        ], className="mb-3")
+                    ], width=12)
+                ], className="mb-3")
+            elif load_performance:
+                # Performance was requested but not available
+                performance_section = dbc.Alert(
+                    "⚠️ Performance data not available for this entity (may not be a tradable stock)",
+                    color="info", className="mb-3"
+                )
+            else:
+                # Performance not yet loaded
+                performance_section = dbc.Alert([
+                    "📊 Live performance data not loaded. ",
+                    html.Strong("Click the 🔄 Refresh button above to load it.")
+                ], color="light", className="mb-3")
+
             body = dbc.Container([
+                # Live Performance Section (if available)
+                performance_section if performance_section else None,
+                
                 # Overview
                 dbc.Row([
                     dbc.Col([

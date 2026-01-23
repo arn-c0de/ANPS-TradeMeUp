@@ -6,12 +6,14 @@ from typing import Generator
 
 from src.config.settings import settings
 
-# Create SQLAlchemy engine
+# Create SQLAlchemy engine with larger pool for concurrent GUI callbacks
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=20,  # Increased from 10 to handle concurrent Dash callbacks
+    max_overflow=30,  # Increased from 20
+    pool_timeout=30,  # Add timeout to prevent indefinite waiting
+    pool_recycle=3600,  # Recycle connections after 1 hour
     echo=settings.log_level == "DEBUG"
 )
 

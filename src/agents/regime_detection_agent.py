@@ -48,6 +48,23 @@ class RegimeDetectionAgent:
         """
         self.db = db
 
+    def _get_default_indicators(self) -> Dict:
+        """
+        Return default market indicators when data fetch fails
+        
+        Returns:
+            Dictionary with default market indicators
+        """
+        return {
+            'vix': 20.0,
+            'spy_price': 450.0,
+            'spy_ma50': 450.0,
+            'spy_ma200': 450.0,
+            'realized_volatility': 15.0,
+            'breadth': 0.0,
+            'lookback_days': 0
+        }
+
     def _fetch_market_data(self, lookback_days: int = 252) -> Dict:
         """
         Fetch market data for regime detection.
@@ -63,27 +80,27 @@ class RegimeDetectionAgent:
             spy = yf.Ticker('SPY')
             spy_hist = spy.history(period=f'{lookback_days}d')
 
-            if spy_hist.empty:
-                logger.warning("Failed to fetch SPY data")
-                return {}
+            if spy_hist is None or spy_hist.empty:
+                logger.warning("Failed to fetch SPY data - returning default indicators")
+                return self._get_default_indicators()
 
             # Fetch VIX data
             vix = yf.Ticker('^VIX')
             vix_hist = vix.history(period='30d')
 
-            current_vix = vix_hist['Close'].iloc[-1] if not vix_hist.empty else 20.0
+            current_vix = vix_hist['Close'].iloc[-1] if (vix_hist is not None and not vix_hist.empty) else 20.0
             current_spy = spy_hist['Close'].iloc[-1]
 
             # Calculate moving averages
-            ma50 = spy_hist['Close'].rolling(window=50).mean().iloc[-1]
-            ma200 = spy_hist['Close'].rolling(window=200).mean().iloc[-1]
+            ma50 = spy_hist['Close'].rolling(window=50).mean().iloc[-1] if len(spy_hist) >= 50 else current_spy
+            ma200 = spy_hist['Close'].rolling(window=200).mean().iloc[-1] if len(spy_hist) >= 200 else current_spy
 
             # Calculate volatility
             returns = spy_hist['Close'].pct_change().dropna()
-            realized_vol = returns.std() * np.sqrt(252)  # Annualized
+            realized_vol = returns.std() * np.sqrt(252) if len(returns) > 0 else 0.15  # Annualized
 
             # Market breadth (simplified - would need advance/decline data)
-            recent_returns = spy_hist['Close'].pct_change(20).iloc[-1]
+            recent_returns = spy_hist['Close'].pct_change(20).iloc[-1] if len(spy_hist) > 20 else 0
             breadth_proxy = 1.0 if recent_returns > 0 else -1.0
 
             return {
@@ -98,6 +115,7 @@ class RegimeDetectionAgent:
 
         except Exception as e:
             logger.error(f"Error fetching market data: {e}")
+            return self._get_default_indicators()
             return {}
 
     def _classify_volatility(self, vix: float) -> str:

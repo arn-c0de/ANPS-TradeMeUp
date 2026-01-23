@@ -31,6 +31,7 @@ class RawNews(Base):
         Index('idx_raw_news_published', 'published_at'),
         Index('idx_raw_news_source', 'source', 'published_at'),
         Index('idx_raw_news_hash', 'content_hash'),
+        Index('idx_raw_news_fetched', 'fetched_at'),  # For date range filters in GUI
     )
 
     def __repr__(self):

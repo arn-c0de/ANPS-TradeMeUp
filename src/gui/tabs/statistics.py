@@ -113,17 +113,57 @@ def create_layout():
         dbc.Row([
             dbc.Col([
                 dbc.Card([
-                    dbc.CardHeader(html.H5("📈 Top Positive Entities (Last 30 Days)")),
+                    dbc.CardHeader([
+                        html.Div([
+                            html.H5("📈 Positive Entities (Last 30 Days)", className="mb-0 d-inline"),
+                            dbc.Input(
+                                id="positive-entity-search-input",
+                                type="text",
+                                placeholder="Search entities...",
+                                className="d-inline-block ms-3",
+                                style={"width": "200px"},
+                                debounce=True
+                            )
+                        ], className="d-flex align-items-center justify-content-between")
+                    ]),
                     dbc.CardBody([
-                        html.Div(id="top-positive-entities")
+                        html.Div(id="top-positive-entities"),
+                        dbc.Button(
+                            "Show More",
+                            id="positive-entities-toggle",
+                            color="link",
+                            size="sm",
+                            className="mt-2"
+                        ),
+                        html.Small("💡 Showing entities sorted by average sentiment score", className="text-muted d-block mt-2")
                     ])
                 ])
             ], width=6),
             dbc.Col([
                 dbc.Card([
-                    dbc.CardHeader(html.H5("📉 Top Negative Entities (Last 30 Days)")),
+                    dbc.CardHeader([
+                        html.Div([
+                            html.H5("📉 Negative Entities (Last 30 Days)", className="mb-0 d-inline"),
+                            dbc.Input(
+                                id="negative-entity-search-input",
+                                type="text",
+                                placeholder="Search entities...",
+                                className="d-inline-block ms-3",
+                                style={"width": "200px"},
+                                debounce=True
+                            )
+                        ], className="d-flex align-items-center justify-content-between")
+                    ]),
                     dbc.CardBody([
-                        html.Div(id="top-negative-entities")
+                        html.Div(id="top-negative-entities"),
+                        dbc.Button(
+                            "Show More",
+                            id="negative-entities-toggle",
+                            color="link",
+                            size="sm",
+                            className="mt-2"
+                        ),
+                        html.Small("💡 Showing entities sorted by average sentiment score", className="text-muted d-block mt-2")
                     ])
                 ])
             ], width=6)
@@ -177,7 +217,11 @@ def create_layout():
         dcc.Store(id="selected-entity-store", data=None),
         
         # Store for table sorting state
-        dcc.Store(id="entity-table-sort-store", data={"column": None, "direction": None})
+        dcc.Store(id="entity-table-sort-store", data={"column": None, "direction": None}),
+        
+        # Store for expand state
+        dcc.Store(id="positive-entities-expanded", data=False),
+        dcc.Store(id="negative-entities-expanded", data=False)
     ], fluid=True)
 
 
@@ -186,6 +230,7 @@ def get_statistics_metrics(engine):
     """Get overall statistics"""
     try:
         with Session(engine) as db:
+            # Simple COUNT queries - these are fast and don't need complex optimization
             total_news = db.query(func.count(RawNews.news_id)).scalar() or 0
             total_processed = db.query(func.count(ProcessedNews.news_id)).scalar() or 0
             total_entities = db.query(func.count(Entity.entity_id)).scalar() or 0
@@ -194,7 +239,7 @@ def get_statistics_metrics(engine):
             total_surprises = db.query(func.count(SurpriseScore.surprise_id)).scalar() or 0
             total_regimes = db.query(func.count(MarketRegime.regime_id)).scalar() or 0
             total_fact_checks = db.query(func.count(FactVerification.verification_id)).scalar() or 0
-            
+
             avg_quality = db.query(func.avg(DataQualityScore.quality_score)).scalar()
             avg_quality = round(avg_quality, 2) if avg_quality else 0
         
@@ -679,8 +724,8 @@ def get_entity_sentiment_chart(engine, timeframe="30d"):
         return fig
 
 
-def get_top_positive_entities(engine):
-    """Get top entities with most positive news in last 30 days"""
+def get_top_positive_entities(engine, search_term="", show_all=False):
+    """Get entities with positive news in last 30 days, optionally filtered by search"""
     try:
         from datetime import datetime, timedelta
         from sqlalchemy import and_
@@ -743,10 +788,34 @@ def get_top_positive_entities(engine):
             entity_stats.items(),
             key=lambda x: (x[1]['avg'], x[1]['positive']),
             reverse=True
-        )[:10]
+        )
+        
+        # Filter by search term if provided
+        if search_term:
+            search_lower = search_term.lower()
+            sorted_entities = [(name, stats) for name, stats in sorted_entities 
+                             if search_lower in name.lower()]
+        
+        # Limit to top 50 to avoid overwhelming display
+        sorted_entities = sorted_entities[:50]
+        
+        # Show message if search yielded no results
+        if search_term and not sorted_entities:
+            return html.P(f"No entities found matching '{search_term}'", className="text-muted")
+        
+        if not sorted_entities:
+            return html.P("No positive sentiment entities in last 30 days", className="text-muted")
         
         # Create display
         rows = []
+        # Add result count header
+        if search_term:
+            rows.append(
+                html.Div([
+                    html.Small(f"Showing {len(sorted_entities)} result(s) for '{search_term}'", className="text-info mb-2")
+                ])
+            )
+        
         for i, (name, stats) in enumerate(sorted_entities, 1):
             badge_color = "success" if i <= 3 else "info"
             rows.append(
@@ -777,8 +846,8 @@ def get_top_positive_entities(engine):
         return html.P(f"Error: {str(e)[:50]}", className="text-danger")
 
 
-def get_top_negative_entities(engine):
-    """Get top entities with most negative news in last 30 days"""
+def get_top_negative_entities(engine, search_term="", show_all=False):
+    """Get entities with negative news in last 30 days, optionally filtered by search"""
     try:
         from datetime import datetime, timedelta
         from sqlalchemy import and_
@@ -840,10 +909,46 @@ def get_top_negative_entities(engine):
             entity_stats.items(),
             key=lambda x: (x[1]['avg'], -x[1]['negative']),
             reverse=False
-        )[:10]
+        )
+        
+        # Filter by search term if provided
+        if search_term:
+            search_lower = search_term.lower()
+            sorted_entities = [(name, stats) for name, stats in sorted_entities 
+                             if search_lower in name.lower()]
+        
+        # Limit display based on state
+        total_count = len(sorted_entities)
+        if not search_term and not show_all:
+            # Show only top 15 by default
+            sorted_entities = sorted_entities[:15]
+        else:
+            # Show up to 50 when searching or expanded
+            sorted_entities = sorted_entities[:50]
+        
+        # Show message if search yielded no results
+        if search_term and not sorted_entities:
+            return html.P(f"No entities found matching '{search_term}'", className="text-muted")
+        
+        if not sorted_entities:
+            return html.P("No negative sentiment entities in last 30 days", className="text-muted")
         
         # Create display
         rows = []
+        # Add result count header
+        if search_term:
+            rows.append(
+                html.Div([
+                    html.Small(f"Showing {len(sorted_entities)} result(s) for '{search_term}'", className="text-info mb-2")
+                ])
+            )
+        elif not show_all and total_count > 15:
+            rows.append(
+                html.Div([
+                    html.Small(f"Showing top 15 of {total_count} entities", className="text-info mb-2")
+                ])
+            )
+        
         for i, (name, stats) in enumerate(sorted_entities, 1):
             badge_color = "danger" if i <= 3 else "warning"
             rows.append(
