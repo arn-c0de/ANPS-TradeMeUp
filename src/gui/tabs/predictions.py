@@ -63,16 +63,39 @@ def create_layout():
     ], fluid=True)
 
 
-def get_predictions_table(engine):
-    """Get predictions table"""
+def get_predictions_table(engine, entity_filter=None, date_range=None, min_confidence=0):
+    """Get predictions table with filters
+    
+    Args:
+        engine: Database engine
+        entity_filter: List of entity IDs to filter by
+        date_range: Tuple of (start_date, end_date)
+        min_confidence: Minimum confidence threshold (0-1)
+    """
     try:
         with Session(engine) as db:
-            predictions = db.query(Prediction).order_by(
-                desc(Prediction.created_at)
-            ).limit(20).all()
+            query = db.query(Prediction).join(
+                Entity, Prediction.entity_id == Entity.entity_id
+            ).order_by(desc(Prediction.created_at))
+            
+            # Apply filters
+            if entity_filter:
+                query = query.filter(Prediction.entity_id.in_(entity_filter))
+            
+            if date_range and len(date_range) == 2:
+                start, end = date_range
+                if start:
+                    query = query.filter(Prediction.created_at >= start)
+                if end:
+                    query = query.filter(Prediction.created_at <= end)
+            
+            if min_confidence > 0:
+                query = query.filter(Prediction.confidence >= min_confidence / 100)
+            
+            predictions = query.limit(50).all()
             
             if not predictions:
-                return dbc.Alert("No predictions available yet. Run the pipeline to generate predictions.", color="info")
+                return dbc.Alert("No predictions match the current filters.", color="info")
         
         rows = []
         for pred in predictions:
@@ -106,6 +129,22 @@ def get_predictions_table(engine):
         ], bordered=True, hover=True, striped=True, className="table-dark")
     except Exception as e:
         return dbc.Alert(
-            "⚠️ Unable to load predictions. Database may be empty. Run the pipeline to generate predictions.",
+            f"⚠️ Unable to load predictions: {str(e)}",
             color="warning"
         )
+
+
+def get_entity_options(engine):
+    """Get available entities for dropdown filter"""
+    try:
+        with Session(engine) as db:
+            entities = db.query(Entity).filter(
+                Entity.entity_type == 'company'
+            ).order_by(Entity.entity_name).all()
+            
+            return [
+                {'label': f"{e.entity_name} ({e.entity_id})", 'value': e.entity_id}
+                for e in entities
+            ]
+    except Exception:
+        return []

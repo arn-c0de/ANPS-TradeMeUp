@@ -512,12 +512,31 @@ def update_performance_chart(n):
 # ============================================================================
 
 @app.callback(
-    Output("predictions-table", "children"),
+    Output("pred-entity-filter", "options"),
     Input("interval-component", "n_intervals")
 )
-def update_predictions_table(n):
-    """Update predictions table"""
-    return predictions.get_predictions_table(engine)
+def update_entity_filter_options(n):
+    """Update entity filter dropdown options"""
+    return predictions.get_entity_options(engine)
+
+
+@app.callback(
+    Output("predictions-table", "children"),
+    [Input("interval-component", "n_intervals"),
+     Input("pred-entity-filter", "value"),
+     Input("pred-date-filter", "start_date"),
+     Input("pred-date-filter", "end_date"),
+     Input("pred-confidence-filter", "value")]
+)
+def update_predictions_table(n, entities, start_date, end_date, min_conf):
+    """Update predictions table with filters"""
+    date_range = (start_date, end_date) if start_date or end_date else None
+    return predictions.get_predictions_table(
+        engine,
+        entity_filter=entities,
+        date_range=date_range,
+        min_confidence=min_conf or 0
+    )
 
 
 # ============================================================================
