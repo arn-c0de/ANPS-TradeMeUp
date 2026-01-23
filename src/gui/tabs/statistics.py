@@ -69,7 +69,7 @@ def get_statistics_metrics(engine):
             total_processed = db.query(func.count(ProcessedNews.news_id)).scalar() or 0
             total_entities = db.query(func.count(Entity.entity_id)).scalar() or 0
             total_predictions = db.query(func.count(Prediction.prediction_id)).scalar() or 0
-            total_impacts = db.query(func.count(ImpactScore.impact_id)).scalar() or 0
+            total_impacts = db.query(func.count(ImpactScore.score_id)).scalar() or 0
             
             avg_quality = db.query(func.avg(DataQualityScore.quality_score)).scalar()
             avg_quality = round(avg_quality, 2) if avg_quality else 0
@@ -113,11 +113,13 @@ def get_statistics_metrics(engine):
             ], width=2)
         ])
     except Exception as e:
+        import logging
+        logging.error(f"Error loading statistics: {e}", exc_info=True)
         return dbc.Row([
             dbc.Col([
                 html.Div([
                     html.P("⚠️ Unable to load statistics", className="text-warning mb-2"),
-                    html.Small("Database may be empty. Run the pipeline to generate data.", className="text-muted")
+                    html.Small(f"Error: {str(e)}", className="text-muted")
                 ], className="text-center")
             ], width=12)
         ])
