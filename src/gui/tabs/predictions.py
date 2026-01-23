@@ -92,13 +92,9 @@ def create_layout():
                         dbc.CardHeader(html.H5("🎯 Active Predictions")),
                         dbc.CardBody([
                             html.P("Click on a prediction to see details", className="text-muted mb-3"),
-                            dcc.Loading(
-                                id="predictions-loading",
-                                type="circle",
-                                children=html.Div(
-                                    id="predictions-table",
-                                    style={"maxHeight": "800px", "overflowY": "auto"}
-                                )
+                            html.Div(
+                                id="predictions-table",
+                                style={"maxHeight": "800px", "overflowY": "auto"}
                             )
                         ])
                     ])
@@ -147,7 +143,7 @@ def create_layout():
     ])
 
 
-def get_predictions_table(engine, entity_filter=None, date_range=None, min_confidence=0, horizon='5d', surprise_filter='all'):
+def get_predictions_table(engine, entity_filter=None, date_range=None, min_confidence=0, horizon='5d', surprise_filter='all', refreshing_prediction_id=None):
     """Get predictions table with filters
 
     Args:
@@ -157,6 +153,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
         min_confidence: Minimum confidence threshold (0-1)
         horizon: Prediction horizon (1d, 5d, 20d)
         surprise_filter: Filter by surprise score ('all', 'high', 'medium', 'low')
+        refreshing_prediction_id: ID of prediction currently being refreshed (for visual feedback)
     """
     try:
         with Session(engine) as db:
@@ -276,6 +273,21 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     result_display = html.Td("—", className="text-muted text-center")
                     return_24h_display = html.Td("—", className="text-muted text-center")
 
+                # Apply loading style if this prediction is being refreshed
+                row_style = {}  # Remove cursor pointer to allow button clicks on touch devices
+                row_class = ""
+                is_refreshing = refreshing_prediction_id and str(pred.prediction_id) == str(refreshing_prediction_id)
+
+                if is_refreshing:
+                    # Darker background and slightly transparent during refresh
+                    # Also disable hover effect with pointer-events: none
+                    row_style.update({
+                        "backgroundColor": "rgba(0, 0, 0, 0.4)",
+                        "opacity": "0.7",
+                        "transition": "all 0.3s ease"
+                    })
+                    row_class = "refreshing-row"  # CSS class to disable hover
+
                 rows.append(html.Tr([
                     html.Td(pred.created_at.strftime("%Y-%m-%d %H:%M") if pred.created_at else "N/A"),
                     html.Td(entity.entity_name if entity else "Unknown", className="text-primary"),
@@ -287,15 +299,36 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     html.Td(pred.horizon if pred.horizon else "N/A"),
                     html.Td([
                         dbc.Button(
-                            "🔄",
+                            "⏳" if is_refreshing else "🔄",
                             id={"type": "pred-refresh-btn", "index": str(pred.prediction_id)},
-                            size="sm", color="success", outline=True, className="me-1",
-                            title="Load & Save Performance"
+                            size="sm", color="success", outline=True, className="me-1 touch-button",
+                            title="Refreshing..." if is_refreshing else "Load & Save Performance",
+                            disabled=is_refreshing,
+                            style={
+                                "minWidth": "44px", 
+                                "minHeight": "44px", 
+                                "touchAction": "manipulation",
+                                "pointerEvents": "auto",
+                                "cursor": "pointer",
+                                "zIndex": "10"
+                            }
                         ),
-                        dbc.Button("Details", id={"type": "pred-detail-btn", "index": str(pred.prediction_id)},
-                                   size="sm", color="info", outline=True)
-                    ])
-                ], style={"cursor": "pointer"}))
+                        dbc.Button("Details", 
+                                   id={"type": "pred-detail-btn", "index": str(pred.prediction_id)},
+                                   size="sm", color="info", outline=True, className="touch-button",
+                                   style={
+                                       "minWidth": "70px", 
+                                       "minHeight": "44px", 
+                                       "touchAction": "manipulation",
+                                       "pointerEvents": "auto",
+                                       "cursor": "pointer",
+                                       "zIndex": "10"
+                                   })
+                    ], style={"whiteSpace": "nowrap", "position": "relative"})
+                ], style=row_style, className=row_class if row_class else None))
+
+            # Always disable hover to prevent light background issues
+            enable_hover = False
 
             return dbc.Table([
                 html.Thead(html.Tr([
@@ -310,7 +343,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     html.Th("Actions")
                 ])),
                 html.Tbody(rows)
-            ], bordered=True, hover=True, striped=True, className="table-dark")
+            ], bordered=True, hover=False, striped=True, className="table-dark predictions-table-no-hover")
     except Exception as e:
         return dbc.Alert(
             f"⚠️ Unable to load predictions: {str(e)}",
