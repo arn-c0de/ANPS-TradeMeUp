@@ -302,20 +302,21 @@ class PredictionAgent:
             ImpactScore.impact_score.desc()
         ).limit(limit * 2).all()  # Get more candidates
         
-        # Filter out those that already have predictions
+        # Filter out those that already have predictions for ALL horizons
         to_predict = []
         for impact in impact_scores:
-            # Check if prediction exists for this impact score
-            existing = self.db.query(Prediction).filter(
+            # Check if predictions exist for ALL horizons
+            predictions_count = self.db.query(Prediction).filter(
                 Prediction.entity_id == impact.entity_id,
                 Prediction.related_news_ids.like(f'%{impact.news_id}%')  # Simple JSON search
-            ).first()
-            
-            if not existing:
+            ).count()
+
+            # If less than 3 predictions (one per horizon), we need to process this
+            if predictions_count < len(self.horizons):
                 to_predict.append(impact)
                 if len(to_predict) >= limit:
                     break
-        
+
         impact_scores = to_predict
 
         logger.info(f"Generating predictions for {len(impact_scores)} impact scores")
@@ -329,18 +330,31 @@ class PredictionAgent:
 
         for impact in impact_scores:
             try:
-                prediction = self.generate_prediction(
-                    entity_id=impact.entity_id,
-                    news_id=str(impact.news_id),
-                    horizon='5d'
-                )
+                # Check which horizons already have predictions
+                existing_predictions = self.db.query(Prediction).filter(
+                    Prediction.entity_id == impact.entity_id,
+                    Prediction.related_news_ids.like(f'%{impact.news_id}%')
+                ).all()
+
+                existing_horizons = {p.horizon for p in existing_predictions}
+
+                # Generate predictions for missing horizons
+                for horizon in self.horizons:
+                    if horizon in existing_horizons:
+                        continue  # Skip if already exists
+
+                    prediction = self.generate_prediction(
+                        entity_id=impact.entity_id,
+                        news_id=str(impact.news_id),
+                        horizon=horizon
+                    )
+
+                    if prediction:
+                        stats['predictions_created'] += 1
+                    else:
+                        stats['skipped_low_confidence'] += 1
 
                 stats['processed'] += 1
-
-                if prediction:
-                    stats['predictions_created'] += 1
-                else:
-                    stats['skipped_low_confidence'] += 1
 
             except Exception as e:
                 stats['errors'] += 1

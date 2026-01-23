@@ -421,6 +421,8 @@ class SurpriseQuantificationAgent:
         ).filter(
             ProcessedNews.event_type.in_(['earnings', 'guidance']),
             SurpriseScore.surprise_id.is_(None)
+        ).order_by(
+            RawNews.published_at.desc()  # Newest first
         ).limit(limit).all()
 
         logger.info(f"Processing {len(articles)} articles for surprise quantification")

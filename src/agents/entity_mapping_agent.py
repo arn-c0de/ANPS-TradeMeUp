@@ -341,6 +341,8 @@ Respond ONLY with JSON."""
             RawNews.news_id == NewsEntityMapping.news_id
         ).filter(
             NewsEntityMapping.mapping_id.is_(None)
+        ).order_by(
+            RawNews.published_at.desc()  # Newest first
         ).limit(limit).all()
 
         logger.info(f"Processing {len(articles)} articles for entity mapping")

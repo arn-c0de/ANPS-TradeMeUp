@@ -339,12 +339,14 @@ class DataQualityAgent:
         Returns:
             Statistics dictionary
         """
-        # Find articles without quality scores
+        # Find articles without quality scores (newest first)
         articles = self.db.query(RawNews).outerjoin(
             DataQualityScore,
             RawNews.news_id == DataQualityScore.news_id
         ).filter(
             DataQualityScore.news_id.is_(None)
+        ).order_by(
+            RawNews.published_at.desc()
         ).limit(limit).all()
 
         logger.info(f"Processing {len(articles)} articles for quality assessment")

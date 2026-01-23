@@ -28,7 +28,7 @@ def create_layout():
                                     multi=True,
                                     placeholder="All entities..."
                                 )
-                            ], width=4),
+                            ], width=3),
                             dbc.Col([
                                 dbc.Label("Date Range:"),
                                 dcc.DatePickerRange(
@@ -36,7 +36,20 @@ def create_layout():
                                     start_date=(datetime.now() - timedelta(days=7)).date(),
                                     end_date=datetime.now().date(),
                                 )
-                            ], width=4),
+                            ], width=3),
+                            dbc.Col([
+                                dbc.Label("Horizon:"),
+                                dcc.Dropdown(
+                                    id="pred-horizon-filter",
+                                    options=[
+                                        {'label': '1 Day (Short-term)', 'value': '1d'},
+                                        {'label': '5 Days (Swing)', 'value': '5d'},
+                                        {'label': '20 Days (Position)', 'value': '20d'}
+                                    ],
+                                    value='5d',
+                                    clearable=False
+                                )
+                            ], width=3),
                             dbc.Col([
                                 dbc.Label("Min Confidence:"),
                                 dcc.Slider(
@@ -44,7 +57,7 @@ def create_layout():
                                     min=0, max=100, step=10, value=0,
                                     marks={i: f"{i}%" for i in range(0, 101, 20)}
                                 )
-                            ], width=4)
+                            ], width=3)
                         ])
                     ])
                 ])
@@ -63,21 +76,25 @@ def create_layout():
     ], fluid=True)
 
 
-def get_predictions_table(engine, entity_filter=None, date_range=None, min_confidence=0):
+def get_predictions_table(engine, entity_filter=None, date_range=None, min_confidence=0, horizon='5d'):
     """Get predictions table with filters
-    
+
     Args:
         engine: Database engine
         entity_filter: List of entity IDs to filter by
         date_range: Tuple of (start_date, end_date)
         min_confidence: Minimum confidence threshold (0-1)
+        horizon: Prediction horizon (1d, 5d, 20d)
     """
     try:
         with Session(engine) as db:
             query = db.query(Prediction).join(
                 Entity, Prediction.entity_id == Entity.entity_id
             ).order_by(desc(Prediction.created_at))
-            
+
+            # Filter by selected horizon
+            query = query.filter(Prediction.horizon == horizon)
+
             # Apply filters
             if entity_filter:
                 query = query.filter(Prediction.entity_id.in_(entity_filter))

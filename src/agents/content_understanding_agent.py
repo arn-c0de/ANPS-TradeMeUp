@@ -243,6 +243,8 @@ Respond ONLY with JSON."""
         ).filter(
             DataQualityScore.quality_score >= 0.6,  # Only process decent quality
             ProcessedNews.news_id.is_(None)  # Not yet processed
+        ).order_by(
+            RawNews.published_at.desc()  # Newest first
         ).limit(limit).all()
 
         logger.info(f"Processing {len(articles)} articles for content understanding")
