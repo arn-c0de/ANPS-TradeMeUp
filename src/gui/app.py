@@ -769,13 +769,69 @@ def update_top_negative_entities(n):
 
 
 @app.callback(
-    Output("entity-details-table", "children"),
+    [Output("entity-details-table", "children"),
+     Output("entity-table-sort-store", "data")],
     [Input("interval-component", "n_intervals"),
-     Input("entity-search-input", "value")]
+     Input("entity-search-input", "value"),
+     Input({"type": "sort-column-btn", "column": dash.dependencies.ALL}, "n_clicks")],
+    [State("entity-table-sort-store", "data"),
+     State({"type": "sort-column-btn", "column": dash.dependencies.ALL}, "id")],
+    prevent_initial_call=False
 )
-def update_entity_details_table(n, search_term):
-    """Update entity details table with search"""
-    return statistics.get_entity_details_table(engine, search_term or "")
+def update_entity_details_table(n, search_term, sort_clicks, sort_state, button_ids):
+    """Update entity details table with search and 3-stage sorting (asc → desc → default)"""
+    from dash import callback_context
+    
+    # Default sort state
+    if sort_state is None:
+        sort_state = {"column": None, "direction": None}
+    
+    current_column = sort_state.get("column")
+    current_direction = sort_state.get("direction")
+    
+    # Check if a sort button was clicked
+    if callback_context.triggered:
+        trigger_id = callback_context.triggered[0]["prop_id"]
+        
+        # Check if trigger is from a sort button
+        if "sort-column-btn" in trigger_id and sort_clicks and any(c for c in sort_clicks if c):
+            # Find which button was clicked
+            for i, clicks in enumerate(sort_clicks):
+                if clicks and clicks > 0:
+                    clicked_column = button_ids[i]["column"]
+                    
+                    # 3-stage sorting logic
+                    if current_column == clicked_column:
+                        # Same column clicked - cycle through states
+                        if current_direction == "asc":
+                            # asc → desc
+                            current_direction = "desc"
+                        elif current_direction == "desc":
+                            # desc → None (default)
+                            current_column = None
+                            current_direction = None
+                        else:
+                            # Should not happen, but reset to asc
+                            current_direction = "asc"
+                    else:
+                        # New column clicked - start with asc
+                        current_column = clicked_column
+                        current_direction = "asc"
+                    
+                    break
+    
+    # Get table with current sort state
+    table = statistics.get_entity_details_table(
+        engine, 
+        search_term or "", 
+        current_column, 
+        current_direction
+    )
+    
+    # Update sort state
+    new_sort_state = {"column": current_column, "direction": current_direction}
+    
+    return table, new_sort_state
 
 
 # Entity Details Modal Callbacks
