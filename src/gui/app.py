@@ -593,11 +593,18 @@ app.clientside_callback(
         if (window.escKeyHandler) {
             document.removeEventListener('keydown', window.escKeyHandler);
         }
-        
+
         // Only add listener if in fullscreen mode
         if (fullscreen_data && fullscreen_data.fullscreen) {
             window.escKeyHandler = function(event) {
                 if (event.key === 'Escape' || event.key === 'Esc') {
+                    // Check if any Bootstrap modal is currently open
+                    const openModals = document.querySelectorAll('.modal.show');
+                    if (openModals.length > 0) {
+                        // Don't trigger fullscreen toggle if a modal is open
+                        return;
+                    }
+
                     const fullscreenBtn = document.getElementById('toggle-fullscreen-btn');
                     if (fullscreenBtn) {
                         fullscreenBtn.click();
@@ -606,7 +613,7 @@ app.clientside_callback(
             };
             document.addEventListener('keydown', window.escKeyHandler);
         }
-        
+
         return window.dash_clientside.no_update;
     }
     """,
@@ -1133,41 +1140,27 @@ def refresh_prediction_performance(refresh_clicks, button_ids, horizon, entities
 
 @app.callback(
     [Output("prediction-modal-title", "children"),
-     Output("prediction-modal-body", "children"),
-     Output("predictions-table", "children", allow_duplicate=True)],
+     Output("prediction-modal-body", "children")],
     [Input("prediction-detail-cache", "data")],
-    [State("prediction-modal", "is_open"),
-     State("pred-entity-filter", "value"),
-     State("pred-date-filter", "start_date"),
-     State("pred-date-filter", "end_date"),
-     State("pred-horizon-filter", "value"),
-     State("pred-confidence-filter", "value")],
+    [State("prediction-modal", "is_open")],
     prevent_initial_call=True
 )
-def update_modal_content(cached_data, is_open, entities, start_date, end_date, horizon, min_conf):
-    """Update modal content from cached prediction_id and refresh table if performance was loaded"""
+def update_modal_content(cached_data, is_open):
+    """Update modal content from cached prediction_id"""
+    logger.info(f"=== UPDATE MODAL CONTENT === is_open: {is_open}, cached_data: {cached_data}")
+
     # Only load if modal is open and we have a prediction_id
     if not is_open or not cached_data or "prediction_id" not in cached_data:
-        return dash.no_update, dash.no_update, dash.no_update
+        logger.info("Skipping modal content update - not open or no data")
+        return dash.no_update, dash.no_update
 
     # Load fresh data from DB using cached prediction_id
     prediction_id = cached_data["prediction_id"]
     load_performance = cached_data.get("load_performance", False)
+    logger.info(f"Loading prediction details: {prediction_id}, load_performance: {load_performance}")
     title, body = predictions.get_prediction_details(engine, prediction_id, load_performance=load_performance)
-    
-    # If we loaded live performance data, refresh the table to show updated values
-    if load_performance:
-        date_range = (start_date, end_date) if start_date or end_date else None
-        table = predictions.get_predictions_table(
-            engine,
-            entity_filter=entities,
-            date_range=date_range,
-            min_confidence=min_conf or 0,
-            horizon=horizon or '5d'
-        )
-        return title, body, table
-    
-    return title, body, dash.no_update
+
+    return title, body
 
 
 # ============================================================================
@@ -1587,23 +1580,23 @@ def open_ticker_in_charts(n_clicks_list, button_ids, tabs_data):
     """Open ticker symbol in charts tab - add new tab or switch to existing"""
     from dash import callback_context
     import uuid
-    
+
     if not callback_context.triggered or not any(n_clicks_list):
         return dash.no_update, dash.no_update, dash.no_update
-    
+
     # Get the clicked button's ticker symbol
     triggered_id = callback_context.triggered[0]["prop_id"].split(".")[0]
     import json
     button_id = json.loads(triggered_id)
     ticker = button_id["index"]
-    
+
     # Check if tab for this ticker already exists
     existing_tab = None
     for tab in tabs_data.get('tabs', []):
         if tab['symbol'] == ticker:
             existing_tab = tab['id']
             break
-    
+
     if existing_tab:
         # Switch to existing tab
         tabs_data['active_tab'] = existing_tab
@@ -1618,9 +1611,9 @@ def open_ticker_in_charts(n_clicks_list, button_ids, tabs_data):
         }
         tabs_data['tabs'].append(new_tab)
         tabs_data['active_tab'] = new_tab_id
-    
-    # Switch to charts tab and close the prediction modal
-    return "charts", tabs_data, False
+
+    # Switch to charts tab but KEEP the prediction modal open - don't close it
+    return "charts", tabs_data, dash.no_update
 
 
 @app.callback(

@@ -22,103 +22,110 @@ logger = logging.getLogger(__name__)
 
 def create_layout():
     """Create predictions tab layout"""
-    return dbc.Container([
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("Filter Predictions", className="mb-3"),
-                        dbc.Row([
-                            dbc.Col([
-                                dbc.Label("Entity/Ticker:"),
-                                dcc.Dropdown(
-                                    id="pred-entity-filter",
-                                    multi=True,
-                                    placeholder="All entities..."
-                                )
-                            ], width=3),
-                            dbc.Col([
-                                dbc.Label("Date Range:"),
-                                dcc.DatePickerRange(
-                                    id="pred-date-filter",
-                                    start_date=(datetime.now() - timedelta(days=7)).date(),
-                                    end_date=datetime.now().date(),
-                                )
-                            ], width=2),
-                            dbc.Col([
-                                dbc.Label("Horizon:"),
-                                dcc.Dropdown(
-                                    id="pred-horizon-filter",
-                                    options=[
-                                        {'label': '1 Day (Short-term)', 'value': '1d'},
-                                        {'label': '5 Days (Swing)', 'value': '5d'},
-                                        {'label': '20 Days (Position)', 'value': '20d'}
-                                    ],
-                                    value='5d',
-                                    clearable=False
-                                )
-                            ], width=2),
-                            dbc.Col([
-                                dbc.Label("🎯 Surprise Score:"),
-                                dcc.Dropdown(
-                                    id="pred-surprise-filter",
-                                    options=[
-                                        {'label': 'All', 'value': 'all'},
-                                        {'label': 'High (>0.7)', 'value': 'high'},
-                                        {'label': 'Medium (0.4-0.7)', 'value': 'medium'},
-                                        {'label': 'Low (<0.4)', 'value': 'low'}
-                                    ],
-                                    value='all',
-                                    clearable=False
-                                )
-                            ], width=2),
-                            dbc.Col([
-                                dbc.Label("Min Confidence:"),
-                                dcc.Slider(
-                                    id="pred-confidence-filter",
-                                    min=0, max=100, step=10, value=0,
-                                    marks={i: f"{i}%" for i in range(0, 101, 20)}
-                                )
-                            ], width=3)
+    return html.Div([
+        dbc.Container([
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H6("Filter Predictions", className="mb-3"),
+                            dbc.Row([
+                                dbc.Col([
+                                    dbc.Label("Entity/Ticker:"),
+                                    dcc.Dropdown(
+                                        id="pred-entity-filter",
+                                        multi=True,
+                                        placeholder="All entities..."
+                                    )
+                                ], width=3),
+                                dbc.Col([
+                                    dbc.Label("Date Range:"),
+                                    dcc.DatePickerRange(
+                                        id="pred-date-filter",
+                                        start_date=(datetime.now() - timedelta(days=7)).date(),
+                                        end_date=datetime.now().date(),
+                                    )
+                                ], width=2),
+                                dbc.Col([
+                                    dbc.Label("Horizon:"),
+                                    dcc.Dropdown(
+                                        id="pred-horizon-filter",
+                                        options=[
+                                            {'label': '1 Day (Short-term)', 'value': '1d'},
+                                            {'label': '5 Days (Swing)', 'value': '5d'},
+                                            {'label': '20 Days (Position)', 'value': '20d'}
+                                        ],
+                                        value='5d',
+                                        clearable=False
+                                    )
+                                ], width=2),
+                                dbc.Col([
+                                    dbc.Label("🎯 Surprise Score:"),
+                                    dcc.Dropdown(
+                                        id="pred-surprise-filter",
+                                        options=[
+                                            {'label': 'All', 'value': 'all'},
+                                            {'label': 'High (>0.7)', 'value': 'high'},
+                                            {'label': 'Medium (0.4-0.7)', 'value': 'medium'},
+                                            {'label': 'Low (<0.4)', 'value': 'low'}
+                                        ],
+                                        value='all',
+                                        clearable=False
+                                    )
+                                ], width=2),
+                                dbc.Col([
+                                    dbc.Label("Min Confidence:"),
+                                    dcc.Slider(
+                                        id="pred-confidence-filter",
+                                        min=0, max=100, step=10, value=0,
+                                        marks={i: f"{i}%" for i in range(0, 101, 20)}
+                                    )
+                                ], width=3)
+                            ])
                         ])
                     ])
-                ])
-            ], width=12)
-        ], className="mb-3"),
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("🎯 Active Predictions")),
-                    dbc.CardBody([
-                        html.P("Click on a prediction to see details", className="text-muted mb-3"),
-                        dcc.Loading(
-                            id="predictions-loading",
-                            type="circle",
-                            children=html.Div(
-                                id="predictions-table",
-                                style={"maxHeight": "800px", "overflowY": "auto"}
+                ], width=12)
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H5("🎯 Active Predictions")),
+                        dbc.CardBody([
+                            html.P("Click on a prediction to see details", className="text-muted mb-3"),
+                            dcc.Loading(
+                                id="predictions-loading",
+                                type="circle",
+                                children=html.Div(
+                                    id="predictions-table",
+                                    style={"maxHeight": "800px", "overflowY": "auto"}
+                                )
                             )
-                        )
+                        ])
                     ])
-                ])
-            ], width=12)
-        ]),
+                ], width=12)
+            ]),
 
-        # Modal for prediction details
+            # Hidden stores
+            dcc.Store(id="prediction-detail-cache", data={}),
+            dcc.Store(id="current-prediction-id", data=None),
+            dcc.Store(id="refresh-loading-state", data={})
+        ], fluid=True),
+
+        # Modal OUTSIDE container for proper z-index and positioning
         dbc.Modal([
             dbc.ModalHeader([
                 dbc.ModalTitle(id="prediction-modal-title"),
-                dbc.Button("🔄", id="refresh-prediction-detail", 
+                dbc.Button("🔄", id="refresh-prediction-detail",
                           size="sm", color="light", outline=True,
                           className="ms-2", title="Refresh live data")
             ], className="d-flex justify-content-between align-items-center"),
-            dbc.ModalBody(id="prediction-modal-body"),
+            dbc.ModalBody(id="prediction-modal-body", className="prediction-modal-body-scroll"),
             dbc.ModalFooter(
                 dbc.Button("Close", id="close-prediction-modal", className="ms-auto", n_clicks=0)
             )
-        ], id="prediction-modal", size="xl", is_open=False),
+        ], id="prediction-modal", size="xl", is_open=False, backdrop=True),
 
-        # Toast notifications
+        # Toast notifications OUTSIDE container
         dbc.Toast(
             id="refresh-toast",
             header="Performance Update",
@@ -127,22 +134,17 @@ def create_layout():
             icon="info",
             duration=3000,
             style={
-                "position": "fixed", 
-                "top": 66, 
-                "right": 10, 
-                "width": 350, 
+                "position": "fixed",
+                "top": 66,
+                "right": 10,
+                "width": 350,
                 "zIndex": 9999,
                 "backgroundColor": "#1e1e1e",
                 "border": "1px solid #444",
                 "boxShadow": "0 4px 8px rgba(0,0,0,0.3)"
             }
-        ),
-
-        # Hidden stores
-        dcc.Store(id="prediction-detail-cache", data={}),
-        dcc.Store(id="current-prediction-id", data=None),
-        dcc.Store(id="refresh-loading-state", data={})
-    ], fluid=True)
+        )
+    ])
 
 
 def get_predictions_table(engine, entity_filter=None, date_range=None, min_confidence=0, horizon='5d', surprise_filter='all'):
