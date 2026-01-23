@@ -1,0 +1,28 @@
+{
+  "S&P500": {
+    "index_symbol": "^GSPC",
+    "top_stocks": [
+      "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA", "BRK.B", "UNH", "JNJ",
+      "V", "XOM", "WMT", "JPM", "PG", "MA", "CVX", "HD", "LLY", "MRK",
+      "ABBV", "AVGO", "PEP", "KO", "COST", "PFE", "TMO", "MCD", "CSCO", "ACN",
+      "ABT", "DHR", "BAC", "WFC", "DIS", "CRM", "VZ", "ADBE", "CMCSA", "NKE",
+      "NFLX", "AMD", "INTC", "TXN", "QCOM", "PM", "NEE", "UPS", "HON", "RTX"
+    ]
+  },
+  "DAX": {
+    "index_symbol": "^GDAXI",
+    "top_stocks": [
+      "SAP", "SIE.DE", "DTE.DE", "AIR.DE", "ALV.DE", "MBG.DE", "BAS.DE", "VOW3.DE", "BAYN.DE", "MUV2.DE",
+      "BMW.DE", "DBK.DE", "ADS.DE", "HEN3.DE", "IFX.DE", "FRE.DE", "DB1.DE", "RWE.DE", "HEI.DE", "VNA.DE",
+      "CON.DE", "SHL.DE", "SY1.DE", "ZAL.DE", "BEI.DE", "PUM.DE", "QIA.DE", "HNR1.DE", "1COV.DE", "EOAN.DE"
+    ]
+  },
+  "DOW": {
+    "index_symbol": "^DJI",
+    "top_stocks": [
+      "AAPL", "MSFT", "UNH", "GS", "HD", "MCD", "V", "CAT", "BA", "AMGN",
+      "HON", "CRM", "IBM", "AXP", "TRV", "JPM", "JNJ", "PG", "CVX", "MMM",
+      "WMT", "DIS", "NKE", "KO", "MRK", "CSCO", "DOW", "VZ", "INTC", "WBA"
+    ]
+  }
+}

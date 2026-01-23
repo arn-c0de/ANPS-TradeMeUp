@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from src.models.raw_news import RawNews
 from src.models.data_quality import DataQualityScore
 from src.models.processed_news import ProcessedNews
-from src.models.predictions import Prediction
+from src.models.predictions import Prediction, PredictionOutcome
 from src.models.entities import Entity, NewsEntityMapping
 from src.models.analysis import ImpactScore, SurpriseScore, SignalDecayModel, FactVerification, MarketRegime
 from src.gui.error_handling import handle_db_errors, create_empty_state
@@ -202,6 +202,18 @@ def create_layout():
                     ])
                 ])
             ], width=12)
+        ], className="mb-3"),
+        
+        # Index Trends & Stock Performance
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader(html.H5("📈 Market Index Trends & Tracked Stocks")),
+                    dbc.CardBody([
+                        html.Div(id="index-trends-display")
+                    ])
+                ])
+            ], width=12)
         ]),
         
         # Entity Details Modal
@@ -212,6 +224,15 @@ def create_layout():
                 dbc.Button("Close", id="close-entity-modal", className="ms-auto")
             ])
         ], id="entity-details-modal", size="xl", scrollable=True),
+        
+        # Stock Predictions Modal
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle(id="stock-modal-title")),
+            dbc.ModalBody(id="stock-modal-body"),
+            dbc.ModalFooter([
+                dbc.Button("Close", id="close-stock-modal", className="ms-auto")
+            ])
+        ], id="stock-predictions-modal", size="xl", scrollable=True),
         
         # Store for selected entity
         dcc.Store(id="selected-entity-store", data=None),
@@ -1474,3 +1495,248 @@ def get_entity_full_details(engine, entity_name):
         import logging
         logging.error(f"Error loading entity details for {entity_name}: {e}", exc_info=True)
         return "Error", html.P(f"Error loading details: {str(e)[:100]}", className="text-danger")
+
+
+def get_index_trends(engine):
+    """Get index trends and related stock predictions"""
+    import json
+    import os
+    from datetime import datetime, timedelta
+    from src.gui.charts.market_data import MarketDataProvider
+    
+    try:
+        # Load index constituents
+        config_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "index_constituents.json")
+        with open(config_path, 'r') as f:
+            indices = json.load(f)
+        
+        market_provider = MarketDataProvider()
+        
+        # Get entities from database that match stocks in indices
+        with Session(engine) as db:
+            all_entities = db.query(Entity).all()
+            entity_symbols = {e.entity_name: e for e in all_entities}
+        
+        index_displays = []
+        
+        for index_name, index_data in indices.items():
+            index_symbol = index_data["index_symbol"]
+            
+            # Get index performance
+            try:
+                index_df = market_provider.get_historical_data(index_symbol, period="1mo")
+                if index_df is not None and not index_df.empty:
+                    current_price = index_df['Close'].iloc[-1]
+                    start_price = index_df['Close'].iloc[0]
+                    change_pct = ((current_price - start_price) / start_price) * 100
+                    
+                    trend_color = "success" if change_pct > 0 else "danger"
+                    trend_icon = "📈" if change_pct > 0 else "📉"
+                else:
+                    change_pct = 0
+                    trend_color = "secondary"
+                    trend_icon = "➡️"
+            except:
+                change_pct = 0
+                trend_color = "secondary"
+                trend_icon = "➡️"
+            
+            # Find tracked stocks from this index
+            tracked_stocks = []
+            for stock_symbol in index_data["top_stocks"]:
+                if stock_symbol in entity_symbols:
+                    entity = entity_symbols[stock_symbol]
+                    
+                    # Count predictions for this stock
+                    with Session(engine) as db:
+                        pred_count = db.query(func.count(Prediction.prediction_id)).filter(
+                            Prediction.entity_id == entity.entity_id
+                        ).scalar()
+                    
+                    if pred_count > 0:
+                        tracked_stocks.append({
+                            "symbol": stock_symbol,
+                            "entity_id": entity.entity_id,
+                            "pred_count": pred_count
+                        })
+            
+            if tracked_stocks:
+                # Create stock buttons
+                stock_buttons = [
+                    dbc.Button(
+                        f"{stock['symbol']} ({stock['pred_count']})",
+                        id={"type": "stock-pred-btn", "index": stock["symbol"]},
+                        size="sm",
+                        color="primary",
+                        outline=True,
+                        className="me-2 mb-2"
+                    )
+                    for stock in tracked_stocks[:20]  # Limit to 20 stocks
+                ]
+                
+                index_displays.append(
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.Div([
+                                html.H6(f"{trend_icon} {index_name}", className="mb-0"),
+                                dbc.Badge(
+                                    f"{change_pct:+.2f}% (30d)",
+                                    color=trend_color,
+                                    className="ms-2"
+                                )
+                            ], className="d-flex align-items-center justify-content-between")
+                        ]),
+                        dbc.CardBody([
+                            html.P(f"{len(tracked_stocks)} tracked stocks with predictions:", className="mb-2"),
+                            html.Div(stock_buttons)
+                        ])
+                    ], className="mb-3")
+                )
+        
+        if not index_displays:
+            return html.P("No tracked stocks found in major indices", className="text-muted text-center")
+        
+        return html.Div(index_displays)
+        
+    except Exception as e:
+        import logging
+        logging.error(f"Error loading index trends: {e}", exc_info=True)
+        return html.P(f"Error loading index trends: {str(e)[:100]}", className="text-danger")
+
+
+def get_stock_predictions_detail(engine, stock_symbol):
+    """Get all predictions for a specific stock with performance data"""
+    import json
+    from datetime import datetime
+    from sqlalchemy import desc
+    from src.gui.tabs.predictions import _format_saved_performance
+    
+    try:
+        with Session(engine) as db:
+            # Find entity by symbol
+            entity = db.query(Entity).filter(Entity.entity_name == stock_symbol).first()
+            
+            if not entity:
+                return f"{stock_symbol} - Not Found", html.P("Stock not found in database", className="text-muted")
+            
+            # Get all predictions for this entity
+            predictions = db.query(Prediction).filter(
+                Prediction.entity_id == entity.entity_id
+            ).order_by(desc(Prediction.created_at)).all()
+            
+            if not predictions:
+                return f"{stock_symbol} - No Predictions", html.P("No predictions found for this stock", className="text-muted")
+            
+            # Create prediction cards
+            pred_cards = []
+            for pred in predictions:
+                # Get prediction outcome
+                outcome = db.query(PredictionOutcome).filter(
+                    PredictionOutcome.prediction_id == pred.prediction_id
+                ).first()
+                
+                # Format performance data
+                perf_data = _format_saved_performance(pred, entity, outcome, load_live_prices=True)
+                
+                if perf_data:
+                    # Status badge
+                    if perf_data.get('status') == 'active':
+                        status_badge = dbc.Badge("Active", color="success")
+                    elif perf_data.get('status') == 'expired':
+                        status_badge = dbc.Badge("Expired", color="secondary")
+                    else:
+                        status_badge = dbc.Badge("Unknown", color="warning")
+                    
+                    # Return badge
+                    total_return = perf_data.get('total_return_pct', 0)
+                    return_color = "success" if total_return > 0 else "danger" if total_return < 0 else "secondary"
+                    
+                    pred_cards.append(
+                        dbc.Card([
+                            dbc.CardHeader([
+                                html.Div([
+                                    html.Span([
+                                        status_badge,
+                                        dbc.Badge(
+                                            f"{pred.horizon_hours}h",
+                                            color="info",
+                                            className="ms-2"
+                                        ),
+                                        dbc.Badge(
+                                            f"{pred.confidence:.1%}",
+                                            color="primary",
+                                            className="ms-2"
+                                        )
+                                    ]),
+                                    dbc.Badge(
+                                        f"{total_return:+.2f}%",
+                                        color=return_color,
+                                        className="ms-auto",
+                                        style={"fontSize": "1rem"}
+                                    )
+                                ], className="d-flex justify-content-between align-items-center")
+                            ]),
+                            dbc.CardBody([
+                                dbc.Row([
+                                    dbc.Col([
+                                        html.Small("Entry Price", className="text-muted"),
+                                        html.H6(f"${perf_data.get('prediction_price', 0):.2f}")
+                                    ], width=3),
+                                    dbc.Col([
+                                        html.Small("Current Price", className="text-muted"),
+                                        html.H6(f"${perf_data.get('current_price', 0):.2f}")
+                                    ], width=3),
+                                    dbc.Col([
+                                        html.Small("Target", className="text-muted"),
+                                        html.H6(f"{pred.predicted_direction.upper()}")
+                                    ], width=3),
+                                    dbc.Col([
+                                        html.Small("Created", className="text-muted"),
+                                        html.H6(pred.created_at.strftime("%Y-%m-%d %H:%M"))
+                                    ], width=3)
+                                ]),
+                                html.Hr(),
+                                html.P(pred.reasoning[:200] + "..." if len(pred.reasoning) > 200 else pred.reasoning, 
+                                      className="small text-muted mb-0")
+                            ])
+                        ], className="mb-3")
+                    )
+            
+            if not pred_cards:
+                return f"{stock_symbol} - No Data", html.P("No performance data available", className="text-muted")
+            
+            # Summary stats
+            active_count = sum(1 for p in predictions if p.created_at)
+            avg_confidence = sum(p.confidence for p in predictions) / len(predictions) if predictions else 0
+            
+            summary = dbc.Card([
+                dbc.CardBody([
+                    dbc.Row([
+                        dbc.Col([
+                            html.H4(len(predictions), className="mb-0"),
+                            html.Small("Total Predictions", className="text-muted")
+                        ], width=4),
+                        dbc.Col([
+                            html.H4(f"{avg_confidence:.1%}", className="mb-0"),
+                            html.Small("Avg Confidence", className="text-muted")
+                        ], width=4),
+                        dbc.Col([
+                            html.H4(entity.entity_name, className="mb-0"),
+                            html.Small("Symbol", className="text-muted")
+                        ], width=4)
+                    ])
+                ])
+            ], className="mb-3", color="dark", outline=True)
+            
+            body = html.Div([
+                summary,
+                html.H5("All Predictions", className="mt-3 mb-3"),
+                html.Div(pred_cards, style={"maxHeight": "600px", "overflowY": "auto"})
+            ])
+            
+            return f"{stock_symbol} - {len(predictions)} Predictions", body
+            
+    except Exception as e:
+        import logging
+        logging.error(f"Error loading stock predictions for {stock_symbol}: {e}", exc_info=True)
+        return "Error", html.P(f"Error: {str(e)[:100]}", className="text-danger")

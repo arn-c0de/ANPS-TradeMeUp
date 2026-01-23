@@ -1089,6 +1089,54 @@ def update_entity_modal_content(entity_data, is_open):
 
 
 @app.callback(
+    Output("index-trends-display", "children"),
+    Input("interval-component", "n_intervals")
+)
+def update_index_trends(n_intervals):
+    """Update index trends display"""
+    return statistics.get_index_trends(engine)
+
+
+@app.callback(
+    [Output("stock-predictions-modal", "is_open"),
+     Output("stock-modal-title", "children"),
+     Output("stock-modal-body", "children")],
+    [Input({"type": "stock-pred-btn", "index": ALL}, "n_clicks"),
+     Input("close-stock-modal", "n_clicks")],
+    [State({"type": "stock-pred-btn", "index": ALL}, "id"),
+     State("stock-predictions-modal", "is_open")],
+    prevent_initial_call=True
+)
+def toggle_stock_predictions_modal(stock_clicks, close_click, button_ids, is_open):
+    """Toggle stock predictions modal"""
+    from dash import callback_context
+    
+    if not callback_context.triggered:
+        return dash.no_update, dash.no_update, dash.no_update
+    
+    trigger_id = callback_context.triggered[0]["prop_id"]
+    
+    # Close button clicked
+    if "close-stock-modal" in trigger_id:
+        return False, dash.no_update, dash.no_update
+    
+    # Stock button clicked
+    if "stock-pred-btn" in trigger_id:
+        if stock_clicks and any(click for click in stock_clicks if click):
+            # Find which button was clicked
+            triggered_id = callback_context.triggered[0]["prop_id"].split(".")[0]
+            import json
+            button_id = json.loads(triggered_id)
+            stock_symbol = button_id["index"]
+            
+            # Load stock predictions
+            title, body = statistics.get_stock_predictions_detail(engine, stock_symbol)
+            return True, title, body
+    
+    return dash.no_update, dash.no_update, dash.no_update
+
+
+@app.callback(
     [Output("prediction-modal", "is_open", allow_duplicate=True),
      Output("prediction-detail-cache", "data", allow_duplicate=True),
      Output("current-prediction-id", "data", allow_duplicate=True),
