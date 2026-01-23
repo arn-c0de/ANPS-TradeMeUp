@@ -1622,7 +1622,7 @@ def get_stock_predictions_detail(engine, stock_symbol):
             # Get all predictions for this entity
             predictions = db.query(Prediction).filter(
                 Prediction.entity_id == entity.entity_id
-            ).order_by(desc(Prediction.created_at)).all()
+            ).order_by(desc(Prediction.created_at)).limit(5).all()  # Limit to 5 most recent for performance
             
             if not predictions:
                 return f"{stock_symbol} - No Predictions", html.P("No predictions found for this stock", className="text-muted")
@@ -1630,15 +1630,19 @@ def get_stock_predictions_detail(engine, stock_symbol):
             # Create prediction cards
             pred_cards = []
             for pred in predictions:
-                # Get prediction outcome
-                outcome = db.query(PredictionOutcome).filter(
-                    PredictionOutcome.prediction_id == pred.prediction_id
-                ).first()
-                
-                # Format performance data
-                perf_data = _format_saved_performance(pred, entity, outcome, load_live_prices=True)
-                
-                if perf_data:
+                try:
+                    # Get prediction outcome
+                    outcome = db.query(PredictionOutcome).filter(
+                        PredictionOutcome.prediction_id == pred.prediction_id
+                    ).first()
+                    
+                    # Always load live prices for this modal (limited to 5 predictions)
+                    perf_data = _format_saved_performance(pred, entity, outcome, load_live_prices=True)
+                    
+                    # If no cached data available, skip this prediction
+                    if not perf_data:
+                        continue
+                    
                     # Status badge
                     if perf_data.get('status') == 'active':
                         status_badge = dbc.Badge("Active", color="success")
@@ -1701,6 +1705,11 @@ def get_stock_predictions_detail(engine, stock_symbol):
                             ])
                         ], className="mb-3")
                     )
+                except Exception as e:
+                    # Skip predictions that cause errors
+                    import logging
+                    logging.error(f"Error processing prediction {pred.prediction_id}: {e}")
+                    continue
             
             if not pred_cards:
                 return f"{stock_symbol} - No Data", html.P("No performance data available", className="text-muted")
