@@ -174,7 +174,10 @@ def create_layout():
         ], id="entity-details-modal", size="xl", scrollable=True),
         
         # Store for selected entity
-        dcc.Store(id="selected-entity-store", data=None)
+        dcc.Store(id="selected-entity-store", data=None),
+        
+        # Store for table sorting state
+        dcc.Store(id="entity-table-sort-store", data={"column": None, "direction": None})
     ], fluid=True)
 
 
@@ -871,8 +874,16 @@ def get_top_negative_entities(engine):
         return html.P(f"Error: {str(e)[:50]}", className="text-danger")
 
 
-def get_entity_details_table(engine, search_term=""):
-    """Get detailed entity table with all tracked metrics"""
+def get_entity_details_table(engine, search_term="", sort_column=None, sort_direction=None):
+    """
+    Get detailed entity table with all tracked metrics and sortable columns
+    
+    Args:
+        engine: Database engine
+        search_term: Search filter
+        sort_column: Column to sort by (entity_name, type, id, mentions, impact_count, avg_impact)
+        sort_direction: 'asc' or 'desc', None for default
+    """
     try:
         import json
         from sqlalchemy import or_
@@ -907,20 +918,102 @@ def get_entity_details_table(engine, search_term=""):
                     )
                 )
             
-            entities = query.order_by(func.count(NewsEntityMapping.mapping_id).desc()).limit(50).all()
+            # Apply sorting based on column and direction
+            if sort_column and sort_direction:
+                if sort_column == "entity_name":
+                    sort_col = Entity.entity_name
+                elif sort_column == "type":
+                    sort_col = Entity.entity_type
+                elif sort_column == "id":
+                    sort_col = Entity.entity_id
+                elif sort_column == "mentions":
+                    sort_col = func.count(NewsEntityMapping.mapping_id.distinct())
+                elif sort_column == "impact_count":
+                    sort_col = func.count(ImpactScore.score_id.distinct())
+                elif sort_column == "avg_impact":
+                    sort_col = func.avg(ImpactScore.impact_score)
+                else:
+                    sort_col = func.count(NewsEntityMapping.mapping_id)  # default
+                
+                if sort_direction == "asc":
+                    query = query.order_by(sort_col.asc())
+                else:  # desc
+                    query = query.order_by(sort_col.desc())
+            else:
+                # Default sorting: by mentions descending
+                query = query.order_by(func.count(NewsEntityMapping.mapping_id).desc())
+            
+            entities = query.limit(50).all()
         
         if not entities:
             return html.P("No entities found" if search_term else "No entities tracked yet", className="text-muted text-center")
         
-        # Build table
+        # Determine sort indicators
+        def get_sort_icon(column_name):
+            if sort_column == column_name:
+                if sort_direction == "asc":
+                    return " ▲"
+                elif sort_direction == "desc":
+                    return " ▼"
+            return ""
+        
+        # Build table with clickable headers
         table_header = [
             html.Thead(html.Tr([
-                html.Th("Entity", style={"width": "25%"}),
-                html.Th("Type", style={"width": "10%"}),
-                html.Th("ID/Ticker", style={"width": "15%"}),
-                html.Th("Mentions", style={"width": "10%"}),
-                html.Th("Impact Scores", style={"width": "10%"}),
-                html.Th("Avg Impact", style={"width": "15%"}),
+                html.Th(
+                    html.Button(
+                        f"Entity{get_sort_icon('entity_name')}", 
+                        id={"type": "sort-column-btn", "column": "entity_name"},
+                        className="btn btn-link text-light p-0 text-decoration-none",
+                        style={"cursor": "pointer"}
+                    ),
+                    style={"width": "25%"}
+                ),
+                html.Th(
+                    html.Button(
+                        f"Type{get_sort_icon('type')}", 
+                        id={"type": "sort-column-btn", "column": "type"},
+                        className="btn btn-link text-light p-0 text-decoration-none",
+                        style={"cursor": "pointer"}
+                    ),
+                    style={"width": "10%"}
+                ),
+                html.Th(
+                    html.Button(
+                        f"ID/Ticker{get_sort_icon('id')}", 
+                        id={"type": "sort-column-btn", "column": "id"},
+                        className="btn btn-link text-light p-0 text-decoration-none",
+                        style={"cursor": "pointer"}
+                    ),
+                    style={"width": "15%"}
+                ),
+                html.Th(
+                    html.Button(
+                        f"Mentions{get_sort_icon('mentions')}", 
+                        id={"type": "sort-column-btn", "column": "mentions"},
+                        className="btn btn-link text-light p-0 text-decoration-none",
+                        style={"cursor": "pointer"}
+                    ),
+                    style={"width": "10%"}
+                ),
+                html.Th(
+                    html.Button(
+                        f"Impact Scores{get_sort_icon('impact_count')}", 
+                        id={"type": "sort-column-btn", "column": "impact_count"},
+                        className="btn btn-link text-light p-0 text-decoration-none",
+                        style={"cursor": "pointer"}
+                    ),
+                    style={"width": "10%"}
+                ),
+                html.Th(
+                    html.Button(
+                        f"Avg Impact{get_sort_icon('avg_impact')}", 
+                        id={"type": "sort-column-btn", "column": "avg_impact"},
+                        className="btn btn-link text-light p-0 text-decoration-none",
+                        style={"cursor": "pointer"}
+                    ),
+                    style={"width": "15%"}
+                ),
                 html.Th("Metadata", style={"width": "15%"})
             ]))
         ]
