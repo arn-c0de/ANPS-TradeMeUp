@@ -1088,6 +1088,71 @@ def update_entity_modal_content(entity_data, is_open):
     return title, body
 
 
+@app.callback(
+    [Output("prediction-modal", "is_open", allow_duplicate=True),
+     Output("prediction-detail-cache", "data", allow_duplicate=True),
+     Output("current-prediction-id", "data", allow_duplicate=True),
+     Output("entity-details-modal", "is_open", allow_duplicate=True)],
+    Input({"type": "news-pred-detail-btn", "index": ALL}, "n_clicks"),
+    [State({"type": "news-pred-detail-btn", "index": ALL}, "id"),
+     State("prediction-modal", "is_open"),
+     State("entity-details-modal", "is_open")],
+    prevent_initial_call=True
+)
+def open_news_prediction_detail(n_clicks_list, button_ids, pred_modal_open, entity_modal_open):
+    """Open prediction detail modal for clicked news article"""
+    from sqlalchemy.orm import Session
+    from src.models.predictions import Prediction
+    
+    # Check if any button was clicked
+    if not n_clicks_list or not any(n_clicks_list):
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    
+    # Find which button was clicked
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    
+    # Get the news_id from the triggered button
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    import json
+    button_id = json.loads(triggered_id)
+    news_id = button_id["index"]  # news_id is a UUID string, not an integer
+    
+    # Find prediction that has this news_id in related_news_ids
+    try:
+        with Session(engine) as db:
+            # Query predictions where related_news_ids contains the news_id
+            # related_news_ids is stored as JSON array
+            predictions = db.query(Prediction).all()
+            
+            matching_prediction = None
+            for pred in predictions:
+                # Check if related_news_ids exists and contains the news_id
+                if hasattr(pred, 'related_news_ids') and pred.related_news_ids:
+                    try:
+                        # related_news_ids might be a list or JSON string
+                        news_ids = pred.related_news_ids if isinstance(pred.related_news_ids, list) else []
+                        if news_id in news_ids:
+                            matching_prediction = pred
+                            break
+                    except (TypeError, ValueError):
+                        continue
+            
+            if not matching_prediction:
+                logger.warning(f"No prediction found for news_id {news_id}")
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            
+            prediction_id = str(matching_prediction.prediction_id)
+            
+            # Close entity modal, open prediction modal with performance data
+            return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id, False
+            
+    except Exception as e:
+        logger.error(f"Error loading prediction for news_id {news_id}: {e}", exc_info=True)
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+
 # ============================================================================
 # CALLBACKS - CHARTS TAB
 # ============================================================================

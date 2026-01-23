@@ -208,9 +208,9 @@ def create_layout():
         dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle(id="entity-modal-title")),
             dbc.ModalBody(id="entity-modal-body"),
-            dbc.ModalFooter(
+            dbc.ModalFooter([
                 dbc.Button("Close", id="close-entity-modal", className="ms-auto")
-            )
+            ])
         ], id="entity-details-modal", size="xl", scrollable=True),
         
         # Store for selected entity
@@ -1266,6 +1266,7 @@ def get_entity_full_details(engine, entity_name):
             
             # Get all news articles mentioning this entity
             news_mappings = db.query(
+                RawNews.news_id,
                 RawNews.title,
                 RawNews.source,
                 RawNews.url,
@@ -1418,12 +1419,21 @@ def get_entity_full_details(engine, entity_name):
                 dbc.Card([
                     dbc.CardBody([
                         html.Div([
-                            html.A(
-                                html.Strong(mapping.title or "No title", className="text-light"),
-                                href=mapping.url if mapping.url else "#",
-                                target="_blank",
-                                className="text-decoration-none"
-                            ),
+                            html.Div([
+                                html.A(
+                                    html.Strong(mapping.title or "No title", className="text-light"),
+                                    href=mapping.url if mapping.url else "#",
+                                    target="_blank",
+                                    className="text-decoration-none"
+                                ),
+                                dbc.Button(
+                                    "📊",
+                                    id={"type": "news-pred-detail-btn", "index": str(mapping.news_id)},
+                                    size="sm",
+                                    color="primary",
+                                    style={"fontSize": "0.7rem", "padding": "0.2rem 0.4rem"}
+                                )
+                            ], className="d-flex justify-content-between align-items-start mb-2"),
                             html.Div([
                                 dbc.Badge(mapping.source or "Unknown", color="info", className="me-2"),
                                 dbc.Badge(mapping.event_type or "No type", color="secondary", className="me-2") if mapping.event_type else None,
