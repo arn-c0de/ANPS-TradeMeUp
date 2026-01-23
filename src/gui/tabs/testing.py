@@ -325,6 +325,8 @@ def test_agent(agent_key):
         "agent_7",    # FactVerificationAgent
         "agent_8",    # CorrelationAnalysisAgent
         "agent_9",    # SignalDecayAgent
+        "agent_11",   # ConfidenceCalibrationAgent
+        "agent_12",   # MetaStrategyAgent
     }
     
     try:

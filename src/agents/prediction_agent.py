@@ -214,6 +214,64 @@ class PredictionAgent:
             'key_drivers': key_drivers
         }
 
+    def generate_prediction(
+        self,
+        entity_id: str,
+        news_id: str,
+        horizon: str = '5d'
+    ) -> Optional[Prediction]:
+        """
+        Generate a single prediction for an entity based on a news article.
+        
+        PUBLIC API: Use this for single predictions with auto-commit.
+        For batch processing, use process_batch() instead.
+        
+        Args:
+            entity_id: Entity ticker/identifier
+            news_id: UUID of news article
+            horizon: Prediction horizon ('1d', '5d', '20d')
+            
+        Returns:
+            Prediction object or None if failed
+        """
+        with get_scoped_session() as db:
+            try:
+                # Get impact score for this news
+                impact = db.query(ImpactScore).filter(
+                    ImpactScore.news_id == news_id,
+                    ImpactScore.entity_id == entity_id
+                ).first()
+                
+                if not impact:
+                    logger.warning(f"No impact score found for {entity_id}/{news_id}")
+                    return None
+                
+                # Create feature engineer
+                feature_engineer = FeatureEngineer(db)
+                
+                # Generate prediction
+                prediction = self._generate_prediction_no_commit(
+                    db=db,
+                    feature_engineer=feature_engineer,
+                    entity_id=entity_id,
+                    news_id=news_id,
+                    horizon=horizon,
+                    impact=impact
+                )
+                
+                if prediction:
+                    db.add(prediction)
+                    db.commit()
+                    logger.info(f"✓ Created prediction for {entity_id} ({horizon})")
+                    return prediction
+                else:
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"Error generating prediction: {e}")
+                db.rollback()
+                return None
+
     def process_batch(self, limit: int = 20) -> Dict:
         """
         Generate predictions for high-impact news.
@@ -259,13 +317,18 @@ class PredictionAgent:
             # Process all impact scores WITHOUT committing
             for impact in impact_scores:
                 try:
+                    news_id_str = str(impact.news_id)
+                    
                     # Check which horizons already have predictions
-                    existing_predictions = db.query(Prediction).filter(
-                        Prediction.entity_id == impact.entity_id,
-                        Prediction.related_news_ids.like(f'%{impact.news_id}%')
+                    # Note: related_news_ids is JSON array, need to check in Python
+                    all_entity_predictions = db.query(Prediction).filter(
+                        Prediction.entity_id == impact.entity_id
                     ).all()
-
-                    existing_horizons = {p.horizon for p in existing_predictions}
+                    
+                    existing_horizons = set()
+                    for pred in all_entity_predictions:
+                        if pred.related_news_ids and news_id_str in pred.related_news_ids:
+                            existing_horizons.add(pred.horizon)
 
                     # Generate predictions for missing horizons
                     for horizon in self.horizons:
@@ -325,19 +388,29 @@ class PredictionAgent:
             ImpactScore.impact_score >= 0.4  # Only significant impact
         ).order_by(
             ImpactScore.created_at.desc()  # Newest first
-        ).limit(limit * 2).all()  # Get more candidates
+        ).limit(limit * 3).all()  # Get more candidates for filtering
 
         # Filter out those that already have predictions for ALL horizons
         to_predict = []
+        news_id_str = None
+        
         for impact in impact_scores:
-            # Check if predictions exist for ALL horizons
-            predictions_count = db.query(Prediction).filter(
-                Prediction.entity_id == impact.entity_id,
-                Prediction.related_news_ids.like(f'%{impact.news_id}%')  # Simple JSON search
-            ).count()
-
-            # If less than 3 predictions (one per horizon), we need to process this
-            if predictions_count < len(self.horizons):
+            news_id_str = str(impact.news_id)
+            
+            # Get all predictions for this entity
+            predictions = db.query(Prediction).filter(
+                Prediction.entity_id == impact.entity_id
+            ).all()
+            
+            # Check if predictions exist for this news_id in any horizon
+            # Note: related_news_ids is a JSON array, need to parse it
+            existing_horizons = set()
+            for pred in predictions:
+                if pred.related_news_ids and news_id_str in pred.related_news_ids:
+                    existing_horizons.add(pred.horizon)
+            
+            # If not all horizons are covered, add to list
+            if len(existing_horizons) < len(self.horizons):
                 to_predict.append(impact)
                 if len(to_predict) >= limit:
                     break

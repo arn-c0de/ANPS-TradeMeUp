@@ -681,8 +681,21 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
                 ])
             ], className="mb-3")
 
-            # Build modal content
-            title = f"{direction_emoji} {entity_name} - {direction.upper()} Prediction"
+            # Build modal content - use entity_id (ticker) in button index, show entity_name as text
+            ticker_symbol = entity.entity_id if entity else pred.entity_id
+            title = html.Div([
+                html.Span(f"{direction_emoji} ", style={"fontSize": "1.5rem"}),
+                dbc.Button(
+                    ["📊 ", entity_name],
+                    id={"type": "open-chart-btn", "index": ticker_symbol},
+                    color="link",
+                    className="p-0 text-decoration-none text-primary",
+                    style={"fontSize": "1.5rem", "fontWeight": "bold"},
+                    title=f"Open {entity_name} chart",
+                    n_clicks=0
+                ),
+                html.Span(f" - {direction.upper()} Prediction", style={"fontSize": "1.5rem"})
+            ], className="d-flex align-items-center")
 
             # Performance section
             performance_section = None

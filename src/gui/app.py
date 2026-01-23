@@ -280,7 +280,265 @@ app.index_string = '''
             ::-webkit-scrollbar-thumb:hover {
                 background: #555;
             }
+            
+            /* Quad panel styling - professional focus indication without scale */
+            .quad-panel-hover {
+                transition: border-color 0.3s ease, box-shadow 0.3s ease;
+            }
+            .quad-panel-hover:hover {
+                box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5) !important;
+                border-color: rgba(102, 126, 234, 0.9) !important;
+            }
+            
+            /* Settings button hover effect */
+            .quad-panel-hover:hover .position-absolute {
+                opacity: 1 !important;
+                transform: scale(1.05);
+                backgroundColor: rgba(40,40,40,0.95) !important;
+            }
+            
+            /* Active/focused panel styling */
+            .panel-focused {
+                border: 3px solid rgba(102, 126, 234, 0.9) !important;
+                box-shadow: 0 0 20px rgba(102, 126, 234, 0.6) !important;
+            }
+
+            /* Ensure panel settings modal is on top of fullscreen charts */
+            .panel-settings-modal {
+                z-index: 3003 !important;
+            }
+            .panel-settings-modal .modal-dialog {
+                z-index: 3004 !important;
+            }
+            .modal-backdrop.show {
+                z-index: 3002 !important;
+            }
+            
+            /* Resizable chart splitters */
+            .chart-splitter-horizontal {
+                height: 8px;
+                background: linear-gradient(to bottom, rgba(102, 126, 234, 0.2), rgba(102, 126, 234, 0.4), rgba(102, 126, 234, 0.2));
+                cursor: ns-resize;
+                position: relative;
+                z-index: 100;
+                transition: background 0.2s ease;
+            }
+            .chart-splitter-horizontal:hover {
+                background: linear-gradient(to bottom, rgba(102, 126, 234, 0.4), rgba(102, 126, 234, 0.7), rgba(102, 126, 234, 0.4));
+            }
+            .chart-splitter-horizontal:active {
+                background: rgba(102, 126, 234, 0.8);
+            }
+            
+            .chart-splitter-vertical {
+                width: 8px;
+                background: linear-gradient(to right, rgba(102, 126, 234, 0.2), rgba(102, 126, 234, 0.4), rgba(102, 126, 234, 0.2));
+                cursor: ew-resize;
+                position: relative;
+                z-index: 100;
+                transition: background 0.2s ease;
+                display: inline-block;
+                height: 100%;
+            }
+            .chart-splitter-vertical:hover {
+                background: linear-gradient(to right, rgba(102, 126, 234, 0.4), rgba(102, 126, 234, 0.7), rgba(102, 126, 234, 0.4));
+            }
+            .chart-splitter-vertical:active {
+                background: rgba(102, 126, 234, 0.8);
+            }
+            
+            /* Resizable panel container */
+            .resizable-panel {
+                position: relative;
+                overflow: hidden;
+            }
+            
+            /* Chart container styles */
+            .chart-container-normal {
+                position: relative;
+                width: 100%;
+            }
+            
+            /* Fullscreen chart container - fills entire viewport */
+            .chart-container-fullscreen {
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                z-index: 3000 !important;
+                background-color: #060606 !important;
+                overflow-y: auto !important;
+                overflow-x: hidden !important;
+                padding: 5px 10px !important;
+                box-sizing: border-box !important;
+            }
+            
+            /* Fix chart panel heights in fullscreen mode */
+            .chart-container-fullscreen .card {
+                margin-bottom: 5px !important;
+                overflow: hidden !important;
+            }
+            
+            .chart-container-fullscreen .card-body {
+                overflow: hidden !important;
+            }
+            
+            .chart-container-fullscreen .h-100 {
+                height: 100% !important;
+                max-height: 100% !important;
+            }
+            
+            /* Force Plotly charts to respect container heights */
+            .chart-container-fullscreen .js-plotly-plot,
+            .chart-container-fullscreen .plotly,
+            .chart-container-fullscreen .plotly .main-svg {
+                height: 100% !important;
+                max-height: 100% !important;
+                width: 100% !important;
+            }
+            
+            /* Make dcc.Graph components flex properly */
+            .chart-container-fullscreen .dash-graph,
+            ._dash-loading-callback {
+                height: 100% !important;
+                display: flex !important;
+                flex-direction: column !important;
+            }
+            
+            /* Force flex on all chart containers */
+            .chart-container-fullscreen [id^="chart-content"] > div {
+                height: 100% !important;
+                display: flex !important;
+                flex-direction: column !important;
+            }
+            
+            /* Ensure proper spacing in fullscreen mode */
+            .chart-container-fullscreen .mb-3 {
+                margin-bottom: 10px !important;
+            }
+            
+            .chart-container-fullscreen .mb-2 {
+                margin-bottom: 10px !important;
+            }
+            
+            /* Remove bottom padding from last row */
+            .chart-container-fullscreen .row:last-child {
+                margin-bottom: 0 !important;
+            }
+            
+            .chart-container-fullscreen .row:last-child .col {
+                margin-bottom: 0 !important;
+            }
         </style>
+        <script>
+            // Drag-to-resize functionality for chart splitters
+            document.addEventListener('DOMContentLoaded', function() {
+                let isDragging = false;
+                let currentSplitter = null;
+                let startPos = 0;
+                
+                function initSplitters() {
+                    // Horizontal splitters
+                    const hSplitters = document.querySelectorAll('.chart-splitter-horizontal');
+                    hSplitters.forEach(splitter => {
+                        splitter.addEventListener('mousedown', function(e) {
+                            isDragging = true;
+                            currentSplitter = splitter;
+                            startPos = e.clientY;
+                            document.body.style.cursor = 'ns-resize';
+                            e.preventDefault();
+                        });
+                    });
+                    
+                    // Vertical splitters
+                    const vSplitters = document.querySelectorAll('.chart-splitter-vertical');
+                    vSplitters.forEach(splitter => {
+                        splitter.addEventListener('mousedown', function(e) {
+                            isDragging = true;
+                            currentSplitter = splitter;
+                            startPos = e.clientX;
+                            document.body.style.cursor = 'ew-resize';
+                            e.preventDefault();
+                        });
+                    });
+                }
+                
+                document.addEventListener('mousemove', function(e) {
+                    if (!isDragging || !currentSplitter) return;
+                    
+                    const isHorizontal = currentSplitter.classList.contains('chart-splitter-horizontal');
+                    const parent = currentSplitter.parentElement;
+                    const prevElement = currentSplitter.previousElementSibling;
+                    const nextElement = currentSplitter.nextElementSibling;
+                    
+                    if (!prevElement || !nextElement) return;
+                    
+                    if (isHorizontal) {
+                        // Vertical drag (horizontal splitter)
+                        const delta = e.clientY - startPos;
+                        const parentHeight = parent.offsetHeight;
+                        const prevHeight = prevElement.offsetHeight;
+                        const nextHeight = nextElement.offsetHeight;
+                        
+                        const newPrevHeight = prevHeight + delta;
+                        const newNextHeight = nextHeight - delta;
+                        
+                        // Minimum height 100px
+                        if (newPrevHeight > 100 && newNextHeight > 100) {
+                            const prevPercent = (newPrevHeight / parentHeight) * 100;
+                            const nextPercent = (newNextHeight / parentHeight) * 100;
+                            
+                            prevElement.style.height = `calc(${prevPercent}% - 4px)`;
+                            nextElement.style.height = `calc(${nextPercent}% - 4px)`;
+                            
+                            startPos = e.clientY;
+                        }
+                    } else {
+                        // Horizontal drag (vertical splitter)
+                        const delta = e.clientX - startPos;
+                        const parentWidth = parent.offsetWidth;
+                        const prevWidth = prevElement.offsetWidth;
+                        const nextWidth = nextElement.offsetWidth;
+                        
+                        const newPrevWidth = prevWidth + delta;
+                        const newNextWidth = nextWidth - delta;
+                        
+                        // Minimum width 200px
+                        if (newPrevWidth > 200 && newNextWidth > 200) {
+                            const prevPercent = (newPrevWidth / parentWidth) * 100;
+                            const nextPercent = (newNextWidth / parentWidth) * 100;
+                            
+                            prevElement.style.width = `${prevPercent}%`;
+                            nextElement.style.width = `${nextPercent}%`;
+                            
+                            startPos = e.clientX;
+                        }
+                    }
+                });
+                
+                document.addEventListener('mouseup', function() {
+                    if (isDragging) {
+                        isDragging = false;
+                        currentSplitter = null;
+                        document.body.style.cursor = '';
+                    }
+                });
+                
+                // Initialize on load and reinitialize on updates
+                initSplitters();
+                
+                // MutationObserver to reinitialize when chart layout changes
+                const observer = new MutationObserver(function(mutations) {
+                    initSplitters();
+                });
+                
+                const chartArea = document.getElementById('chart-display-area');
+                if (chartArea) {
+                    observer.observe(chartArea, { childList: true, subtree: true });
+                }
+            });
+        </script>
     </head>
     <body>
         {%app_entry%}
@@ -304,6 +562,8 @@ app.layout = html.Div([
     dcc.Interval(id="interval-component", interval=5*1000, n_intervals=0),  # 5 seconds for live updates
     dcc.Store(id="continuous-pipeline-state", data={"running": False, "pid": None}),
     dcc.Store(id="delete-action-store", data={"action": None, "params": None}),
+    dcc.Store(id="rss-fetch-status-store", data=None),
+    
     create_navbar(),
     dbc.Container([
         dbc.Tabs([
@@ -319,6 +579,40 @@ app.layout = html.Div([
         ], id="tabs", active_tab="dashboard", persistence=True, persistence_type="local")
     ], fluid=True)
 ], className="bg-dark text-light min-vh-100")
+
+
+# ============================================================================
+# CLIENTSIDE CALLBACKS
+# ============================================================================
+
+# ESC key listener for fullscreen mode - fixed version
+app.clientside_callback(
+    """
+    function(fullscreen_data) {
+        // Remove old listener if exists
+        if (window.escKeyHandler) {
+            document.removeEventListener('keydown', window.escKeyHandler);
+        }
+        
+        // Only add listener if in fullscreen mode
+        if (fullscreen_data && fullscreen_data.fullscreen) {
+            window.escKeyHandler = function(event) {
+                if (event.key === 'Escape' || event.key === 'Esc') {
+                    const fullscreenBtn = document.getElementById('toggle-fullscreen-btn');
+                    if (fullscreenBtn) {
+                        fullscreenBtn.click();
+                    }
+                }
+            };
+            document.addEventListener('keydown', window.escKeyHandler);
+        }
+        
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("esc-key-listener", "value"),
+    Input("chart-fullscreen-state", "data")
+)
 
 
 # ============================================================================
@@ -449,6 +743,59 @@ def control_continuous_pipeline(start_clicks, stop_clicks, current_state):
         )
     
     return dash.no_update
+
+
+@app.callback(
+    Output("rss-fetch-status-store", "data"),
+    Input("btn-fetch-rss-only", "n_clicks"),
+    prevent_initial_call=True
+)
+def fetch_rss_only(n_clicks):
+    """Open RSS fetch in separate terminal window"""
+    if not n_clicks:
+        return dash.no_update
+    
+    import subprocess
+    from pathlib import Path
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Use wrapper batch script to keep console open
+        wrapper_script = Path("scripts/run_rss_fetch_wrapper.bat").absolute()
+        
+        if not wrapper_script.exists():
+            error_msg = f"RSS fetch script not found: {wrapper_script}"
+            activity_logger.log_activity(error_msg, "ERROR")
+            logger.error(error_msg)
+            return {"status": "error", "message": str(error_msg)}
+        
+        # Start in new console window
+        cmd = f'start "TradeMeUp RSS Fetch" /D "{Path.cwd()}" "{wrapper_script}"'
+        
+        # Start the process using shell command
+        process = subprocess.Popen(
+            cmd,
+            shell=True,
+            cwd=str(Path.cwd())
+        )
+        
+        logger.info(f"RSS fetch terminal opened with command: {cmd}")
+        activity_logger.log_activity(
+            "RSS Feed Fetch: Terminal window opened - Check the new window",
+            "INFO"
+        )
+        
+        return {"status": "success", "message": "RSS fetch started in new terminal"}
+        
+    except Exception as e:
+        logger.error(f"Error opening RSS fetch terminal: {e}", exc_info=True)
+        activity_logger.log_activity(
+            f"RSS Fetch Error: {str(e)}",
+            "ERROR"
+        )
+        return {"status": "error", "message": str(e)}
 
 
 @app.callback(
@@ -1157,7 +1504,8 @@ def toggle_stock_predictions_modal(stock_clicks, close_click, button_ids, is_ope
     [Output("prediction-modal", "is_open", allow_duplicate=True),
      Output("prediction-detail-cache", "data", allow_duplicate=True),
      Output("current-prediction-id", "data", allow_duplicate=True),
-     Output("entity-details-modal", "is_open", allow_duplicate=True)],
+     Output("entity-details-modal", "is_open", allow_duplicate=True),
+     Output("no-prediction-toast", "is_open", allow_duplicate=True)],
     Input({"type": "news-pred-detail-btn", "index": ALL}, "n_clicks"),
     [State({"type": "news-pred-detail-btn", "index": ALL}, "id"),
      State("prediction-modal", "is_open"),
@@ -1171,12 +1519,12 @@ def open_news_prediction_detail(n_clicks_list, button_ids, pred_modal_open, enti
     
     # Check if any button was clicked
     if not n_clicks_list or not any(n_clicks_list):
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
     
     # Find which button was clicked
     ctx = dash.callback_context
     if not ctx.triggered:
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
     
     # Get the news_id from the triggered button
     triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
@@ -1198,55 +1546,739 @@ def open_news_prediction_detail(n_clicks_list, button_ids, pred_modal_open, enti
                     try:
                         # related_news_ids might be a list or JSON string
                         news_ids = pred.related_news_ids if isinstance(pred.related_news_ids, list) else []
-                        if news_id in news_ids:
+                        # Convert both to strings for comparison (handle UUID objects)
+                        news_ids_str = [str(nid) for nid in news_ids]
+                        if str(news_id) in news_ids_str:
                             matching_prediction = pred
                             break
-                    except (TypeError, ValueError):
+                    except (TypeError, ValueError) as conv_error:
+                        logger.debug(f"Error converting news_ids for prediction {pred.prediction_id}: {conv_error}")
                         continue
             
             if not matching_prediction:
                 logger.warning(f"No prediction found for news_id {news_id}")
-                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+                # Show toast notification to user
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, True
             
             prediction_id = str(matching_prediction.prediction_id)
             
-            # Close entity modal, open prediction modal with performance data
-            return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id, False
+            # Close entity modal, open prediction modal with performance data (don't show toast)
+            return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id, False, False
             
     except Exception as e:
         logger.error(f"Error loading prediction for news_id {news_id}: {e}", exc_info=True)
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
 
 # ============================================================================
-# CALLBACKS - CHARTS TAB
+# CALLBACKS - CHARTS TAB (Modern Tab-based Interface)
 # ============================================================================
 
 @app.callback(
-    Output("market-indices-display", "children"),
-    Input("chart-update-interval", "n_intervals")
+    [Output("tabs", "active_tab", allow_duplicate=True),
+     Output("chart-tabs-store", "data", allow_duplicate=True),
+     Output("prediction-modal", "is_open", allow_duplicate=True)],
+    Input({"type": "open-chart-btn", "index": ALL}, "n_clicks"),
+    [State({"type": "open-chart-btn", "index": ALL}, "id"),
+     State("chart-tabs-store", "data")],
+    prevent_initial_call=True
 )
-def update_market_indices(n):
-    """Update market indices display"""
-    return charts.get_market_indices_cards()
+def open_ticker_in_charts(n_clicks_list, button_ids, tabs_data):
+    """Open ticker symbol in charts tab - add new tab or switch to existing"""
+    from dash import callback_context
+    import uuid
+    
+    if not callback_context.triggered or not any(n_clicks_list):
+        return dash.no_update, dash.no_update, dash.no_update
+    
+    # Get the clicked button's ticker symbol
+    triggered_id = callback_context.triggered[0]["prop_id"].split(".")[0]
+    import json
+    button_id = json.loads(triggered_id)
+    ticker = button_id["index"]
+    
+    # Check if tab for this ticker already exists
+    existing_tab = None
+    for tab in tabs_data.get('tabs', []):
+        if tab['symbol'] == ticker:
+            existing_tab = tab['id']
+            break
+    
+    if existing_tab:
+        # Switch to existing tab
+        tabs_data['active_tab'] = existing_tab
+    else:
+        # Create new tab
+        new_tab_id = f"tab-{uuid.uuid4().hex[:8]}"
+        new_tab = {
+            'id': new_tab_id,
+            'symbol': ticker,
+            'timeframe': '1mo',
+            'chart_type': 'candlestick'
+        }
+        tabs_data['tabs'].append(new_tab)
+        tabs_data['active_tab'] = new_tab_id
+    
+    # Switch to charts tab and close the prediction modal
+    return "charts", tabs_data, False
+
+
+@app.callback(
+    Output("chart-tab-buttons", "children"),
+    Input("chart-tabs-store", "data")
+)
+def render_chart_tabs(tabs_data):
+    """Render the browser-style tab buttons with market data"""
+    from src.gui.charts.market_data import market_data
+    
+    tabs = tabs_data.get('tabs', [])
+    active_tab = tabs_data.get('active_tab')
+    
+    tab_buttons = []
+    for tab in tabs:
+        is_active = tab['id'] == active_tab
+        symbol = tab['symbol']
+        timeframe = tab.get('timeframe', '1mo')
+        
+        # Get live price data
+        try:
+            quote = market_data.get_live_price(symbol)
+            if quote:
+                price = quote.get('price', 0)
+                change = quote.get('change', 0)
+                change_pct = quote.get('change_percent', 0)
+                high = quote.get('high', 0)
+                low = quote.get('low', 0)
+                volume = quote.get('volume', 0)
+                
+                # Format volume
+                vol_str = f"{volume/1000000:.1f}M" if volume > 1000000 else f"{volume/1000:.1f}K"
+                
+                # Color based on change
+                price_color = "#00ff88" if change >= 0 else "#ff4444"
+                
+                # Tab content with price info
+                tab_content = html.Div([
+                    html.Div([
+                        html.Span(f"{symbol} ", style={'fontWeight': 'bold', 'fontSize': '0.9rem'}),
+                        html.Span(f"${price:.2f}", style={'color': price_color, 'fontWeight': 'bold', 'fontSize': '0.85rem', 'marginLeft': '4px'}),
+                        html.Span(f" {change:+.2f} ({change_pct:+.2f}%)", style={'color': price_color, 'fontSize': '0.7rem', 'marginLeft': '2px'})
+                    ], style={'whiteSpace': 'nowrap'}),
+                    html.Div([
+                        html.Span(f"H ${high:.2f}", style={'fontSize': '0.65rem', 'marginRight': '4px', 'opacity': '0.8'}),
+                        html.Span(f"L ${low:.2f}", style={'fontSize': '0.65rem', 'marginRight': '4px', 'opacity': '0.8'}),
+                        html.Span(f"Vol {vol_str}", style={'fontSize': '0.65rem', 'marginRight': '4px', 'opacity': '0.8'}),
+                        html.Span(f"[{timeframe}]", style={'fontSize': '0.65rem', 'opacity': '0.6'})
+                    ], style={'whiteSpace': 'nowrap', 'marginTop': '2px'})
+                ], style={'textAlign': 'left', 'lineHeight': '1.1'})
+            else:
+                # Fallback if no data
+                tab_content = html.Div([
+                    html.Div(symbol, style={'fontWeight': 'bold'}),
+                    html.Div(f"[{timeframe}]", style={'fontSize': '0.7rem', 'opacity': '0.6'})
+                ])
+        except Exception as e:
+            # Fallback on error
+            tab_content = html.Div([
+                html.Div(symbol, style={'fontWeight': 'bold'}),
+                html.Div(f"[{timeframe}]", style={'fontSize': '0.7rem', 'opacity': '0.6'})
+            ])
+        
+        # Modern tab styling with gradient for active tab
+        tab_style = {
+            'background': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' if is_active else 'transparent',
+            'border': '2px solid #667eea' if is_active else '1px solid #6c757d',
+            'boxShadow': '0 2px 8px rgba(102, 126, 234, 0.3)' if is_active else 'none',
+            'padding': '4px 8px'
+        }
+        
+        tab_button = dbc.ButtonGroup([
+            dbc.Button(
+                tab_content,
+                id={"type": "chart-tab-btn", "index": tab['id']},
+                color="primary" if is_active else "secondary",
+                size="sm",
+                outline=not is_active,
+                style=tab_style
+            ),
+            dbc.Button(
+                "×",
+                id={"type": "chart-tab-close-btn", "index": tab['id']},
+                color="danger" if is_active else "secondary",
+                size="sm",
+                outline=True,
+                className="px-2",
+                style={'transition': 'all 0.2s ease', "borderLeft": "1px solid rgba(255,255,255,0.2)"},
+                title="Close tab"
+            )
+        ], size="sm", className="me-1")
+        
+        tab_buttons.append(tab_button)
+    
+    return tab_buttons
+
+
+@app.callback(
+    Output("chart-tabs-store", "data", allow_duplicate=True),
+    Input({"type": "chart-tab-btn", "index": ALL}, "n_clicks"),
+    State("chart-tabs-store", "data"),
+    prevent_initial_call=True
+)
+def switch_chart_tab(n_clicks_list, tabs_data):
+    """Switch to clicked tab"""
+    from dash import callback_context
+    
+    if not callback_context.triggered or not any(n_clicks_list):
+        return dash.no_update
+    
+    # Get the clicked tab ID
+    triggered_id = callback_context.triggered[0]["prop_id"].split(".")[0]
+    import json
+    button_id = json.loads(triggered_id)
+    tab_id = button_id["index"]
+    
+    tabs_data['active_tab'] = tab_id
+    return tabs_data
+
+
+@app.callback(
+    Output("chart-tabs-store", "data", allow_duplicate=True),
+    Input({"type": "chart-tab-close-btn", "index": ALL}, "n_clicks"),
+    State("chart-tabs-store", "data"),
+    prevent_initial_call=True
+)
+def close_chart_tab(n_clicks_list, tabs_data):
+    """Close clicked tab"""
+    from dash import callback_context
+    
+    if not callback_context.triggered or not any(n_clicks_list):
+        return dash.no_update
+    
+    # Get the clicked tab ID
+    triggered_id = callback_context.triggered[0]["prop_id"].split(".")[0]
+    import json
+    button_id = json.loads(triggered_id)
+    tab_id_to_close = button_id["index"]
+    
+    # Don't close if it's the last tab (keep at least one)
+    if len(tabs_data.get('tabs', [])) <= 1:
+        return dash.no_update
+    
+    # Remove the tab
+    tabs_data['tabs'] = [t for t in tabs_data['tabs'] if t['id'] != tab_id_to_close]
+    
+    # If we closed the active tab, switch to the first remaining tab
+    if tabs_data['active_tab'] == tab_id_to_close:
+        if tabs_data['tabs']:
+            tabs_data['active_tab'] = tabs_data['tabs'][0]['id']
+        else:
+            tabs_data['active_tab'] = None
+    
+    return tabs_data
+
+
+@app.callback(
+    [Output("new-tab-modal", "is_open"),
+     Output("new-tab-symbol-input", "value"),
+     Output("new-tab-timeframe-selector", "value"),
+     Output("new-tab-chart-type-selector", "value")],
+    [Input("add-chart-tab-btn", "n_clicks"),
+     Input("new-tab-cancel-btn", "n_clicks"),
+     Input("new-tab-add-btn", "n_clicks")],
+    State("new-tab-modal", "is_open"),
+    prevent_initial_call=True
+)
+def toggle_new_tab_modal(add_click, cancel_click, add_btn_click, is_open):
+    """Toggle new tab modal"""
+    from dash import callback_context
+    
+    if not callback_context.triggered:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    
+    trigger_id = callback_context.triggered[0]['prop_id'].split('.')[0]
+    
+    if trigger_id == "add-chart-tab-btn":
+        return True, None, '1mo', 'candlestick'
+    else:
+        return False, None, '1mo', 'candlestick'
+
+
+@app.callback(
+    Output("chart-tabs-store", "data", allow_duplicate=True),
+    Input("new-tab-add-btn", "n_clicks"),
+    [State("new-tab-symbol-input", "value"),
+     State("new-tab-timeframe-selector", "value"),
+     State("new-tab-chart-type-selector", "value"),
+     State("chart-tabs-store", "data")],
+    prevent_initial_call=True
+)
+def add_new_chart_tab(n_clicks, symbol, timeframe, chart_type, tabs_data):
+    """Add new chart tab"""
+    import uuid
+    
+    if not n_clicks or not symbol:
+        return dash.no_update
+    
+    # Create new tab
+    new_tab_id = f"tab-{uuid.uuid4().hex[:8]}"
+    new_tab = {
+        'id': new_tab_id,
+        'symbol': symbol,
+        'timeframe': timeframe,
+        'chart_type': chart_type
+    }
+    
+    tabs_data['tabs'].append(new_tab)
+    tabs_data['active_tab'] = new_tab_id
+    
+    return tabs_data
+
+
+@app.callback(
+    Output("new-tab-symbol-input", "options"),
+    Input("new-tab-symbol-input", "search_value"),
+    prevent_initial_call=True
+)
+def search_new_tab_symbols(search_value):
+    """Search for symbols in new tab modal"""
+    if not search_value or len(search_value) < 1:
+        return []
+    
+    from sqlalchemy.orm import Session
+    from src.models.entities import Entity
+    
+    try:
+        with Session(engine) as db:
+            search_term = f"%{search_value.upper()}%"
+            entities = db.query(Entity).filter(
+                (Entity.entity_id.ilike(search_term)) | 
+                (Entity.entity_name.ilike(search_term))
+            ).limit(20).all()
+            
+            options = []
+            for entity in entities:
+                label = f"{entity.entity_id} - {entity.entity_name}"
+                options.append({"label": label, "value": entity.entity_id})
+            
+            return options
+    except Exception as e:
+        logger.error(f"Error searching symbols: {e}")
+        return []
+
+
+@app.callback(
+    [Output("chart-display-area", "children"),
+     Output("chart-display-area", "className")],
+    [Input("chart-tabs-store", "data"),
+     Input("quad-mode-store", "data"),
+     Input("chart-options-checklist", "value"),
+     Input("chart-fullscreen-state", "data"),
+     Input("layout-preset-dropdown", "value"),
+     Input("refresh-all-panels", "n_clicks")],
+    prevent_initial_call='initial_duplicate'
+)
+def render_chart_display(tabs_data, quad_data, chart_options, fullscreen_data, layout_preset, refresh_clicks):
+    """Render chart display area - single or quad mode with options and fullscreen"""
+    tabs = tabs_data.get('tabs', [])
+    active_tab_id = tabs_data.get('active_tab')
+    quad_enabled = quad_data.get('enabled', False)
+    is_fullscreen = fullscreen_data.get('fullscreen', False)
+    
+    show_volume = 'volume' in (chart_options or [])
+    show_ma = 'ma' in (chart_options or [])
+    show_stats = 'stats' in (chart_options or [])
+    
+    # Container class based on fullscreen
+    container_class = 'position-fixed top-0 start-0 w-100 h-100 bg-dark' if is_fullscreen else 'chart-container-normal'
+    
+    if not tabs:
+        return dbc.Alert("No charts open. Click '+ New' to add a chart.", color="info", className="mt-3"), container_class
+    
+    if quad_enabled:
+        # Render quad view - only show existing tabs, respect individual settings
+        panels = []
+        
+        # Calculate height based on number of panels and fullscreen mode
+        num_tabs = len(tabs)
+        if num_tabs == 0:
+            return dbc.Alert("No charts open. Click '+ New' to add a chart.", color="info", className="mt-3"), container_class
+        
+        # Use up to 4 tabs for quad view
+        tabs_to_show = tabs[:4]
+        panel_height = 'calc(50vh - 80px)' if is_fullscreen else '500px'
+        
+        for tab in tabs_to_show:
+            # Use individual tab settings, not global ones
+            tab_show_volume = tab.get('show_volume', True)
+            tab_show_ma = tab.get('show_ma', False)
+            # Stats still use global setting
+            
+            chart = charts.get_stock_chart_with_stats(
+                tab['symbol'],
+                tab['timeframe'],
+                tab['chart_type'],
+                show_volume=tab_show_volume,
+                show_ma=tab_show_ma,
+                show_stats=show_stats
+            )
+            
+            # Panel with settings button next to symbol/stats
+            panel_content = html.Div([
+                chart,
+                # Settings button positioned OVER the chart at top-left
+                dbc.Button(
+                    [html.I(className="fas fa-cog"), " "],
+                    id={"type": "panel-settings-btn", "index": tab['id']},
+                    color="dark",
+                    size="sm",
+                    className="position-absolute",
+                    outline=True,
+                    style={
+                        'top': '5px', 
+                        'left': '8px',
+                        'zIndex': '2000',  # Very high to be above everything
+                        'opacity': '0.9',
+                        'transition': 'all 0.2s ease',
+                        'padding': '3px 8px',
+                        'fontSize': '0.8rem',
+                        'boxShadow': '0 2px 4px rgba(0,0,0,0.3)'
+                    },
+                    title="Chart Settings"
+                )
+            ], style={'position': 'relative', 'height': '100%'})
+            
+            # Clickable panel wrapper to focus tab on click
+            is_active = tab['id'] == active_tab_id
+            panel_wrapper = html.Div(
+                panel_content,
+                id={"type": "quad-panel", "index": tab['id']},
+                style={
+                    'height': panel_height,
+                    'overflow': 'hidden',
+                    'cursor': 'pointer',
+                    'borderRadius': '8px',
+                    'transition': 'border-color 0.3s ease, box-shadow 0.3s ease'
+                },
+                className='quad-panel-hover' + (' panel-focused' if is_active else '')
+            )
+            panels.append(panel_wrapper)
+        
+        # Create dynamic grid based on number of panels and layout preset
+        if num_tabs == 1:
+            # Single panel - full width
+            content = dbc.Container([
+                dbc.Row([dbc.Col(panels[0], width=12)])
+            ], fluid=True, className="px-2" + (" h-100" if is_fullscreen else ""))
+        elif num_tabs == 2:
+            # Two panels - apply layout preset with vertical splitter
+            if layout_preset == 'left-focus':
+                left_width, right_width = '66%', 'calc(34% - 8px)'
+            elif layout_preset == 'right-focus':
+                left_width, right_width = '34%', 'calc(66% - 8px)'
+            else:  # equal or grid
+                left_width, right_width = '49%', '49%'
+            
+            content = dbc.Container([
+                html.Div([
+                    html.Div(panels[0], style={'width': left_width, 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel"),
+                    html.Div(id="splitter-v-main", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top'}),
+                    html.Div(panels[1], style={'width': right_width, 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel")
+                ], style={'height': '100%'})
+            ], fluid=True, className="px-2" + (" h-100" if is_fullscreen else ""))
+        elif num_tabs == 3:
+            # Three panels - apply layout preset with resize handles
+            if layout_preset == 'left-focus':
+                # 1 large left, 2 stacked right with vertical splitter
+                content = dbc.Container([
+                    html.Div([
+                        html.Div(panels[0], style={'width': '66%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel"),
+                        html.Div(id="splitter-v-1", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top'}),
+                        html.Div([
+                            html.Div(panels[1], style={'height': '49%'}, className="resizable-panel"),
+                            html.Div(id="splitter-h-1", className="chart-splitter-horizontal"),
+                            html.Div(panels[2], style={'height': '49%'}, className="resizable-panel")
+                        ], style={'width': 'calc(34% - 8px)', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'})
+                    ], style={'height': '100%'})
+                ], fluid=True, className="px-2" + (" h-100" if is_fullscreen else ""))
+            elif layout_preset == 'right-focus':
+                # 2 stacked left, 1 large right with vertical splitter
+                content = dbc.Container([
+                    html.Div([
+                        html.Div([
+                            html.Div(panels[0], style={'height': '49%'}, className="resizable-panel"),
+                            html.Div(id="splitter-h-2", className="chart-splitter-horizontal"),
+                            html.Div(panels[1], style={'height': '49%'}, className="resizable-panel")
+                        ], style={'width': '34%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+                        html.Div(id="splitter-v-2", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top'}),
+                        html.Div(panels[2], style={'width': 'calc(66% - 8px)', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel")
+                    ], style={'height': '100%'})
+                ], fluid=True, className="px-2" + (" h-100" if is_fullscreen else ""))
+            else:  # equal or grid - 2 top, 1 bottom with horizontal splitter
+                content = dbc.Container([
+                    html.Div([
+                        html.Div([
+                            html.Div(panels[0], style={'width': '49%', 'display': 'inline-block', 'height': '100%', 'verticalAlign': 'top'}, className="resizable-panel"),
+                            html.Div(id="splitter-v-3", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top', 'height': '100%'}),
+                            html.Div(panels[1], style={'width': '49%', 'display': 'inline-block', 'height': '100%', 'verticalAlign': 'top'}, className="resizable-panel")
+                        ], style={'height': 'calc(50% - 4px)', 'display': 'block'}),
+                        html.Div(id="splitter-h-3", className="chart-splitter-horizontal"),
+                        html.Div(panels[2], style={'height': 'calc(50% - 4px)', 'display': 'block'}, className="resizable-panel")
+                    ], style={'height': '100%', 'display': 'block'})
+                ], fluid=True, className="px-2 h-100")
+        else:
+            # Four panels - 2x2 grid with splitters
+            content = dbc.Container([
+                html.Div([
+                    html.Div([
+                        html.Div(panels[0], style={'width': '49%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel"),
+                        html.Div(id="splitter-v-top", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top'}),
+                        html.Div(panels[1], style={'width': '49%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel")
+                    ], style={'height': '49%'}),
+                    html.Div(id="splitter-h-middle", className="chart-splitter-horizontal"),
+                    html.Div([
+                        html.Div(panels[2], style={'width': '49%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel"),
+                        html.Div(id="splitter-v-bottom", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top'}),
+                        html.Div(panels[3], style={'width': '49%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel")
+                    ], style={'height': '49%'})
+                ], style={'height': '100%'})
+            ], fluid=True, className="px-2" + (" h-100" if is_fullscreen else ""))
+        
+        return content, container_class
+    else:
+        # Render single active chart
+        active_tab = next((t for t in tabs if t['id'] == active_tab_id), None)
+        if not active_tab:
+            return dbc.Alert("No active chart", color="warning"), container_class
+        
+        # Use individual tab settings
+        tab_show_volume = active_tab.get('show_volume', True)
+        tab_show_ma = active_tab.get('show_ma', False)
+        
+        chart = charts.get_stock_chart_with_stats(
+            active_tab['symbol'],
+            active_tab['timeframe'],
+            active_tab['chart_type'],
+            show_volume=tab_show_volume,
+            show_ma=tab_show_ma,
+            show_stats=show_stats
+        )
+        
+        # Chart with settings button next to symbol/stats
+        chart_content = html.Div([
+            chart,
+            # Settings button positioned OVER the chart at top-left
+            dbc.Button(
+                [html.I(className="fas fa-cog"), " "],
+                id={"type": "panel-settings-btn", "index": active_tab_id},
+                color="dark",
+                size="sm",
+                className="position-absolute",
+                outline=True,
+                style={
+                    'top': '5px', 
+                    'left': '8px',
+                    'zIndex': '2000',  # Very high to be above everything
+                    'opacity': '0.9',
+                    'transition': 'all 0.2s ease',
+                    'padding': '3px 8px',
+                    'fontSize': '0.8rem',
+                    'boxShadow': '0 2px 4px rgba(0,0,0,0.3)'
+                },
+                title="Chart Settings"
+            )
+        ], style={'position': 'relative', 'height': '100%'})
+        
+        height = 'calc(100vh - 180px)' if is_fullscreen else 'calc(100vh - 320px)'
+        return html.Div(chart_content, style={'height': height, 'minHeight': '600px'}), container_class
+
+
+@app.callback(
+    Output("quad-mode-store", "data"),
+    [Input("layout-single", "n_clicks"),
+     Input("layout-quad", "n_clicks")],
+    State("quad-mode-store", "data"),
+    prevent_initial_call=True
+)
+def toggle_quad_mode(single_click, quad_click, quad_data):
+    """Toggle between single and quad mode"""
+    from dash import callback_context
+    
+    if not callback_context.triggered:
+        return dash.no_update
+    
+    trigger_id = callback_context.triggered[0]['prop_id'].split('.')[0]
+    
+    if trigger_id == "layout-single":
+        quad_data['enabled'] = False
+    elif trigger_id == "layout-quad":
+        quad_data['enabled'] = True
+    
+    return quad_data
+
+
+@app.callback(
+    [Output("chart-fullscreen-state", "data"),
+     Output("toggle-fullscreen-btn", "children"),
+     Output("toggle-fullscreen-btn", "color")],
+    Input("toggle-fullscreen-btn", "n_clicks"),
+    State("chart-fullscreen-state", "data"),
+    prevent_initial_call=True
+)
+def toggle_chart_fullscreen(n_clicks, fullscreen_data):
+    """Toggle fullscreen mode for charts"""
+    if not n_clicks:
+        return dash.no_update, dash.no_update, dash.no_update
+    
+    is_fullscreen = fullscreen_data.get('fullscreen', False)
+    fullscreen_data['fullscreen'] = not is_fullscreen
+    
+    if fullscreen_data['fullscreen']:
+        return fullscreen_data, "⬇ Exit", "danger"
+    else:
+        return fullscreen_data, "⛶", "info"
 
 
 @app.callback(
     [Output("layout-single", "outline"),
-     Output("layout-split-h", "outline"),
-     Output("layout-split-v", "outline"),
      Output("layout-quad", "outline")],
-    Input("chart-panels-config", "data")
+    Input("quad-mode-store", "data")
 )
-def highlight_active_layout(config):
+def highlight_active_layout_mode(quad_data):
     """Highlight the currently active layout button"""
-    layout = config.get('layout', 'single')
-    return (
-        layout != 'single',  # outline=True means not active (inverted logic for outline buttons)
-        layout != 'split-horizontal',
-        layout != 'split-vertical',
-        layout != 'quad'
-    )
+    quad_enabled = quad_data.get('enabled', False)
+    return (quad_enabled, not quad_enabled)
+
+
+@app.callback(
+    [Output("panel-settings-modal", "is_open"),
+     Output("panel-settings-tab-id", "data"),
+     Output("panel-settings-timeframe", "value"),
+     Output("panel-settings-chart-type", "value"),
+     Output("panel-settings-options", "value")],
+    [Input({"type": "panel-settings-btn", "index": dash.ALL}, "n_clicks"),
+     Input("panel-settings-cancel-btn", "n_clicks"),
+     Input("panel-settings-apply-btn", "n_clicks")],
+    [State("chart-tabs-store", "data"),
+     State("panel-settings-tab-id", "data")],
+    prevent_initial_call=True
+)
+def toggle_panel_settings_modal(settings_clicks, cancel_clicks, apply_clicks, tabs_data, current_tab_id):
+    """Open/close panel settings modal and load current settings"""
+    from dash import callback_context
+    
+    if not callback_context.triggered:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    
+    trigger = callback_context.triggered[0]['prop_id']
+    
+    # Close modal
+    if 'cancel' in trigger or 'apply' in trigger:
+        return False, None, dash.no_update, dash.no_update, dash.no_update
+    
+    # Open modal - load settings for clicked panel (only if settings button was actually clicked)
+    if 'panel-settings-btn' in trigger and any(settings_clicks):
+        import json
+        trigger_dict = json.loads(trigger.split('.')[0])
+        tab_id = trigger_dict['index']
+        
+        # Find the tab
+        tabs = tabs_data.get('tabs', [])
+        tab = next((t for t in tabs if t['id'] == tab_id), None)
+        
+        if tab:
+            # Load current settings
+            timeframe = tab.get('timeframe', '1mo')
+            chart_type = tab.get('chart_type', 'candlestick')
+            
+            options = []
+            if tab.get('show_volume', True):
+                options.append('volume')
+            if tab.get('show_ma', False):
+                options.append('ma')
+            # Stats is always shown for now
+            options.append('stats')
+            
+            return True, tab_id, timeframe, chart_type, options
+    
+    return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+
+@app.callback(
+    Output("chart-tabs-store", "data", allow_duplicate=True),
+    Input("panel-settings-apply-btn", "n_clicks"),
+    [State("panel-settings-tab-id", "data"),
+     State("panel-settings-timeframe", "value"),
+     State("panel-settings-chart-type", "value"),
+     State("panel-settings-options", "value"),
+     State("chart-tabs-store", "data")],
+    prevent_initial_call=True
+)
+def apply_panel_settings(n_clicks, tab_id, timeframe, chart_type, options, tabs_data):
+    """Apply settings to the selected panel/tab"""
+    if not n_clicks or not tab_id:
+        return dash.no_update
+    
+    tabs = tabs_data.get('tabs', [])
+    
+    # Find and update the tab
+    for tab in tabs:
+        if tab['id'] == tab_id:
+            tab['timeframe'] = timeframe
+            tab['chart_type'] = chart_type
+            tab['show_volume'] = 'volume' in (options or [])
+            tab['show_ma'] = 'ma' in (options or [])
+            break
+    
+    tabs_data['tabs'] = tabs
+    return tabs_data
+
+
+@app.callback(
+    Output("chart-fullscreen-state", "data", allow_duplicate=True),
+    Input("esc-key-listener", "value"),
+    State("chart-fullscreen-state", "data"),
+    prevent_initial_call=True
+)
+def close_fullscreen_on_esc(key_value, fullscreen_data):
+    """Close fullscreen mode when ESC key is pressed"""
+    # ESC key detection via clientside callback would be better, but this works as fallback
+    if fullscreen_data.get('fullscreen', False):
+        fullscreen_data['fullscreen'] = False
+        return fullscreen_data
+    return dash.no_update
+
+
+@app.callback(
+    Output("chart-tabs-store", "data", allow_duplicate=True),
+    Input({"type": "quad-panel", "index": dash.ALL}, "n_clicks"),
+    State("chart-tabs-store", "data"),
+    prevent_initial_call=True
+)
+def focus_tab_on_quad_panel_click(n_clicks_list, tabs_data):
+    """Focus the corresponding tab when a quad panel is clicked (but not settings button)"""
+    from dash import callback_context
+    
+    if not callback_context.triggered or not any(n_clicks_list):
+        return dash.no_update
+    
+    # Get the clicked panel's tab ID
+    trigger = callback_context.triggered[0]['prop_id']
+    
+    # Don't focus if a settings button was clicked - check if trigger is exactly quad-panel
+    if 'quad-panel' in trigger and 'panel-settings-btn' not in trigger:
+        import json
+        # Extract tab_id from the trigger string
+        try:
+            trigger_dict = json.loads(trigger.split('.')[0])
+            clicked_tab_id = trigger_dict['index']
+            
+            # Update active tab
+            tabs_data['active_tab'] = clicked_tab_id
+            return tabs_data
+        except:
+            return dash.no_update
+    
+    return dash.no_update
 
 
 @app.callback(
@@ -1258,32 +2290,6 @@ def highlight_active_layout(config):
 def toggle_market_overview(n_clicks, is_open):
     """Toggle market overview section"""
     return not is_open
-
-
-@app.callback(
-    [Output("chart-fullscreen-state", "data"),
-     Output("toggle-fullscreen-btn", "children"),
-     Output("toggle-fullscreen-btn", "outline"),
-     Output("toggle-fullscreen-btn", "color")],
-    Input("toggle-fullscreen-btn", "n_clicks"),
-    State("chart-fullscreen-state", "data"),
-    prevent_initial_call=True
-)
-def toggle_fullscreen(n_clicks, fullscreen_state):
-    """Toggle fullscreen mode for charts"""
-    is_fullscreen = fullscreen_state.get('fullscreen', False)
-    new_state = not is_fullscreen
-    
-    if new_state:
-        button_text = "⬇ Exit Fullscreen"
-        outline = False  # Solid button when in fullscreen
-        color = "danger"
-    else:
-        button_text = "⛶ Fullscreen"
-        outline = True  # Outline button in normal mode
-        color = "info"
-    
-    return {'fullscreen': new_state}, button_text, outline, color
 
 
 @app.callback(
@@ -1365,6 +2371,40 @@ def render_chart_panels(config, n_intervals, refresh_clicks, fullscreen_state):
     
     chart_layout = charts.render_multi_panel_layout(layout, panels, is_fullscreen)
     return chart_layout, container_class
+
+
+@app.callback(
+    Output("config-symbol-input", "options"),
+    Input("config-symbol-input", "search_value"),
+    prevent_initial_call=True
+)
+def search_config_symbols(search_value):
+    """Search for symbols and company names in Entity database"""
+    if not search_value or len(search_value) < 1:
+        return []
+    
+    from sqlalchemy.orm import Session
+    from src.models.entities import Entity
+    
+    try:
+        with Session(engine) as db:
+            # Search by entity_id (ticker) or entity_name (company name)
+            search_term = f"%{search_value.upper()}%"
+            entities = db.query(Entity).filter(
+                (Entity.entity_id.ilike(search_term)) | 
+                (Entity.entity_name.ilike(search_term))
+            ).limit(20).all()
+            
+            # Format as dropdown options: "AAPL - Apple Inc."
+            options = []
+            for entity in entities:
+                label = f"{entity.entity_id} - {entity.entity_name}"
+                options.append({"label": label, "value": entity.entity_id})
+            
+            return options
+    except Exception as e:
+        logger.error(f"Error searching symbols: {e}")
+        return []
 
 
 @app.callback(
@@ -2395,7 +3435,7 @@ def save_llm_settings(n_clicks, provider, model):
 
 # Open settings tab
 @app.callback(
-    Output("tabs", "active_tab"),
+    Output("tabs", "active_tab", allow_duplicate=True),
     Input("btn-open-settings", "n_clicks"),
     prevent_initial_call=True
 )

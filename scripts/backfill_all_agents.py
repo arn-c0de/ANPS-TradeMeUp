@@ -245,7 +245,8 @@ def backfill_surprise_scoring(db, batch_size=50):
         logger.info("✓ All processed articles have surprise scores")
         return 0
 
-    agent = SurpriseQuantificationAgent(db)
+    # Note: SurpriseQuantificationAgent uses scoped sessions internally
+    agent = SurpriseQuantificationAgent()
     processed = 0
     total_surprises = 0
     max_iterations = (unsurprised // batch_size) + 2
@@ -287,7 +288,8 @@ def backfill_impact_scoring(db, batch_size=50):
         logger.info("✓ All processed articles have impact scores")
         return 0
 
-    agent = ImpactScoringAgent(db)
+    # Note: ImpactScoringAgent uses scoped sessions internally
+    agent = ImpactScoringAgent()
     processed = 0
     total_scores = 0
     max_iterations = (unscored // batch_size) + 2
@@ -337,7 +339,8 @@ def backfill_predictions(db, batch_size=50):
         logger.info("✓ No high-impact scores to predict")
         return 0
 
-    agent = PredictionAgent(db)
+    # Note: PredictionAgent uses scoped sessions internally, no db param needed
+    agent = PredictionAgent()
     total_processed = 0
     total_predictions = 0
     max_iterations = (high_impact // batch_size) + 10  # Buffer for safety
