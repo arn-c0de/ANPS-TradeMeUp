@@ -13,7 +13,7 @@ from src.models.raw_news import RawNews
 from src.models.data_quality import DataQualityScore
 from src.models.processed_news import ProcessedNews
 from src.models.predictions import Prediction
-from src.models.entities import Entity
+from src.models.entities import Entity, NewsEntityMapping
 from src.models.analysis import ImpactScore, SurpriseScore, SignalDecayModel, FactVerification, MarketRegime
 from src.gui.error_handling import handle_db_errors, create_empty_state
 
@@ -21,6 +21,7 @@ from src.gui.error_handling import handle_db_errors, create_empty_state
 def create_layout():
     """Create statistics tab layout"""
     return dbc.Container([
+        # Overall Metrics
         dbc.Row([
             dbc.Col([
                 dbc.Card([
@@ -31,6 +32,8 @@ def create_layout():
                 ])
             ], width=12)
         ], className="mb-3"),
+        
+        # Event & Quality Distribution
         dbc.Row([
             dbc.Col([
                 dbc.Card([
@@ -49,6 +52,8 @@ def create_layout():
                 ])
             ], width=6)
         ], className="mb-3"),
+        
+        # Sentiment, Impact & Top Entities
         dbc.Row([
             dbc.Col([
                 dbc.Card([
@@ -75,6 +80,79 @@ def create_layout():
                 ])
             ], width=4)
         ], className="mb-3"),
+        
+        # NEW: Entity Sentiment Analysis
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.Div([
+                            html.H5("📊 Entity Sentiment Analysis", className="mb-0 d-inline"),
+                            dbc.Select(
+                                id="sentiment-timeframe-selector",
+                                options=[
+                                    {"label": "Last 7 Days", "value": "7d"},
+                                    {"label": "Last 30 Days", "value": "30d"},
+                                    {"label": "Last 90 Days", "value": "90d"},
+                                    {"label": "All Time", "value": "all"}
+                                ],
+                                value="30d",
+                                className="w-auto d-inline-block ms-3",
+                                style={"width": "150px"}
+                            )
+                        ], className="d-flex align-items-center justify-content-between")
+                    ]),
+                    dbc.CardBody([
+                        dcc.Graph(id="entity-sentiment-chart")
+                    ])
+                ])
+            ], width=12)
+        ], className="mb-3"),
+        
+        # NEW: Top Positive & Negative Entities
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader(html.H5("📈 Top Positive Entities (Last 30 Days)")),
+                    dbc.CardBody([
+                        html.Div(id="top-positive-entities")
+                    ])
+                ])
+            ], width=6),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader(html.H5("📉 Top Negative Entities (Last 30 Days)")),
+                    dbc.CardBody([
+                        html.Div(id="top-negative-entities")
+                    ])
+                ])
+            ], width=6)
+        ], className="mb-3"),
+        
+        # NEW: Entity Details Table
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.Div([
+                            html.H5("🏢 Entity Details", className="mb-0 d-inline"),
+                            dbc.Input(
+                                id="entity-search-input",
+                                type="text",
+                                placeholder="Search entities...",
+                                className="d-inline-block ms-3",
+                                style={"width": "300px"}
+                            )
+                        ], className="d-flex align-items-center")
+                    ]),
+                    dbc.CardBody([
+                        html.Div(id="entity-details-table")
+                    ])
+                ])
+            ], width=12)
+        ], className="mb-3"),
+        
+        # News Volume Over Time
         dbc.Row([
             dbc.Col([
                 dbc.Card([
@@ -416,14 +494,14 @@ def get_top_entities_list(engine):
         with Session(engine) as db:
             top_entities = db.query(
                 Entity.entity_name,
-                Entity.ticker,
+                Entity.entity_id,
                 func.count(NewsEntityMapping.mapping_id).label('mentions')
             ).join(
                 NewsEntityMapping,
                 Entity.entity_id == NewsEntityMapping.entity_id
             ).group_by(
                 Entity.entity_name,
-                Entity.ticker
+                Entity.entity_id
             ).order_by(
                 func.count(NewsEntityMapping.mapping_id).desc()
             ).limit(10).all()
@@ -432,13 +510,13 @@ def get_top_entities_list(engine):
             return html.P("No entities tracked yet", className="text-muted")
         
         rows = []
-        for i, (name, ticker, mentions) in enumerate(top_entities, 1):
+        for i, (name, entity_id, mentions) in enumerate(top_entities, 1):
             badge_color = "danger" if i <= 3 else "warning" if i <= 6 else "secondary"
             rows.append(
                 html.Div([
                     dbc.Badge(f"#{i}", color=badge_color, className="me-2"),
                     html.Span(name, className="text-light"),
-                    html.Small(f" ({ticker})" if ticker else "", className="text-muted ms-1"),
+                    html.Small(f" ({entity_id})" if entity_id else "", className="text-muted ms-1"),
                     dbc.Badge(f"{mentions}", color="info", className="ms-auto")
                 ], className="d-flex align-items-center mb-2")
             )
@@ -446,6 +524,424 @@ def get_top_entities_list(engine):
         return html.Div(rows)
     except Exception as e:
         return html.P(f"Error loading entities: {str(e)[:50]}", className="text-danger")
+
+
+def get_entity_sentiment_chart(engine, timeframe="30d"):
+    """Get entity sentiment analysis chart over time"""
+    try:
+        from datetime import datetime, timedelta
+        from sqlalchemy import and_
+        import json
+        
+        with Session(engine) as db:
+            # Calculate cutoff date
+            cutoff_date = None
+            if timeframe == "7d":
+                cutoff_date = datetime.now() - timedelta(days=7)
+            elif timeframe == "30d":
+                cutoff_date = datetime.now() - timedelta(days=30)
+            elif timeframe == "90d":
+                cutoff_date = datetime.now() - timedelta(days=90)
+            
+            # Query entity-news mappings with sentiment
+            query = db.query(
+                Entity.entity_name,
+                Entity.entity_id,
+                ProcessedNews.sentiment,
+                RawNews.fetched_at
+            ).join(
+                NewsEntityMapping, Entity.entity_id == NewsEntityMapping.entity_id
+            ).join(
+                RawNews, NewsEntityMapping.news_id == RawNews.news_id
+            ).join(
+                ProcessedNews, RawNews.news_id == ProcessedNews.news_id
+            ).filter(
+                ProcessedNews.sentiment.isnot(None)
+            )
+            
+            if cutoff_date:
+                query = query.filter(RawNews.fetched_at >= cutoff_date)
+            
+            entity_sentiments = query.all()
+        
+        if not entity_sentiments:
+            import plotly.graph_objects as go
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No sentiment data available<br>Run content analysis to see entity sentiments",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False)
+            )
+            return fig
+        
+        # Aggregate sentiments by entity
+        entity_data = {}
+        for name, entity_id, sentiment_json, fetched_at in entity_sentiments:
+            if name not in entity_data:
+                entity_data[name] = []
+            
+            try:
+                sent_dict = sentiment_json if isinstance(sentiment_json, dict) else json.loads(sentiment_json)
+                if 'overall' in sent_dict:
+                    entity_data[name].append(sent_dict['overall'])
+            except:
+                pass
+        
+        # Calculate average sentiment per entity
+        entity_avg_sentiments = []
+        for entity, sentiments in entity_data.items():
+            if sentiments:
+                avg_sent = sum(sentiments) / len(sentiments)
+                entity_avg_sentiments.append({
+                    'entity': entity,
+                    'avg_sentiment': avg_sent,
+                    'count': len(sentiments)
+                })
+        
+        # Sort by average sentiment
+        entity_avg_sentiments.sort(key=lambda x: x['avg_sentiment'], reverse=True)
+        
+        # Take top 15 (best and worst)
+        top_entities = entity_avg_sentiments[:15] if len(entity_avg_sentiments) > 15 else entity_avg_sentiments
+        
+        # Create bar chart
+        df_chart = pd.DataFrame(top_entities)
+        
+        # Color by sentiment
+        colors = ['#28a745' if s > 0.2 else '#dc3545' if s < -0.2 else '#6c757d' 
+                  for s in df_chart['avg_sentiment']]
+        
+        fig = px.bar(
+            df_chart,
+            x='avg_sentiment',
+            y='entity',
+            orientation='h',
+            template="plotly_dark",
+            color='avg_sentiment',
+            color_continuous_scale=['#dc3545', '#6c757d', '#28a745']
+        )
+        fig.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis_title="Average Sentiment Score",
+            yaxis_title="Entity",
+            showlegend=False,
+            height=max(400, len(top_entities) * 30),
+            margin=dict(l=150, r=40, t=40, b=40)
+        )
+        return fig
+    except Exception as e:
+        import plotly.graph_objects as go
+        import logging
+        logging.error(f"Error creating entity sentiment chart: {e}", exc_info=True)
+        
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"Error loading chart<br>{str(e)[:50]}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color="red")
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        return fig
+
+
+def get_top_positive_entities(engine):
+    """Get top entities with most positive news in last 30 days"""
+    try:
+        from datetime import datetime, timedelta
+        from sqlalchemy import and_
+        import json
+        
+        with Session(engine) as db:
+            cutoff = datetime.now() - timedelta(days=30)
+            
+            # Get entity-news with sentiments
+            results = db.query(
+                Entity.entity_name,
+                Entity.entity_id,
+                ProcessedNews.sentiment,
+                RawNews.fetched_at
+            ).join(
+                NewsEntityMapping, Entity.entity_id == NewsEntityMapping.entity_id
+            ).join(
+                RawNews, NewsEntityMapping.news_id == RawNews.news_id
+            ).join(
+                ProcessedNews, RawNews.news_id == ProcessedNews.news_id
+            ).filter(
+                and_(
+                    RawNews.fetched_at >= cutoff,
+                    ProcessedNews.sentiment.isnot(None)
+                )
+            ).all()
+        
+        if not results:
+            return html.P("No sentiment data in last 30 days", className="text-muted")
+        
+        # Calculate entity sentiment stats
+        entity_stats = {}
+        for name, entity_id, sentiment_json, _ in results:
+            if name not in entity_stats:
+                entity_stats[name] = {'positive': 0, 'negative': 0, 'neutral': 0, 'total': 0, 'avg': 0}
+            
+            try:
+                sent_dict = sentiment_json if isinstance(sentiment_json, dict) else json.loads(sentiment_json)
+                if 'overall' in sent_dict:
+                    score = sent_dict['overall']
+                    entity_stats[name]['total'] += 1
+                    entity_stats[name]['avg'] += score
+                    
+                    if score > 0.3:
+                        entity_stats[name]['positive'] += 1
+                    elif score < -0.3:
+                        entity_stats[name]['negative'] += 1
+                    else:
+                        entity_stats[name]['neutral'] += 1
+            except:
+                pass
+        
+        # Calculate averages and sort by positive sentiment
+        for name in entity_stats:
+            if entity_stats[name]['total'] > 0:
+                entity_stats[name]['avg'] /= entity_stats[name]['total']
+        
+        # Sort by average sentiment (descending) and positive count
+        sorted_entities = sorted(
+            entity_stats.items(),
+            key=lambda x: (x[1]['avg'], x[1]['positive']),
+            reverse=True
+        )[:10]
+        
+        # Create display
+        rows = []
+        for i, (name, stats) in enumerate(sorted_entities, 1):
+            badge_color = "success" if i <= 3 else "info"
+            rows.append(
+                html.Div([
+                    html.Div([
+                        dbc.Badge(f"#{i}", color=badge_color, className="me-2"),
+                        html.Span(name, className="text-light fw-bold")
+                    ], className="mb-1"),
+                    html.Div([
+                        dbc.Badge(f"{stats['positive']} Positive", color="success", className="me-1"),
+                        dbc.Badge(f"{stats['neutral']} Neutral", color="secondary", className="me-1"),
+                        dbc.Badge(f"{stats['negative']} Negative", color="danger", className="me-1"),
+                        html.Small(f" | Avg: {stats['avg']:.2f}", className="text-muted ms-2")
+                    ])
+                ], className="mb-3 p-2 border-bottom border-secondary")
+            )
+        
+        return html.Div(rows)
+    except Exception as e:
+        import logging
+        logging.error(f"Error getting top positive entities: {e}", exc_info=True)
+        return html.P(f"Error: {str(e)[:50]}", className="text-danger")
+
+
+def get_top_negative_entities(engine):
+    """Get top entities with most negative news in last 30 days"""
+    try:
+        from datetime import datetime, timedelta
+        from sqlalchemy import and_
+        import json
+        
+        with Session(engine) as db:
+            cutoff = datetime.now() - timedelta(days=30)
+            
+            results = db.query(
+                Entity.entity_name,
+                Entity.entity_id,
+                ProcessedNews.sentiment,
+                RawNews.fetched_at
+            ).join(
+                NewsEntityMapping, Entity.entity_id == NewsEntityMapping.entity_id
+            ).join(
+                RawNews, NewsEntityMapping.news_id == RawNews.news_id
+            ).join(
+                ProcessedNews, RawNews.news_id == ProcessedNews.news_id
+            ).filter(
+                and_(
+                    RawNews.fetched_at >= cutoff,
+                    ProcessedNews.sentiment.isnot(None)
+                )
+            ).all()
+        
+        if not results:
+            return html.P("No sentiment data in last 30 days", className="text-muted")
+        
+        # Calculate entity sentiment stats
+        entity_stats = {}
+        for name, entity_id, sentiment_json, _ in results:
+            if name not in entity_stats:
+                entity_stats[name] = {'positive': 0, 'negative': 0, 'neutral': 0, 'total': 0, 'avg': 0}
+            
+            try:
+                sent_dict = sentiment_json if isinstance(sentiment_json, dict) else json.loads(sentiment_json)
+                if 'overall' in sent_dict:
+                    score = sent_dict['overall']
+                    entity_stats[name]['total'] += 1
+                    entity_stats[name]['avg'] += score
+                    
+                    if score > 0.3:
+                        entity_stats[name]['positive'] += 1
+                    elif score < -0.3:
+                        entity_stats[name]['negative'] += 1
+                    else:
+                        entity_stats[name]['neutral'] += 1
+            except:
+                pass
+        
+        # Calculate averages
+        for name in entity_stats:
+            if entity_stats[name]['total'] > 0:
+                entity_stats[name]['avg'] /= entity_stats[name]['total']
+        
+        # Sort by average sentiment (ascending) and negative count
+        sorted_entities = sorted(
+            entity_stats.items(),
+            key=lambda x: (x[1]['avg'], -x[1]['negative']),
+            reverse=False
+        )[:10]
+        
+        # Create display
+        rows = []
+        for i, (name, stats) in enumerate(sorted_entities, 1):
+            badge_color = "danger" if i <= 3 else "warning"
+            rows.append(
+                html.Div([
+                    html.Div([
+                        dbc.Badge(f"#{i}", color=badge_color, className="me-2"),
+                        html.Span(name, className="text-light fw-bold")
+                    ], className="mb-1"),
+                    html.Div([
+                        dbc.Badge(f"{stats['negative']} Negative", color="danger", className="me-1"),
+                        dbc.Badge(f"{stats['neutral']} Neutral", color="secondary", className="me-1"),
+                        dbc.Badge(f"{stats['positive']} Positive", color="success", className="me-1"),
+                        html.Small(f" | Avg: {stats['avg']:.2f}", className="text-muted ms-2")
+                    ])
+                ], className="mb-3 p-2 border-bottom border-secondary")
+            )
+        
+        return html.Div(rows)
+    except Exception as e:
+        import logging
+        logging.error(f"Error getting top negative entities: {e}", exc_info=True)
+        return html.P(f"Error: {str(e)[:50]}", className="text-danger")
+
+
+def get_entity_details_table(engine, search_term=""):
+    """Get detailed entity table with all tracked metrics"""
+    try:
+        import json
+        from sqlalchemy import or_
+        
+        with Session(engine) as db:
+            # Base query
+            query = db.query(
+                Entity.entity_name,
+                Entity.entity_id,
+                Entity.entity_type,
+                Entity.metadata_,
+                func.count(NewsEntityMapping.mapping_id.distinct()).label('mentions'),
+                func.count(ImpactScore.score_id.distinct()).label('impact_count'),
+                func.avg(ImpactScore.impact_score).label('avg_impact')
+            ).outerjoin(
+                NewsEntityMapping, Entity.entity_id == NewsEntityMapping.entity_id
+            ).outerjoin(
+                ImpactScore, Entity.entity_id == ImpactScore.entity_id
+            ).group_by(
+                Entity.entity_name,
+                Entity.entity_id,
+                Entity.entity_type,
+                Entity.metadata_
+            )
+            
+            # Apply search filter
+            if search_term:
+                query = query.filter(
+                    or_(
+                        Entity.entity_name.ilike(f"%{search_term}%"),
+                        Entity.entity_id.ilike(f"%{search_term}%")
+                    )
+                )
+            
+            entities = query.order_by(func.count(NewsEntityMapping.mapping_id).desc()).limit(50).all()
+        
+        if not entities:
+            return html.P("No entities found" if search_term else "No entities tracked yet", className="text-muted text-center")
+        
+        # Build table
+        table_header = [
+            html.Thead(html.Tr([
+                html.Th("Entity", style={"width": "25%"}),
+                html.Th("Type", style={"width": "10%"}),
+                html.Th("ID/Ticker", style={"width": "15%"}),
+                html.Th("Mentions", style={"width": "10%"}),
+                html.Th("Impact Scores", style={"width": "10%"}),
+                html.Th("Avg Impact", style={"width": "15%"}),
+                html.Th("Metadata", style={"width": "15%"})
+            ]))
+        ]
+        
+        table_rows = []
+        for name, entity_id, entity_type, metadata_json, mentions, impact_count, avg_impact in entities:
+            # Parse metadata
+            metadata_display = "—"
+            if metadata_json:
+                try:
+                    meta = metadata_json if isinstance(metadata_json, dict) else json.loads(metadata_json)
+                    metadata_display = ", ".join([f"{k}: {v}" for k, v in list(meta.items())[:2]])
+                except:
+                    pass
+            
+            # Format average impact
+            impact_display = "—"
+            impact_color = "secondary"
+            if avg_impact is not None:
+                impact_display = f"{avg_impact:.2f}"
+                if avg_impact >= 0.7:
+                    impact_color = "danger"
+                elif avg_impact >= 0.4:
+                    impact_color = "warning"
+                else:
+                    impact_color = "info"
+            
+            table_rows.append(html.Tr([
+                html.Td(html.Strong(name, className="text-light")),
+                html.Td(dbc.Badge(entity_type, color="info")),
+                html.Td(html.Code(entity_id, className="text-warning")),
+                html.Td(dbc.Badge(str(mentions), color="primary")),
+                html.Td(dbc.Badge(str(impact_count), color="success")),
+                html.Td(dbc.Badge(impact_display, color=impact_color)),
+                html.Td(html.Small(metadata_display, className="text-muted"))
+            ]))
+        
+        return dbc.Table(
+            table_header + [html.Tbody(table_rows)],
+            striped=True,
+            hover=True,
+            bordered=True,
+            color="dark",
+            responsive=True,
+            size="sm",
+            className="mb-0"
+        )
+    except Exception as e:
+        import logging
+        logging.error(f"Error creating entity details table: {e}", exc_info=True)
+        return html.P(f"Error loading table: {str(e)[:50]}", className="text-danger")
 
 
 def get_news_volume_chart(engine):

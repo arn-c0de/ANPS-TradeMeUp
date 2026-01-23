@@ -693,22 +693,89 @@ def update_statistics_metrics(n):
 
 @app.callback(
     [Output("event-distribution-chart", "figure"),
-     Output("quality-distribution-chart", "figure"),
-     Output("sentiment-distribution-chart", "figure"),
-     Output("impact-distribution-chart", "figure"),
-     Output("top-entities-list", "children"),
-     Output("news-volume-chart", "figure")],
+     Output("quality-distribution-chart", "figure")],
     Input("interval-component", "n_intervals")
 )
 def update_statistics_charts(n):
     """Update statistics charts"""
     event_fig = statistics.get_event_distribution_chart(engine)
     quality_fig = statistics.get_quality_distribution_chart(engine)
-    sentiment_fig = statistics.get_sentiment_distribution_chart(engine)
-    impact_fig = statistics.get_impact_distribution_chart(engine)
-    top_entities = statistics.get_top_entities_list(engine)
-    volume_fig = statistics.get_news_volume_chart(engine)
-    return event_fig, quality_fig, sentiment_fig, impact_fig, top_entities, volume_fig
+    return event_fig, quality_fig
+
+
+@app.callback(
+    Output("sentiment-distribution-chart", "figure"),
+    Input("interval-component", "n_intervals")
+)
+def update_sentiment_chart(n):
+    """Update sentiment distribution chart"""
+    return statistics.get_sentiment_distribution_chart(engine)
+
+
+@app.callback(
+    Output("impact-distribution-chart", "figure"),
+    Input("interval-component", "n_intervals")
+)
+def update_impact_chart(n):
+    """Update impact distribution chart"""
+    return statistics.get_impact_distribution_chart(engine)
+
+
+@app.callback(
+    Output("top-entities-list", "children"),
+    Input("interval-component", "n_intervals")
+)
+def update_top_entities(n):
+    """Update top entities list"""
+    return statistics.get_top_entities_list(engine)
+
+
+@app.callback(
+    Output("news-volume-chart", "figure"),
+    Input("interval-component", "n_intervals")
+)
+def update_news_volume(n):
+    """Update news volume chart"""
+    return statistics.get_news_volume_chart(engine)
+
+
+# NEW: Entity Sentiment Analysis Callbacks
+@app.callback(
+    Output("entity-sentiment-chart", "figure"),
+    [Input("interval-component", "n_intervals"),
+     Input("sentiment-timeframe-selector", "value")]
+)
+def update_entity_sentiment_chart(n, timeframe):
+    """Update entity sentiment chart with timeframe filter"""
+    return statistics.get_entity_sentiment_chart(engine, timeframe)
+
+
+@app.callback(
+    Output("top-positive-entities", "children"),
+    Input("interval-component", "n_intervals")
+)
+def update_top_positive_entities(n):
+    """Update top positive entities"""
+    return statistics.get_top_positive_entities(engine)
+
+
+@app.callback(
+    Output("top-negative-entities", "children"),
+    Input("interval-component", "n_intervals")
+)
+def update_top_negative_entities(n):
+    """Update top negative entities"""
+    return statistics.get_top_negative_entities(engine)
+
+
+@app.callback(
+    Output("entity-details-table", "children"),
+    [Input("interval-component", "n_intervals"),
+     Input("entity-search-input", "value")]
+)
+def update_entity_details_table(n, search_term):
+    """Update entity details table with search"""
+    return statistics.get_entity_details_table(engine, search_term or "")
 
 
 # ============================================================================
