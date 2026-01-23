@@ -1465,6 +1465,213 @@ def update_pipeline_stats(n):
 # CALLBACKS - SETTINGS TAB
 # ============================================================================
 
+# LLM Models by Provider
+LLM_MODELS = {
+    'ollama': [
+        {'label': 'Qwen 3 (8B) - Fast', 'value': 'qwen3:8b'},
+        {'label': 'Llama 3.1 (8B)', 'value': 'llama3.1:8b'},
+        {'label': 'Mistral (7B)', 'value': 'mistral:7b'},
+        {'label': 'Gemma 2 (9B)', 'value': 'gemma2:9b'},
+        {'label': 'Phi-3 (3.8B) - Lightweight', 'value': 'phi3'},
+    ],
+    'openai': [
+        {'label': 'GPT-4o-mini (Recommended)', 'value': 'gpt-4o-mini'},
+        {'label': 'GPT-3.5-turbo', 'value': 'gpt-3.5-turbo'},
+        {'label': 'GPT-4o', 'value': 'gpt-4o'},
+        {'label': 'GPT-4-turbo', 'value': 'gpt-4-turbo'},
+    ],
+    'anthropic': [
+        {'label': 'Claude 3.5 Sonnet (Best)', 'value': 'claude-3-5-sonnet-20241022'},
+        {'label': 'Claude 3 Haiku (Fast)', 'value': 'claude-3-haiku-20240307'},
+        {'label': 'Claude 3 Opus (Powerful)', 'value': 'claude-3-opus-20240229'},
+    ]
+}
+
+
+@app.callback(
+    Output("settings-llm-provider", "value"),
+    Input("tabs", "active_tab"),
+    prevent_initial_call=False
+)
+def load_current_llm_provider(active_tab):
+    """Load current LLM provider from settings"""
+    try:
+        from src.config.settings import settings
+        return settings.llm_provider
+    except:
+        return 'ollama'
+
+
+@app.callback(
+    [Output("settings-llm-model", "options"),
+     Output("settings-llm-model", "value"),
+     Output("llm-provider-settings", "children"),
+     Output("llm-cost-info", "children")],
+    Input("settings-llm-provider", "value"),
+    prevent_initial_call=False
+)
+def update_llm_model_options(provider):
+    """Update available models based on selected provider"""
+    if not provider:
+        return [], None, html.Div(), ""
+
+    # Try to load current model from settings
+    try:
+        from src.config.settings import settings
+        if provider == 'ollama' and hasattr(settings, 'ollama_model'):
+            current_model = settings.ollama_model
+        elif provider == 'openai' and hasattr(settings, 'openai_model'):
+            current_model = settings.openai_model
+        elif provider == 'anthropic' and hasattr(settings, 'anthropic_model'):
+            current_model = settings.anthropic_model
+        else:
+            current_model = None
+    except:
+        current_model = None
+
+    # Get models for provider
+    models = LLM_MODELS.get(provider, [])
+
+    # Use current model if available, otherwise use first model
+    if current_model:
+        default_model = current_model
+    else:
+        default_model = models[0]['value'] if models else None
+
+    # Provider-specific settings (no API keys - those are in environment)
+    if provider == 'ollama':
+        provider_settings = html.Div([
+            html.Small("API URL is configured in .env file", className="text-muted")
+        ])
+        cost_info = html.Div([
+            html.Strong("💡 Local Ollama:"),
+            html.Ul([
+                html.Li("✅ Free (no API costs)"),
+                html.Li("⚡ ~30-60s per article"),
+                html.Li("💡 ~€4-5 electricity per 700 articles (35h)"),
+                html.Li("🖥️ Requires local GPU (8GB+ VRAM recommended)")
+            ])
+        ])
+
+    elif provider == 'openai':
+        provider_settings = html.Div([
+            html.Small("API key is configured in .env file (OPENAI_API_KEY)", className="text-muted")
+        ])
+        cost_info = html.Div([
+            html.Strong("💰 OpenAI Costs (GPT-4o-mini):"),
+            html.Ul([
+                html.Li("📊 ~$0.0005 per article (~€0.0005)"),
+                html.Li("💸 700 articles = ~$0.33 (€0.30)"),
+                html.Li("⚡ ~5-10s per article"),
+                html.Li("🚀 18x faster than local Ollama"),
+                html.Li("✅ No hardware required")
+            ])
+        ])
+
+    elif provider == 'anthropic':
+        provider_settings = html.Div([
+            html.Small("API key is configured in .env file (ANTHROPIC_API_KEY)", className="text-muted")
+        ])
+        cost_info = html.Div([
+            html.Strong("💰 Anthropic Costs (Claude 3.5 Sonnet):"),
+            html.Ul([
+                html.Li("📊 ~$0.003 per article"),
+                html.Li("💸 700 articles = ~$2.10"),
+                html.Li("⚡ ~5-10s per article"),
+                html.Li("🧠 Highest quality analysis"),
+                html.Li("✅ Best at complex reasoning")
+            ])
+        ])
+
+    else:
+        provider_settings = html.Div()
+        cost_info = ""
+
+    return models, default_model, provider_settings, cost_info
+
+
+@app.callback(
+    Output("llm-settings-save-status", "children"),
+    Input("btn-save-llm-settings", "n_clicks"),
+    [State("settings-llm-provider", "value"),
+     State("settings-llm-model", "value")],
+    prevent_initial_call=True
+)
+def save_llm_settings(n_clicks, provider, model):
+    """Save LLM settings to .env.local"""
+    if not n_clicks:
+        return ""
+
+    try:
+        import os
+        from pathlib import Path
+
+        # Path to .env.local
+        env_path = Path(__file__).parent.parent.parent / ".env.local"
+
+        # Read existing .env.local
+        if env_path.exists():
+            with open(env_path, 'r') as f:
+                lines = f.readlines()
+        else:
+            lines = []
+
+        # Update LLM settings
+        new_lines = []
+        updated_provider = False
+        updated_model = False
+
+        for line in lines:
+            if line.startswith('LLM_PROVIDER='):
+                new_lines.append(f'LLM_PROVIDER={provider}\n')
+                updated_provider = True
+            elif provider == 'ollama' and line.startswith('OLLAMA_MODEL='):
+                new_lines.append(f'OLLAMA_MODEL={model}\n')
+                updated_model = True
+            elif provider == 'openai' and line.startswith('OPENAI_MODEL='):
+                new_lines.append(f'OPENAI_MODEL={model}\n')
+                updated_model = True
+            elif provider == 'anthropic' and line.startswith('ANTHROPIC_MODEL='):
+                new_lines.append(f'ANTHROPIC_MODEL={model}\n')
+                updated_model = True
+            else:
+                new_lines.append(line)
+
+        # Add if not found
+        if not updated_provider:
+            new_lines.append(f'LLM_PROVIDER={provider}\n')
+        if not updated_model:
+            if provider == 'ollama':
+                new_lines.append(f'OLLAMA_MODEL={model}\n')
+            elif provider == 'openai':
+                new_lines.append(f'OPENAI_MODEL={model}\n')
+            elif provider == 'anthropic':
+                new_lines.append(f'ANTHROPIC_MODEL={model}\n')
+
+        # Write back
+        with open(env_path, 'w') as f:
+            f.writelines(new_lines)
+
+        return dbc.Alert(
+            [
+                html.Strong("✅ Settings saved!"),
+                html.Br(),
+                html.Small(f"Provider: {provider} | Model: {model}"),
+                html.Br(),
+                html.Small("⚠️ Restart the pipeline for changes to take effect")
+            ],
+            color="success",
+            dismissable=True
+        )
+
+    except Exception as e:
+        return dbc.Alert(
+            f"❌ Error saving settings: {str(e)}",
+            color="danger",
+            dismissable=True
+        )
+
+
 # Open settings tab
 @app.callback(
     Output("tabs", "active_tab"),
