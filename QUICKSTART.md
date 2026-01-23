@@ -126,9 +126,22 @@ Details: [Continuous Pipeline Performance Guide](docs/CONTINUOUS_PIPELINE_PERFOR
 # - 📋 Real-time Server Logs
 # - 📊 Metrics & Statistics
 # - 📰 News Feed
-# - 🎯 Predictions
+# - 🎯 Predictions mit Task Queue
 # - 🎮 Agent Control Panel
+# - ⚡ Task Queue System (verhindert Server-Blockierung)
 ```
+
+### Task Queue System (NEU!)
+
+Das Dashboard verwendet ein modernes Task-Queue-System für alle Server-Aktionen:
+
+- **Automatische Warteschlange**: Mehrere Klicks werden nacheinander abgearbeitet
+- **Keine Server-Blockierung**: Tasks werden asynchron im Hintergrund ausgeführt  
+- **Status-Feedback**: Toast-Benachrichtigungen zeigen Queue-Position und Fortschritt
+- **Priorisierung**: User-initiierte Aktionen haben höchste Priorität
+- **Fehlerbehandlung**: Automatische Wiederholungen bei Fehlern
+
+**Beispiel**: Klickst du 3x auf "Refresh" → alle 3 Tasks werden nacheinander ausgeführt, ohne den Server zu überlasten.
 
 ## API starten
 

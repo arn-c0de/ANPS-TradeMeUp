@@ -21,6 +21,7 @@ import logging
 from src.config.settings import settings
 from src.gui.components import create_navbar
 from src.utils.activity_logger import activity_logger
+from src.gui.utils.task_queue import get_task_queue, add_gui_task
 
 logger = logging.getLogger(__name__)
 
@@ -1065,7 +1066,10 @@ def toggle_prediction_modal(detail_clicks, close_click, refresh_click, is_open, 
 
 @app.callback(
     [Output("refresh-loading-state", "data"),
-     Output("predictions-table", "children", allow_duplicate=True)],
+     Output("predictions-table", "children", allow_duplicate=True),
+     Output("refresh-toast", "is_open", allow_duplicate=True),
+     Output("refresh-toast", "children", allow_duplicate=True),
+     Output("refresh-toast", "icon", allow_duplicate=True)],
     [Input({"type": "pred-refresh-btn", "index": ALL}, "n_clicks")],
     [State({"type": "pred-refresh-btn", "index": ALL}, "id"),
      State("pred-horizon-filter", "value"),
@@ -1077,18 +1081,18 @@ def toggle_prediction_modal(detail_clicks, close_click, refresh_click, is_open, 
     prevent_initial_call=True
 )
 def set_refresh_loading_state(refresh_clicks, button_ids, horizon, entities, start_date, end_date, surprise_filter, min_conf):
-    """Set loading state and show loading UI immediately"""
+    """Add refresh task to queue and show loading UI immediately"""
     from dash import callback_context
     import json
 
     if not callback_context.triggered:
-        return {}, dash.no_update
+        return {}, dash.no_update, False, "", "info"
 
     trigger_id = callback_context.triggered[0]["prop_id"]
     trigger_value = callback_context.triggered[0].get("value")
 
     if trigger_value is None:
-        return {}, dash.no_update
+        return {}, dash.no_update, False, "", "info"
 
     # Extract prediction_id from the clicked button
     if "pred-refresh-btn" in trigger_id and ".n_clicks" in trigger_id:
@@ -1097,7 +1101,25 @@ def set_refresh_loading_state(refresh_clicks, button_ids, horizon, entities, sta
         prediction_id = id_dict.get("index")
 
         if prediction_id:
-            logger.info(f"Setting loading state for prediction: {prediction_id}")
+            logger.info(f"🔄 Adding refresh task for prediction: {prediction_id}")
+
+            # Add task to queue
+            def refresh_task():
+                """Execute the refresh in background"""
+                from src.services.prediction_performance_service import prediction_performance_service
+                return prediction_performance_service.calculate_and_save_performance(engine, prediction_id)
+            
+            # Get queue stats
+            queue_mgr = get_task_queue()
+            queue_stats = queue_mgr.get_queue_stats()
+            queue_size = queue_stats.get('queue_sizes', {}).get('refresh_prediction', 0)
+            
+            # Add task
+            task_id = add_gui_task(
+                task_type="refresh_prediction",
+                function=refresh_task,
+                priority=1
+            )
 
             # Generate table with loading state
             date_range = (start_date, end_date) if start_date or end_date else None
@@ -1108,22 +1130,27 @@ def set_refresh_loading_state(refresh_clicks, button_ids, horizon, entities, sta
                 min_confidence=min_conf or 0,
                 horizon=horizon or '5d',
                 surprise_filter=surprise_filter or 'all',
-                refreshing_prediction_id=prediction_id  # Show loading for this row
+                refreshing_prediction_id=prediction_id
             )
 
-            return {"prediction_id": prediction_id}, table_with_loading
+            # Toast notification about queue
+            toast_msg = f"Task queued (position: {queue_size + 1})" if queue_size > 0 else "Processing..."
+            toast_icon = "info"
 
-    return {}, dash.no_update
+            return {"prediction_id": prediction_id, "task_id": task_id}, table_with_loading, True, toast_msg, toast_icon
+
+    return {}, dash.no_update, False, "", "info"
 
 
 @app.callback(
     [Output("predictions-table", "children", allow_duplicate=True),
-     Output("refresh-toast", "is_open"),
-     Output("refresh-toast", "children"),
-     Output("refresh-toast", "icon"),
+     Output("refresh-toast", "is_open", allow_duplicate=True),
+     Output("refresh-toast", "children", allow_duplicate=True),
+     Output("refresh-toast", "icon", allow_duplicate=True),
      Output("refresh-loading-state", "data", allow_duplicate=True)],
-    [Input("refresh-loading-state", "data")],
-    [State("pred-horizon-filter", "value"),
+    [Input("interval-component", "n_intervals")],
+    [State("refresh-loading-state", "data"),
+     State("pred-horizon-filter", "value"),
      State("pred-entity-filter", "value"),
      State("pred-date-filter", "start_date"),
      State("pred-date-filter", "end_date"),
@@ -1131,120 +1158,58 @@ def set_refresh_loading_state(refresh_clicks, button_ids, horizon, entities, sta
      State("pred-confidence-filter", "value")],
     prevent_initial_call=True
 )
-def refresh_prediction_performance(loading_state, horizon, entities, start_date, end_date, surprise_filter, min_conf):
-    """Load and save performance data for a specific prediction"""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from src.services.prediction_performance_service import prediction_performance_service
-    from src.models.predictions import Prediction
-    from src.models.entities import Entity
-
-    # Check if loading_state has prediction_id
-    if not loading_state or "prediction_id" not in loading_state:
-        logger.info("No prediction_id in loading_state")
-        return dash.no_update, False, "", "info", {}
-
+def refresh_prediction_performance(n_intervals, loading_state, horizon, entities, start_date, end_date, surprise_filter, min_conf):
+    """Check task queue and update UI when tasks complete"""
+    from src.gui.utils.task_queue import TaskStatus
+    
+    # Check if we have an active task
+    if not loading_state or "task_id" not in loading_state:
+        raise dash.exceptions.PreventUpdate
+    
+    task_id = loading_state.get("task_id")
     prediction_id = loading_state.get("prediction_id")
-    logger.info(f"=== REFRESH PERFORMANCE CALLBACK === prediction_id: {prediction_id}")
-
-    if not prediction_id:
-        return dash.no_update, False, "", "info", {}
-
-    # Create DB session
-    db_engine = create_engine(app.server.config.get('DATABASE_URI', 'sqlite:///trademeup.db'))
-    Session = sessionmaker(bind=db_engine)
-    db_session = Session()
-
-    toast_msg = ""
-    toast_icon = "info"
-
-    try:
-        # Load prediction and entity
-        pred = db_session.query(Prediction).filter(
-            Prediction.prediction_id == prediction_id
-        ).first()
-
-        if not pred:
-            logger.error(f"Prediction {prediction_id} not found in database")
-            db_session.close()
-            toast_msg = "❌ Prediction not found"
-            toast_icon = "danger"
-            table = predictions.get_predictions_table(
-                db_engine,
-                entity_filter=None,
-                date_range=None,
-                min_confidence=0,
-                horizon=horizon or '5d',
-                refreshing_prediction_id=None
-            )
-            return table, True, toast_msg, toast_icon, {}
-
-        entity = db_session.query(Entity).filter(
-            Entity.entity_id == pred.entity_id
-        ).first()
-
-        if not entity:
-            logger.error(f"Entity {pred.entity_id} not found for prediction {prediction_id}")
-            db_session.close()
-            toast_msg = "❌ Entity not found"
-            toast_icon = "danger"
-            date_range = (start_date, end_date) if start_date or end_date else None
-            table = predictions.get_predictions_table(
-                db_engine,
-                entity_filter=entities,
-                date_range=date_range,
-                min_confidence=min_conf or 0,
-                horizon=horizon or '5d',
-                surprise_filter=surprise_filter or 'all',
-                refreshing_prediction_id=None
-            )
-            return table, True, toast_msg, toast_icon, {}
-
-        logger.info(f"Loading performance for {entity.entity_id} ({entity.entity_name}), prediction {prediction_id}")
-
-        # Calculate performance
-        perf_data = prediction_performance_service.get_prediction_performance(pred, entity)
-
-        if perf_data:
-            # Save to database
-            prediction_performance_service.save_prediction_performance(
-                prediction_id, perf_data, db_session
-            )
-            logger.info(f"✅ Saved performance for {prediction_id}: {perf_data.get('total_return_pct')}%")
-
-            # Success toast
-            toast_msg = f"✅ {entity.entity_name}: {perf_data.get('total_return_pct'):+.2f}%"
-            toast_icon = "success"
-        else:
-            logger.warning(f"⚠️ Could not calculate performance for {prediction_id} - ticker: {entity.entity_id}")
-
-            # Check if it's an invalid ticker
-            invalid_tickers = ['OTHER', 'UNKNOWN', 'N/A', 'NONE', 'TEST', 'HEALTH', 'TAO']
-            if entity.entity_id.upper() in invalid_tickers:
-                toast_msg = f"⚠️ {entity.entity_name}: No market ticker"
-            else:
-                toast_msg = f"⚠️ {entity.entity_name}: Market data unavailable"
-            toast_icon = "warning"
-
-    except Exception as e:
-        logger.error(f"Error refreshing prediction performance: {e}", exc_info=True)
-        toast_msg = f"❌ Error: {str(e)[:50]}"
-        toast_icon = "danger"
-    finally:
-        db_session.close()
-
-    # Refresh the table with proper parameters (preserve filters)
+    
+    if not task_id or not prediction_id:
+        raise dash.exceptions.PreventUpdate
+    
+    # Check task status
+    queue_mgr = get_task_queue()
+    status = queue_mgr.get_task_status(task_id)
+    
+    # Task not found or still pending/running
+    if status is None or status in [TaskStatus.PENDING, TaskStatus.RUNNING]:
+        raise dash.exceptions.PreventUpdate
+    
+    # Task completed or failed - update UI
     date_range = (start_date, end_date) if start_date or end_date else None
     table = predictions.get_predictions_table(
-        db_engine,
+        engine,
         entity_filter=entities,
         date_range=date_range,
         min_confidence=min_conf or 0,
         horizon=horizon or '5d',
         surprise_filter=surprise_filter or 'all',
-        refreshing_prediction_id=None  # Clear loading state after refresh completes
+        refreshing_prediction_id=None
     )
-
+    
+    toast_msg = ""
+    toast_icon = "info"
+    
+    if status == TaskStatus.COMPLETED:
+        result = queue_mgr.get_task_result(task_id)
+        if result:
+            toast_msg = f"✅ Performance updated: {result.get('total_return_pct', 0):+.2f}%"
+            toast_icon = "success"
+        else:
+            toast_msg = "✅ Performance updated"
+            toast_icon = "success"
+    elif status == TaskStatus.FAILED:
+        toast_msg = "❌ Error updating performance"
+        toast_icon = "danger"
+    elif status == TaskStatus.CANCELLED:
+        toast_msg = "⚠️ Task cancelled"
+        toast_icon = "warning"
+    
     return table, True, toast_msg, toast_icon, {}
 
 
