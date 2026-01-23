@@ -180,7 +180,9 @@ Respond ONLY with JSON."""
         Returns:
             Extraction results
         """
-        # Fetch article
+        from src.models.processed_news import ProcessedNews
+
+        # Fetch article (prefer processed version with richer content)
         article = self.db.query(RawNews).filter(
             RawNews.news_id == news_id
         ).first()
@@ -188,10 +190,27 @@ Respond ONLY with JSON."""
         if not article:
             raise ValueError(f"Article {news_id} not found")
 
+        # Try to get processed version for richer content
+        processed = self.db.query(ProcessedNews).filter(
+            ProcessedNews.news_id == news_id
+        ).first()
+
+        # Build content from available sources
+        if processed and processed.key_facts:
+            # Use key facts from processed article (much richer content)
+            facts_text = "\n".join([
+                f.get('fact', '') if isinstance(f, dict) else str(f)
+                for f in processed.key_facts[:10]  # Use top 10 facts
+            ])
+            content = f"{article.title}\n\n{facts_text}"
+        else:
+            # Fallback to raw text (might be short)
+            content = f"{article.title}\n\n{article.full_text}"
+
         # Prepare prompt
         prompt = self.prompt_template.format(
             title=article.title,
-            content=article.full_text[:3000]  # Limit length
+            content=content[:3000]  # Limit length
         )
 
         try:
