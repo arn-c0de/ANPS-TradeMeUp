@@ -5,8 +5,8 @@ An advanced AI-powered system that transforms unstructured financial news into p
 ## 🎯 Project Status
 
 **Current Phase:** Phase 1 - MVP Core Development 🚀
-**Progress:** 8 of 17 Agents Implemented (47%)
-**Next Milestone:** Complete remaining MVP agents & API
+**Progress:** 16 of 17 Agents Implemented (94%)
+**Next Milestone:** Finalize remaining integrations, populate DB with pipeline data, and production hardening
 
 ### Implementation Progress
 - ✅ Project structure & infrastructure setup
@@ -14,22 +14,34 @@ An advanced AI-powered system that transforms unstructured financial news into p
 - ✅ **TIER 1: Data Ingestion** (2/2 agents) ✅
   - Agent 1: Feed & Data Ingestion
   - Agent 1.5: Data Quality
-- ✅ **TIER 2: Understanding** (2/3 agents) ✅
+- ✅ **TIER 2: Understanding** (3/3 agents) ✅
   - Agent 2: Content Understanding (LLM)
+  - Agent 2.5: Fact Verification
   - Agent 3: Entity & Sector Mapping
-- ✅ **TIER 3: Analysis** (3/5 agents) ✅
+- ✅ **TIER 3: Analysis** (5/5 agents) ✅
   - Agent 4: Impact & Relevance Scoring
   - Agent 4.5: Surprise Quantification
   - Agent 5: Market Regime Detection
-- ✅ **TIER 4: Prediction** (1/4 agents) ✅
+  - Agent 5.5: Signal Decay Modeling
+  - Agent 5.6: Correlation Analysis
+- ✅ **TIER 4: Prediction** (4/4 agents) ✅
   - Agent 6: Market Prediction & Ensemble (XGBoost baseline)
-- ⚠️ **TIER 6: Learning** (1/3 agents) - Partial
+  - Agent 6.5: Confidence Calibration
+  - Agent 7: Meta-Strategy
+  - Agent 7.5: Scenario Generation
+- ⚠️ **TIER 6: Learning** (2/3 agents) - Partial
   - Agent 12: Backtesting & Learning (basic)
+  - Agent 12.5: Model Performance Monitor (basic)
 - ✅ **Pipeline Orchestration** - Continuous & One-Shot modes
 - ✅ **FastAPI Backend** - Basic endpoints
-- ✅ **GUI Dashboard** - Dash with 10 tabs
-- ⬜ Remaining 9 agents (Phase 2 & 3)
+- ✅ **GUI Dashboard** - Dash with improved error handling and full agent support
+- ⬜ Remaining agents: Risk & Execution and Observability features (Phase 3)
 - ⬜ Advanced features & production hardening
+
+**Recent Updates:**
+- **GUI:** Added support for new agents, user-friendly empty states, and central error handling module (`src/gui/error_handling.py`).
+- **Tests:** Added `tests/test_agent_init.py` to verify agent initialization; run with `python tests/test_agent_init.py` or `pytest`.
+- **Database:** Alembic migrations applied; use `alembic upgrade head` if needed.
 
 ## 🏗️ Architecture
 
@@ -367,6 +379,6 @@ pytest --cov=src tests/
 ---
 
 **Last Updated:** January 23, 2026  
-**Version:** 0.5.0 (MVP Core - 8 Agents)  
+**Version:** 0.6.0 (MVP - 16 Agents)  
 **Status:** Production-Ready Pipeline, GUI Dashboard Operational  
 **Next Release:** v0.6.0 - Advanced Analysis Agents (Phase 2)
