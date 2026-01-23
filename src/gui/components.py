@@ -36,6 +36,14 @@ def create_navbar():
                 dbc.Col([
                     dbc.ButtonGroup([
                         dbc.Button(
+                            [html.I(className="bi bi-download me-2"), "Fetch RSS"],
+                            id="btn-fetch-rss-only",
+                            color="info",
+                            size="sm",
+                            className="me-2",
+                            title="Fetch news from RSS feeds only (no AI analysis)"
+                        ),
+                        dbc.Button(
                             [html.I(className="bi bi-play-fill me-2"), "Start Auto"],
                             id="btn-start-continuous",
                             color="success",

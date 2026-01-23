@@ -414,16 +414,16 @@ class ContinuousPipeline:
             logger.info(f"Fact Verification: {fact_results}")
 
             # Phase 13: Confidence Calibration (for predictions)
-            # TODO: Refactor when needed (mainly read-only)
+            # ✅ REFACTORED: Uses scoped sessions internally
             activity_logger.log_phase(13, "Confidence Calibration")
-            calibrator = ConfidenceCalibrationAgent(self.db)
+            calibrator = ConfidenceCalibrationAgent()  # ✅ No db parameter!
             calibration_stats = calibrator.get_statistics()
             logger.info(f"Calibration: {calibration_stats}")
 
             # Phase 14: Meta-Strategy (Ensemble Predictions)
-            # TODO: Refactor when needed (mainly read-only)
+            # ✅ REFACTORED: Uses scoped sessions internally
             activity_logger.log_phase(14, "Meta-Strategy Ensemble")
-            meta_strategy = MetaStrategyAgent(self.db)
+            meta_strategy = MetaStrategyAgent()  # ✅ No db parameter!
             # Get entities that have multiple predictions for ensemble
             ensemble_results = meta_strategy.get_statistics()
             logger.info(f"Meta-Strategy: {ensemble_results}")

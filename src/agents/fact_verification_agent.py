@@ -43,8 +43,12 @@ class FactVerificationAgent:
         Returns:
             FactVerification object (not yet committed)
         """
-        # Fetch processed article
-        article = db.query(ProcessedNews).filter(
+        from sqlalchemy.orm import joinedload
+        
+        # Fetch processed article with news relationship loaded
+        article = db.query(ProcessedNews).options(
+            joinedload(ProcessedNews.news)
+        ).filter(
             ProcessedNews.news_id == news_id
         ).first()
 
@@ -125,10 +129,15 @@ class FactVerificationAgent:
             f"- {f.get('fact', '') if isinstance(f, dict) else str(f)}"
             for f in (article.key_facts or [])[:10]
         ])
+        
+        # Get title from news relationship (correct name in model)
+        article_title = 'N/A'
+        if hasattr(article, 'news') and article.news:
+            article_title = article.news.title
 
         prompt = f"""Verify the factual accuracy of claims in this financial news article:
 
-Article Title: {article.raw_news.title if article.raw_news else 'N/A'}
+Article Title: {article_title}"
 
 Key Facts Claimed:
 {facts_text}

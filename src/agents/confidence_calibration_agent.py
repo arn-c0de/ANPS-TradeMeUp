@@ -7,6 +7,7 @@ from sqlalchemy import func
 import numpy as np
 
 from src.models.predictions import Prediction, PredictionOutcome
+from src.models.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,13 @@ class ConfidenceCalibrationAgent:
     - Track calibration metrics
     """
 
-    def __init__(self, db: Session):
-        """Initialize confidence calibration agent."""
-        self.db = db
+    def __init__(self):
+        """
+        Initialize confidence calibration agent.
+        
+        Note: Uses scoped sessions internally for better isolation.
+        """
+        pass
 
     def calculate_calibration_error(self, lookback_days: int = 30) -> Dict:
         """
@@ -36,71 +41,78 @@ class ConfidenceCalibrationAgent:
         Returns:
             Calibration metrics
         """
-        cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+        db = SessionLocal()
+        try:
+            cutoff = datetime.utcnow() - timedelta(days=lookback_days)
 
-        # Fetch predictions with outcomes
-        predictions = self.db.query(Prediction).join(
-            PredictionOutcome,
-            Prediction.prediction_id == PredictionOutcome.prediction_id
-        ).filter(
-            Prediction.created_at >= cutoff
-        ).all()
+            # Fetch predictions with outcomes
+            predictions = db.query(Prediction).join(
+                PredictionOutcome,
+                Prediction.prediction_id == PredictionOutcome.prediction_id
+            ).filter(
+                Prediction.created_at >= cutoff
+            ).all()
 
-        if len(predictions) < 10:
-            logger.warning("Insufficient predictions for calibration")
-            return {'error': 'insufficient_data'}
+            if len(predictions) < 10:
+                logger.warning("Insufficient predictions for calibration")
+                return {'error': 'insufficient_data'}
 
-        # Bin predictions by confidence
-        bins = [0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-        bin_counts = {i: [] for i in range(len(bins) - 1)}
-        bin_accuracies = {i: [] for i in range(len(bins) - 1)}
+            # Bin predictions by confidence
+            bins = [0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+            bin_counts = {i: [] for i in range(len(bins) - 1)}
+            bin_accuracies = {i: [] for i in range(len(bins) - 1)}
 
-        for pred in predictions:
-            confidence = pred.confidence
-            outcome = self.db.query(PredictionOutcome).filter(
-                PredictionOutcome.prediction_id == pred.prediction_id
-            ).first()
+            for pred in predictions:
+                confidence = pred.confidence
+                outcome = db.query(PredictionOutcome).filter(
+                    PredictionOutcome.prediction_id == pred.prediction_id
+                ).first()
 
-            if not outcome:
-                continue
+                if not outcome:
+                    continue
 
-            # Determine if prediction was correct
-            was_correct = self._check_prediction_accuracy(pred, outcome)
+                # Determine if prediction was correct
+                was_correct = self._check_prediction_accuracy(pred, outcome)
 
-            # Find bin
+                # Find bin
+                for i in range(len(bins) - 1):
+                    if bins[i] <= confidence < bins[i + 1]:
+                        bin_counts[i].append(confidence)
+                        bin_accuracies[i].append(1 if was_correct else 0)
+                        break
+
+            # Calculate ECE
+            total_samples = sum(len(v) for v in bin_counts.values())
+            ece = 0.0
+
+            calibration_data = []
+
             for i in range(len(bins) - 1):
-                if bins[i] <= confidence < bins[i + 1]:
-                    bin_counts[i].append(confidence)
-                    bin_accuracies[i].append(1 if was_correct else 0)
-                    break
+                if len(bin_counts[i]) > 0:
+                    avg_confidence = np.mean(bin_counts[i])
+                    avg_accuracy = np.mean(bin_accuracies[i])
+                    bin_weight = len(bin_counts[i]) / total_samples
 
-        # Calculate ECE
-        total_samples = sum(len(v) for v in bin_counts.values())
-        ece = 0.0
+                    ece += bin_weight * abs(avg_confidence - avg_accuracy)
 
-        calibration_data = []
+                    calibration_data.append({
+                        'bin': f"{bins[i]:.1f}-{bins[i+1]:.1f}",
+                        'avg_confidence': float(avg_confidence),
+                        'avg_accuracy': float(avg_accuracy),
+                        'sample_count': len(bin_counts[i]),
+                        'calibration_error': float(abs(avg_confidence - avg_accuracy))
+                    })
 
-        for i in range(len(bins) - 1):
-            if len(bin_counts[i]) > 0:
-                avg_confidence = np.mean(bin_counts[i])
-                avg_accuracy = np.mean(bin_accuracies[i])
-                bin_weight = len(bin_counts[i]) / total_samples
-
-                ece += bin_weight * abs(avg_confidence - avg_accuracy)
-
-                calibration_data.append({
-                    'bin': f"{bins[i]:.1f}-{bins[i+1]:.1f}",
-                    'avg_confidence': float(avg_confidence),
-                    'avg_accuracy': float(avg_accuracy),
-                    'sample_count': len(bin_counts[i]),
-                    'calibration_error': float(abs(avg_confidence - avg_accuracy))
-                })
-
-        return {
-            'expected_calibration_error': float(ece),
-            'total_predictions': total_samples,
-            'by_bin': calibration_data
-        }
+            return {
+                'expected_calibration_error': float(ece),
+                'total_predictions': total_samples,
+                'by_bin': calibration_data
+            }
+        except Exception as e:
+            logger.error(f"Error calculating calibration error: {e}")
+            return {'error': str(e)}
+        finally:
+            db.close()
 
     def _check_prediction_accuracy(self, prediction: Prediction, outcome: PredictionOutcome) -> bool:
         """Check if prediction was accurate."""
@@ -158,47 +170,55 @@ class ConfidenceCalibrationAgent:
         Returns:
             Statistics
         """
-        # Get recent predictions
-        predictions = self.db.query(Prediction).order_by(
-            Prediction.created_at.desc()
-        ).limit(limit).all()
+        db = SessionLocal()
+        try:
+            # Get recent predictions
+            predictions = db.query(Prediction).order_by(
+                Prediction.created_at.desc()
+            ).limit(limit).all()
 
-        logger.info(f"Recalibrating {len(predictions)} predictions")
+            logger.info(f"Recalibrating {len(predictions)} predictions")
 
-        stats = {
-            'processed': 0,
-            'avg_raw_confidence': 0.0,
-            'avg_calibrated_confidence': 0.0,
-            'errors': 0
-        }
+            stats = {
+                'processed': 0,
+                'avg_raw_confidence': 0.0,
+                'avg_calibrated_confidence': 0.0,
+                'errors': 0
+            }
 
-        raw_confidences = []
-        calibrated_confidences = []
+            raw_confidences = []
+            calibrated_confidences = []
 
-        for pred in predictions:
-            try:
-                raw_conf = pred.confidence
-                calibrated_conf = self.calibrate_confidence(raw_conf, pred.model_id)
+            for pred in predictions:
+                try:
+                    raw_conf = pred.confidence
+                    calibrated_conf = self.calibrate_confidence(raw_conf, pred.model_id)
 
-                raw_confidences.append(raw_conf)
-                calibrated_confidences.append(calibrated_conf)
+                    raw_confidences.append(raw_conf)
+                    calibrated_confidences.append(calibrated_conf)
 
-                # Update prediction with calibrated confidence
-                pred.calibrated_confidence = calibrated_conf
-                stats['processed'] += 1
+                    # Update prediction with calibrated confidence
+                    pred.calibrated_confidence = calibrated_conf
+                    stats['processed'] += 1
 
-            except Exception as e:
-                stats['errors'] += 1
-                logger.error(f"Error calibrating prediction {pred.prediction_id}: {e}")
+                except Exception as e:
+                    stats['errors'] += 1
+                    logger.error(f"Error calibrating prediction {pred.prediction_id}: {e}")
 
-        self.db.commit()
+            db.commit()
 
-        if raw_confidences:
-            stats['avg_raw_confidence'] = float(np.mean(raw_confidences))
-            stats['avg_calibrated_confidence'] = float(np.mean(calibrated_confidences))
+            if raw_confidences:
+                stats['avg_raw_confidence'] = float(np.mean(raw_confidences))
+                stats['avg_calibrated_confidence'] = float(np.mean(calibrated_confidences))
 
-        logger.info(f"Confidence calibration complete. Stats: {stats}")
-        return stats
+            logger.info(f"Confidence calibration complete. Stats: {stats}")
+            return stats
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error in process_batch: {e}")
+            return {'processed': 0, 'errors': 1, 'error': str(e)}
+        finally:
+            db.close()
 
     def get_statistics(self) -> Dict:
         """Get calibration statistics."""

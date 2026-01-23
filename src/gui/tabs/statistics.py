@@ -234,6 +234,27 @@ def create_layout():
             ])
         ], id="stock-predictions-modal", size="xl", scrollable=True),
         
+        # Toast notification for missing predictions
+        dbc.Toast(
+            "No prediction found for this news article. The prediction may not have been created yet.",
+            id="no-prediction-toast",
+            header="⚠️ No Prediction Found",
+            is_open=False,
+            dismissable=True,
+            icon="warning",
+            duration=4000,
+            style={
+                "position": "fixed",
+                "top": 66,
+                "right": 10,
+                "width": 350,
+                "zIndex": 9999,
+                "backgroundColor": "#1e1e1e",
+                "border": "1px solid #ffc107",
+                "boxShadow": "0 4px 8px rgba(0,0,0,0.3)"
+            }
+        ),
+        
         # Store for selected entity
         dcc.Store(id="selected-entity-store", data=None),
         
@@ -1448,11 +1469,13 @@ def get_entity_full_details(engine, entity_name):
                                     className="text-decoration-none"
                                 ),
                                 dbc.Button(
-                                    "📊",
+                                    ["📊 Prediction"],
                                     id={"type": "news-pred-detail-btn", "index": str(mapping.news_id)},
                                     size="sm",
                                     color="primary",
-                                    style={"fontSize": "0.7rem", "padding": "0.2rem 0.4rem"}
+                                    outline=True,
+                                    className="ms-2",
+                                    title="View prediction details for this news"
                                 )
                             ], className="d-flex justify-content-between align-items-start mb-2"),
                             html.Div([

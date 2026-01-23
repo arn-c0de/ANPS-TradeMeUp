@@ -89,8 +89,7 @@ def test_confidence_calibration():
     logger.info("Testing Agent 6.5: Confidence Calibration Agent")
     logger.info("="*80)
 
-    db = next(get_db())
-    agent = ConfidenceCalibrationAgent(db)
+    agent = ConfidenceCalibrationAgent()
 
     # Test statistics
     stats = agent.get_statistics()
@@ -111,8 +110,7 @@ def test_meta_strategy():
     logger.info("Testing Agent 7: Meta-Strategy Agent")
     logger.info("="*80)
 
-    db = next(get_db())
-    agent = MetaStrategyAgent(db)
+    agent = MetaStrategyAgent()
 
     # Test statistics
     stats = agent.get_statistics()

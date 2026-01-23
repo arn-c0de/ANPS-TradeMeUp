@@ -9,14 +9,16 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 
-def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "") -> go.Figure:
+def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", show_volume: bool = True, show_ma: bool = False) -> go.Figure:
     """
-    Create a candlestick chart with volume
+    Create a candlestick chart with optional volume and indicators
     
     Args:
         df: DataFrame with OHLCV data
         symbol: Stock ticker symbol
         title: Chart title
+        show_volume: Show volume subplot
+        show_ma: Show moving averages (20, 50)
         
     Returns:
         Plotly Figure
@@ -24,69 +26,114 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "") -> 
     if df is None or df.empty:
         return create_empty_chart("No data available")
     
-    # Create subplots: candlestick + volume
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.03,
-        subplot_titles=(title or f'{symbol} Price', 'Volume'),
-        row_heights=[0.7, 0.3]
-    )
+    # Create subplots based on options
+    if show_volume:
+        fig = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.02,
+            subplot_titles=(title or f'{symbol} Price', 'Volume'),
+            row_heights=[0.75, 0.25]
+        )
+        volume_row = 2
+    else:
+        fig = go.Figure()
+        volume_row = None
     
     # Candlestick chart
-    fig.add_trace(
-        go.Candlestick(
-            x=df.index,
-            open=df['Open'],
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close'],
-            name='Price',
-            increasing_line_color='#00ff88',
-            decreasing_line_color='#ff4444'
-        ),
-        row=1, col=1
+    candlestick = go.Candlestick(
+        x=df.index,
+        open=df['Open'],
+        high=df['High'],
+        low=df['Low'],
+        close=df['Close'],
+        name='Price',
+        increasing_line_color='#00ff88',
+        decreasing_line_color='#ff4444',
+        increasing_fillcolor='rgba(0, 255, 136, 0.3)',
+        decreasing_fillcolor='rgba(255, 68, 68, 0.3)'
     )
+    
+    if show_volume:
+        fig.add_trace(candlestick, row=1, col=1)
+    else:
+        fig.add_trace(candlestick)
+    
+    # Add moving averages if requested
+    if show_ma and len(df) >= 50:
+        ma20 = df['Close'].rolling(window=20).mean()
+        ma50 = df['Close'].rolling(window=50).mean()
+        
+        ma20_trace = go.Scatter(
+            x=df.index,
+            y=ma20,
+            name='MA 20',
+            line=dict(color='#ffa500', width=1.5),
+            opacity=0.7
+        )
+        ma50_trace = go.Scatter(
+            x=df.index,
+            y=ma50,
+            name='MA 50',
+            line=dict(color='#00bfff', width=1.5),
+            opacity=0.7
+        )
+        
+        if show_volume:
+            fig.add_trace(ma20_trace, row=1, col=1)
+            fig.add_trace(ma50_trace, row=1, col=1)
+        else:
+            fig.add_trace(ma20_trace)
+            fig.add_trace(ma50_trace)
     
     # Volume bars
-    colors = ['#00ff88' if close >= open_ else '#ff4444' 
-              for close, open_ in zip(df['Close'], df['Open'])]
+    if show_volume:
+        colors = ['#00ff88' if close >= open_ else '#ff4444' 
+                  for close, open_ in zip(df['Close'], df['Open'])]
+        
+        fig.add_trace(
+            go.Bar(
+                x=df.index,
+                y=df['Volume'],
+                name='Volume',
+                marker_color=colors,
+                showlegend=False,
+                opacity=0.7
+            ),
+            row=volume_row, col=1
+        )
     
-    fig.add_trace(
-        go.Bar(
-            x=df.index,
-            y=df['Volume'],
-            name='Volume',
-            marker_color=colors,
-            showlegend=False
-        ),
-        row=2, col=1
-    )
-    
-    # Update layout
+    # Update layout with modern styling
     fig.update_layout(
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(10,10,10,1)',
         xaxis_rangeslider_visible=False,
-        height=None,  # Allow dynamic height
-        autosize=True,
-        margin=dict(l=50, r=50, t=50, b=50),
+        height=None,  # Auto height
+        autosize=True,  # Enable autosizing
+        margin=dict(l=40, r=15, t=15, b=5, autoexpand=True),
         hovermode='x unified',
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
+        hoverlabel=dict(
+            bgcolor="rgba(30, 30, 30, 0.95)",
+            font_size=13,
+            font_family="monospace"
+        ),
+        showlegend=False,  # Hide legend completely
+        font=dict(
+            family="Arial, sans-serif",
+            size=12,
+            color="#e0e0e0"
+        ),
+        uirevision='constant'  # Maintain UI state on resize
     )
     
-    # Update axes
+    # Update axes - hide x-axis labels, show only in hover
     fig.update_xaxes(
         gridcolor='#333',
         showgrid=True,
-        zeroline=False
+        zeroline=False,
+        type='category',  # Uniform spacing between all data points
+        showticklabels=False  # Hide timestamp labels on x-axis
     )
     
     fig.update_yaxes(
