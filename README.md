@@ -40,7 +40,7 @@ TradeMeUp is an MVP-grade pipeline that ingests news, extracts events/entities u
 ## Quick Start (3 steps) ⚡
 1. Clone:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/arn-c0de/TradeMeUp.git
    cd TradeMeUp
    ```
 2. Create an environment file and add API keys:
@@ -131,11 +131,22 @@ Please follow the development workflow in `CONTRIBUTING.md` (add if missing).
 
 ---
 
-## Contact & License
-- Add maintainers and contact info here.
-- Add license information.
+## Security
+If you discover a security vulnerability, please do not file a public issue. Report it by email to `arn-c0de@protonmail.com` or via GitHub Security Advisories at `https://github.com/arn-c0de/TradeMeUp/security`. Include steps to reproduce, affected versions, and an assessment of potential impact where possible. The maintainer will acknowledge receipt within 3 business days.
+
+---
+
+## License
+Copyright (c) 2026 arn-c0de. All rights reserved.
+
+Maintainer: `arn-c0de` (<arn-c0de@protonmail.com>)
+Repository: `https://github.com/arn-c0de/TradeMeUp`
+
+This is proprietary software. Unauthorized use, copying, modification, or distribution is strictly prohibited. See [LICENSE](LICENSE) for details.
 
 ---
 
 **Last Updated:** January 23, 2026
-**Version:** 0.6.0
+**Version:** 1.0.2
+
+Developer note: When updating the project version, please also update the `VERSION` constant in `src/config/settings.py` so the GUI and documentation reflect the correct version.

@@ -4,6 +4,9 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 
+# Application Version
+VERSION = "1.0.2"
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
