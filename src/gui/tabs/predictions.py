@@ -13,7 +13,7 @@ from src.models.predictions import Prediction
 from src.models.entities import Entity
 from src.models.raw_news import RawNews
 from src.models.processed_news import ProcessedNews
-from src.models.analysis import ImpactScore
+from src.models.analysis import ImpactScore, SurpriseScore, FactVerification
 
 
 def create_layout():

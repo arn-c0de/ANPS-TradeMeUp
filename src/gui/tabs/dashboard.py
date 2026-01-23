@@ -14,7 +14,7 @@ from src.models.raw_news import RawNews
 from src.models.data_quality import DataQualityScore
 from src.models.processed_news import ProcessedNews
 from src.models.predictions import Prediction
-from src.models.analysis import MarketRegime
+from src.models.analysis import MarketRegime, SurpriseScore, FactVerification
 from src.gui.components import create_metric_card
 
 
@@ -102,6 +102,8 @@ def get_metrics(engine):
             total_news = db.query(func.count(RawNews.news_id)).scalar() or 0
             total_processed = db.query(func.count(ProcessedNews.news_id)).scalar() or 0
             total_predictions = db.query(func.count(Prediction.prediction_id)).scalar() or 0
+            total_surprises = db.query(func.count(SurpriseScore.surprise_id)).scalar() or 0
+            total_fact_checks = db.query(func.count(FactVerification.verification_id)).scalar() or 0
             
             avg_quality = db.query(func.avg(DataQualityScore.quality_score)).scalar()
             avg_quality = round(avg_quality, 2) if avg_quality else 0
@@ -110,19 +112,74 @@ def get_metrics(engine):
                 RawNews.fetched_at >= datetime.now() - timedelta(hours=24)
             ).scalar() or 0
         
-        return dbc.Row([
-            dbc.Col([
-                create_metric_card("Total Articles", f"{total_news:,}", "in database", "📰")
-            ], width=3),
-            dbc.Col([
-                create_metric_card("LLM Processed", f"{total_processed:,}", "articles analyzed", "🧠", "success")
-            ], width=3),
-            dbc.Col([
-                create_metric_card("Avg Quality", f"{avg_quality:.2f}", "out of 1.0", "⭐", "warning")
-            ], width=3),
-            dbc.Col([
-                create_metric_card("Last 24h", f"+{recent_news}", "new articles", "🔥", "danger")
-            ], width=3)
+        # Show different layout depending on whether data exists
+        if total_news == 0:
+            return dbc.Row([
+                dbc.Col([
+                    dbc.Alert([
+                        html.H4("🚀 Willkommen bei TradeMeUp!", className="alert-heading"),
+                        html.Hr(),
+                        html.P("Die Datenbank ist leer. Starte die Pipeline um Daten zu sammeln:", className="mb-3"),
+                        html.Ul([
+                            html.Li([html.Strong("Option 1:"), " Gehe zum 🎮 Agent Control Tab und klicke 'Run Full Pipeline'"]),
+                            html.Li([html.Strong("Option 2:"), " Führe aus: ", html.Code("python scripts/run_mvp_pipeline.py")]),
+                            html.Li([html.Strong("Option 3:"), " Quick Test: ", html.Code("python scripts/run_ingestion.py")])
+                        ]),
+                        html.P(["📖 Mehr Info: ", html.A("QUICKSTART.md", href="#", className="alert-link")], className="mb-0")
+                    ], color="info", className="shadow")
+                ], width=12)
+            ])
+        
+        return html.Div([
+            dbc.Row([
+                dbc.Col([
+                    create_metric_card("Total Articles", f"{total_news:,}", "in database", "📰")
+                ], width=3),
+                dbc.Col([
+                    create_metric_card("LLM Processed", f"{total_processed:,}", "articles analyzed", "🧠", "success")
+                ], width=3),
+                dbc.Col([
+                    create_metric_card("Avg Quality", f"{avg_quality:.2f}", "out of 1.0", "⭐", "warning")
+                ], width=3),
+                dbc.Col([
+                    create_metric_card("Last 24h", f"+{recent_news}", "new articles", "🔥", "danger")
+                ], width=3)
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div([
+                                html.Span("🎯 ", style={"fontSize": "20px"}),
+                                html.Strong(f"{total_surprises:,}", className="text-warning me-2"),
+                                html.Small("Surprise Scores", className="text-muted")
+                            ])
+                        ])
+                    ], className="bg-dark border-warning")
+                ], width=4),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div([
+                                html.Span("✅ ", style={"fontSize": "20px"}),
+                                html.Strong(f"{total_fact_checks:,}", className="text-success me-2"),
+                                html.Small("Fact Checks", className="text-muted")
+                            ])
+                        ])
+                    ], className="bg-dark border-success")
+                ], width=4),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div([
+                                html.Span("🔮 ", style={"fontSize": "20px"}),
+                                html.Strong(f"{total_predictions:,}", className="text-info me-2"),
+                                html.Small("Predictions", className="text-muted")
+                            ])
+                        ])
+                    ], className="bg-dark border-info")
+                ], width=4)
+            ])
         ])
     except Exception as e:
         return dbc.Row([

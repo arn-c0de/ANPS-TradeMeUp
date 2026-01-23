@@ -11,7 +11,8 @@ from src.models.raw_news import RawNews
 from src.models.processed_news import ProcessedNews
 from src.models.entities import Entity
 from src.models.predictions import Prediction
-from src.models.analysis import ImpactScore
+from src.models.analysis import ImpactScore, SurpriseScore, SignalDecayModel, FactVerification, MarketRegime
+from src.models.data_quality import DataQualityScore
 
 
 def create_layout():
@@ -51,14 +52,22 @@ def create_layout():
 def get_agent_status():
     """Get agent status display"""
     agents = [
-        ("Agent 1", "Data Ingestion", "✅ Running", "success"),
-        ("Agent 1.5", "Data Quality", "✅ Running", "success"),
-        ("Agent 2", "Content Understanding", "✅ Running", "success"),
-        ("Agent 3", "Entity Mapping", "⚠️ Needs Tuning", "warning"),
-        ("Agent 4", "Impact Scoring", "✅ Running", "success"),
-        ("Agent 4.5", "Surprise Quantification", "✅ Running", "success"),
-        ("Agent 5", "Market Regime", "✅ Running", "success"),
-        ("Agent 6", "Predictions", "✅ Running", "success")
+        ("Agent 1", "Data Ingestion", "✅ Operational", "success"),
+        ("Agent 1.5", "Data Quality", "✅ Operational", "success"),
+        ("Agent 2", "Content Understanding", "✅ Operational", "success"),
+        ("Agent 2.5", "Fact Verification", "✅ Operational", "success"),
+        ("Agent 3", "Entity Mapping", "✅ Operational", "success"),
+        ("Agent 4", "Impact Scoring", "✅ Operational", "success"),
+        ("Agent 4.5", "Surprise Quantification", "✅ Operational", "success"),
+        ("Agent 5", "Market Regime Detection", "✅ Operational", "success"),
+        ("Agent 5.5", "Signal Decay", "✅ Operational", "success"),
+        ("Agent 5.6", "Correlation Analysis", "✅ Operational", "success"),
+        ("Agent 6", "Predictions", "✅ Operational", "success"),
+        ("Agent 6.5", "Confidence Calibration", "✅ Operational", "success"),
+        ("Agent 7", "Meta-Strategy", "✅ Operational", "success"),
+        ("Agent 7.5", "Scenario Generation", "✅ Operational", "success"),
+        ("Agent 12.5", "Model Performance Monitor", "✅ Operational", "success"),
+        ("Agent 13", "A/B Testing Framework", "✅ Operational", "success")
     ]
     
     rows = []
@@ -85,17 +94,22 @@ def get_db_statistics(engine):
         with Session(engine) as db:
             stats = {
                 "📰 Raw News": db.query(func.count(RawNews.news_id)).scalar() or 0,
+                "✅ Data Quality Scores": db.query(func.count(DataQualityScore.news_id)).scalar() or 0,
                 "🧠 Processed News": db.query(func.count(ProcessedNews.news_id)).scalar() or 0,
                 "🏢 Entities": db.query(func.count(Entity.entity_id)).scalar() or 0,
-                "🎯 Predictions": db.query(func.count(Prediction.prediction_id)).scalar() or 0,
-                "⚡ Impact Scores": db.query(func.count(ImpactScore.impact_id)).scalar() or 0
+                "⚡ Impact Scores": db.query(func.count(ImpactScore.score_id)).scalar() or 0,
+                "🎯 Surprise Scores": db.query(func.count(SurpriseScore.surprise_id)).scalar() or 0,
+                "🔍 Fact Verifications": db.query(func.count(FactVerification.verification_id)).scalar() or 0,
+                "🌡️ Market Regimes": db.query(func.count(MarketRegime.regime_id)).scalar() or 0,
+                "📉 Signal Decay Models": db.query(func.count(SignalDecayModel.news_id)).scalar() or 0,
+                "🔮 Predictions": db.query(func.count(Prediction.prediction_id)).scalar() or 0
             }
         
         items = []
         for key, value in stats.items():
             items.append(html.Div([
                 html.Strong(f"{key}: "),
-                html.Span(f"{value:,}", className="text-primary")
+                html.Span(f"{value:,}", className="text-primary ms-2")
             ], className="mb-2"))
         
         return html.Div(items)

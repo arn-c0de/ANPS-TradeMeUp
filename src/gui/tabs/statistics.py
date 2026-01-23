@@ -14,7 +14,8 @@ from src.models.data_quality import DataQualityScore
 from src.models.processed_news import ProcessedNews
 from src.models.predictions import Prediction
 from src.models.entities import Entity
-from src.models.analysis import ImpactScore
+from src.models.analysis import ImpactScore, SurpriseScore, SignalDecayModel, FactVerification, MarketRegime
+from src.gui.error_handling import handle_db_errors, create_empty_state
 
 
 def create_layout():
@@ -61,6 +62,7 @@ def create_layout():
     ], fluid=True)
 
 
+@handle_db_errors(default_message="Unable to load statistics", show_details=False)
 def get_statistics_metrics(engine):
     """Get overall statistics"""
     try:
@@ -70,47 +72,78 @@ def get_statistics_metrics(engine):
             total_entities = db.query(func.count(Entity.entity_id)).scalar() or 0
             total_predictions = db.query(func.count(Prediction.prediction_id)).scalar() or 0
             total_impacts = db.query(func.count(ImpactScore.score_id)).scalar() or 0
+            total_surprises = db.query(func.count(SurpriseScore.surprise_id)).scalar() or 0
+            total_regimes = db.query(func.count(MarketRegime.regime_id)).scalar() or 0
+            total_fact_checks = db.query(func.count(FactVerification.verification_id)).scalar() or 0
             
             avg_quality = db.query(func.avg(DataQualityScore.quality_score)).scalar()
             avg_quality = round(avg_quality, 2) if avg_quality else 0
         
-        return dbc.Row([
-            dbc.Col([
-                html.Div([
-                    html.H3(f"{total_news:,}", className="text-primary"),
-                    html.P("Total Articles", className="text-muted mb-0")
-                ], className="text-center")
-            ], width=2),
-            dbc.Col([
-                html.Div([
-                    html.H3(f"{total_processed:,}", className="text-success"),
-                    html.P("Processed", className="text-muted mb-0")
-                ], className="text-center")
-            ], width=2),
-            dbc.Col([
-                html.Div([
-                    html.H3(f"{total_entities:,}", className="text-info"),
-                    html.P("Entities", className="text-muted mb-0")
-                ], className="text-center")
-            ], width=2),
-            dbc.Col([
-                html.Div([
-                    html.H3(f"{total_predictions:,}", className="text-warning"),
-                    html.P("Predictions", className="text-muted mb-0")
-                ], className="text-center")
-            ], width=2),
-            dbc.Col([
-                html.Div([
-                    html.H3(f"{total_impacts:,}", className="text-danger"),
-                    html.P("Impact Scores", className="text-muted mb-0")
-                ], className="text-center")
-            ], width=2),
-            dbc.Col([
-                html.Div([
-                    html.H3(f"{avg_quality:.2f}", className="text-primary"),
-                    html.P("Avg Quality", className="text-muted mb-0")
-                ], className="text-center")
-            ], width=2)
+        return html.Div([
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.H3(f"{total_news:,}", className="text-primary"),
+                        html.P("Total Articles", className="text-muted mb-0")
+                    ], className="text-center")
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.H3(f"{total_processed:,}", className="text-success"),
+                        html.P("Processed", className="text-muted mb-0")
+                    ], className="text-center")
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.H3(f"{total_entities:,}", className="text-info"),
+                        html.P("Entities", className="text-muted mb-0")
+                    ], className="text-center")
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.H3(f"{total_predictions:,}", className="text-warning"),
+                        html.P("Predictions", className="text-muted mb-0")
+                    ], className="text-center")
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.H3(f"{total_impacts:,}", className="text-danger"),
+                        html.P("Impact Scores", className="text-muted mb-0")
+                    ], className="text-center")
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.H3(f"{avg_quality:.2f}", className="text-primary"),
+                        html.P("Avg Quality", className="text-muted mb-0")
+                    ], className="text-center")
+                ], width=2)
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.H4(f"{total_surprises:,}", className="text-warning"),
+                        html.P("Surprise Scores", className="text-muted mb-0 small")
+                    ], className="text-center")
+                ], width=3),
+                dbc.Col([
+                    html.Div([
+                        html.H4(f"{total_regimes:,}", className="text-info"),
+                        html.P("Market Regimes", className="text-muted mb-0 small")
+                    ], className="text-center")
+                ], width=3),
+                dbc.Col([
+                    html.Div([
+                        html.H4(f"{total_fact_checks:,}", className="text-success"),
+                        html.P("Fact Checks", className="text-muted mb-0 small")
+                    ], className="text-center")
+                ], width=3),
+                dbc.Col([
+                    html.Div([
+                        html.H4("-", className="text-secondary"),
+                        html.P("Reserved", className="text-muted mb-0 small")
+                    ], className="text-center")
+                ], width=3)
+            ])
         ])
     except Exception as e:
         import logging
