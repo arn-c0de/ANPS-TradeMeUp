@@ -237,7 +237,8 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                 outcome = pred.outcome[0] if pred.outcome else None
 
                 if outcome and outcome.actual_return is not None:
-                    # Show saved performance data with last update time
+                    # Show ONLY saved performance data - NEVER recalculate on refresh
+                    # actual_return is already stored as percentage, don't multiply by 100
                     return_val = outcome.actual_return
                     
                     # Format last update time
@@ -260,10 +261,13 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                             className="text-success" if return_val > 0 else "text-danger" if return_val < 0 else "text-muted"
                         ),
                         update_info
-                    ])
+                    ], title="Saved performance data - click 🔄 to update")
+                    
+                    # Show result based on saved direction_correct
                     result_display = html.Td(
                         "✅" if outcome.direction_correct else "❌",
-                        className="text-center"
+                        className="text-center",
+                        title="Saved result - click 🔄 to update"
                     )
                     return_24h_display = html.Td("—", className="text-muted text-center")
                 else:

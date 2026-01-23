@@ -300,43 +300,42 @@ app.index_string = '''
                 -webkit-user-select: none !important;
                 -moz-user-select: none !important;
                 -ms-user-select: none !important;
-                pointer-events: auto !important;
                 cursor: pointer !important;
                 position: relative !important;
-                z-index: 10 !important;
+                z-index: 100 !important;
+                touch-action: manipulation !important;
             }
             
-            /* Ensure buttons capture all touch events */
+            /* Ensure buttons capture all touch events with visual feedback */
             .touch-button:active {
                 transform: scale(0.95);
-                background-color: rgba(102, 126, 234, 0.2) !important;
+                background-color: rgba(102, 126, 234, 0.3) !important;
+                transition: transform 0.1s ease, background-color 0.1s ease;
             }
             
-            /* Remove pointer events from table rows to allow button clicks */
-            .predictions-table-no-hover tbody tr {
-                pointer-events: none !important;
+            /* DON'T block pointer events on table rows - needed for Dash updates! */
+            /* Just ensure buttons have high z-index to capture clicks first */
+            .predictions-table-no-hover tbody tr td button {
+                isolation: isolate;
             }
             
-            /* But enable pointer events on table cells with buttons */
-            .predictions-table-no-hover tbody tr td {
-                pointer-events: auto !important;
-            }
-            
-            /* Ensure buttons are easily tappable on mobile (44x44px minimum) */
+            /* Ensure buttons are easily tappable on mobile (48x48px minimum) */
             @media (max-width: 768px) {
                 .touch-button {
                     min-width: 48px !important;
                     min-height: 48px !important;
-                    padding: 8px 12px !important;
+                    padding: 10px 14px !important;
+                    font-size: 14px !important;
                 }
             }
             
-            /* Increase tap target for tablets */
+            /* Increase tap target for tablets (50x50px) */
             @media (min-width: 769px) and (max-width: 1024px) {
                 .touch-button {
-                    min-width: 50px !important;
-                    min-height: 50px !important;
-                    padding: 10px 14px !important;
+                    min-width: 52px !important;
+                    min-height: 52px !important;
+                    padding: 12px 16px !important;
+                    font-size: 15px !important;
                 }
             }
             
