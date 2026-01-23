@@ -81,6 +81,18 @@ def create_layout():
             ], width=4)
         ], className="mb-3"),
         
+        # Index Trends & Stock Performance
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader(html.H5("📈 Market Index Trends & Tracked Stocks")),
+                    dbc.CardBody([
+                        html.Div(id="index-trends-display")
+                    ])
+                ])
+            ], width=12)
+        ], className="mb-3"),
+        
         # NEW: Entity Sentiment Analysis
         dbc.Row([
             dbc.Col([
@@ -199,18 +211,6 @@ def create_layout():
                     dbc.CardHeader(html.H5("📰 News Volume Over Time")),
                     dbc.CardBody([
                         dcc.Graph(id="news-volume-chart")
-                    ])
-                ])
-            ], width=12)
-        ], className="mb-3"),
-        
-        # Index Trends & Stock Performance
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("📈 Market Index Trends & Tracked Stocks")),
-                    dbc.CardBody([
-                        html.Div(id="index-trends-display")
                     ])
                 ])
             ], width=12)
@@ -1658,7 +1658,7 @@ def get_stock_predictions_detail(engine, stock_symbol):
                                     html.Span([
                                         status_badge,
                                         dbc.Badge(
-                                            f"{pred.horizon_hours}h",
+                                            pred.horizon,
                                             color="info",
                                             className="ms-2"
                                         ),
@@ -1688,7 +1688,7 @@ def get_stock_predictions_detail(engine, stock_symbol):
                                     ], width=3),
                                     dbc.Col([
                                         html.Small("Target", className="text-muted"),
-                                        html.H6(f"{pred.predicted_direction.upper()}")
+                                        html.H6(f"{pred.predicted_direction.upper()}" if hasattr(pred, 'predicted_direction') else "N/A")
                                     ], width=3),
                                     dbc.Col([
                                         html.Small("Created", className="text-muted"),
@@ -1696,7 +1696,7 @@ def get_stock_predictions_detail(engine, stock_symbol):
                                     ], width=3)
                                 ]),
                                 html.Hr(),
-                                html.P(pred.reasoning[:200] + "..." if len(pred.reasoning) > 200 else pred.reasoning, 
+                                html.P(pred.reasoning[:200] + "..." if hasattr(pred, 'reasoning') and len(pred.reasoning) > 200 else getattr(pred, 'reasoning', 'No reasoning available'), 
                                       className="small text-muted mb-0")
                             ])
                         ], className="mb-3")
