@@ -204,23 +204,38 @@ class LLMService:
 
         response = self.generate(json_prompt, system_prompt, temperature)
 
-        # Try to extract JSON from response
+        # Try to extract and fix JSON from response
         try:
             # Try direct parsing
             return json.loads(response)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.warning(f"Initial JSON parse failed: {e}. Attempting extraction...")
+            
             # Try to find JSON in code blocks
             import re
             json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
             if json_match:
-                return json.loads(json_match.group(1))
+                try:
+                    return json.loads(json_match.group(1))
+                except json.JSONDecodeError:
+                    pass
 
             # Try to find any JSON object
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
-                return json.loads(json_match.group(0))
+                json_str = json_match.group(0)
+                
+                # Try to fix common JSON issues
+                try:
+                    # Remove trailing commas before closing braces/brackets
+                    json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                    # Fix missing commas between properties (basic heuristic)
+                    json_str = re.sub(r'"\s*\n\s*"', '",\n"', json_str)
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    pass
 
-            logger.error(f"Failed to parse JSON from response: {response}")
+            logger.error(f"Failed to parse JSON from response: {response[:500]}")
             raise ValueError("Could not parse valid JSON from LLM response")
 
     def get_embedding(self, text: str) -> List[float]:
