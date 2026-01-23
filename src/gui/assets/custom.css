@@ -200,6 +200,42 @@ p, span, small, label, h1, h2, h3, h4, h5, h6 {
     background-color: #252525 !important;
 }
 
+/* Disable ALL hover effects for rows that are being refreshed */
+table.table-hover tbody tr.refreshing-row,
+table.table-hover tbody tr.refreshing-row:hover,
+table tbody tr.refreshing-row,
+table tbody tr.refreshing-row:hover,
+.table-hover tbody tr.refreshing-row,
+.table-hover tbody tr.refreshing-row:hover,
+.table tbody tr.refreshing-row,
+.table tbody tr.refreshing-row:hover {
+    background-color: rgba(0, 0, 0, 0.4) !important;
+    cursor: wait !important;
+    pointer-events: none !important;
+}
+
+/* Disable hover effect for ALL elements inside refreshing rows */
+table.table-hover tbody tr.refreshing-row td,
+table.table-hover tbody tr.refreshing-row:hover td,
+table.table-hover tbody tr.refreshing-row th,
+table.table-hover tbody tr.refreshing-row:hover th,
+.table-hover tbody tr.refreshing-row td,
+.table-hover tbody tr.refreshing-row:hover td,
+.table-hover tbody tr.refreshing-row th,
+.table-hover tbody tr.refreshing-row:hover th,
+table tbody tr.refreshing-row td,
+table tbody tr.refreshing-row:hover td,
+.table tbody tr.refreshing-row td,
+.table tbody tr.refreshing-row:hover td {
+    background-color: transparent !important;
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Block pointer events on all children */
+tr.refreshing-row * {
+    pointer-events: none !important;
+}
+
 /* Navigation Tabs */
 .nav-tabs {
     border-bottom: 1px solid #444 !important;

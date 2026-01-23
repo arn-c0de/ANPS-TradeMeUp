@@ -190,9 +190,20 @@ app.index_string = '''
             .table-striped.table-dark tbody tr:nth-of-type(even) {
                 background-color: #0a0a0a !important;
             }
-            .table-striped tbody tr:hover,
-            .table-striped.table-dark tbody tr:hover {
-                background-color: #1a1a1a !important;
+            
+            /* COMPLETELY DISABLE hover effect on predictions table */
+            .predictions-table-no-hover tbody tr:hover,
+            .predictions-table-no-hover.table-striped tbody tr:hover,
+            .predictions-table-no-hover.table-dark tbody tr:hover,
+            .predictions-table-no-hover.table-striped.table-dark tbody tr:hover {
+                background-color: #0a0a0a !important;
+                cursor: default !important;
+            }
+            
+            /* Keep hover for other tables */
+            .table-striped tbody tr:hover:not(.predictions-table-no-hover tbody tr),
+            .table-striped.table-dark tbody tr:hover:not(.predictions-table-no-hover tbody tr) {
+                background-color: #0a0a0a !important;
             }
             
             /* Force all table cells dark - ULTRA AGGRESSIVE */
@@ -279,6 +290,54 @@ app.index_string = '''
             }
             ::-webkit-scrollbar-thumb:hover {
                 background: #555;
+            }
+            
+            /* Mobile-friendly touch buttons */
+            .touch-button {
+                -webkit-tap-highlight-color: rgba(102, 126, 234, 0.3) !important;
+                tap-highlight-color: rgba(102, 126, 234, 0.3) !important;
+                user-select: none !important;
+                -webkit-user-select: none !important;
+                -moz-user-select: none !important;
+                -ms-user-select: none !important;
+                pointer-events: auto !important;
+                cursor: pointer !important;
+                position: relative !important;
+                z-index: 10 !important;
+            }
+            
+            /* Ensure buttons capture all touch events */
+            .touch-button:active {
+                transform: scale(0.95);
+                background-color: rgba(102, 126, 234, 0.2) !important;
+            }
+            
+            /* Remove pointer events from table rows to allow button clicks */
+            .predictions-table-no-hover tbody tr {
+                pointer-events: none !important;
+            }
+            
+            /* But enable pointer events on table cells with buttons */
+            .predictions-table-no-hover tbody tr td {
+                pointer-events: auto !important;
+            }
+            
+            /* Ensure buttons are easily tappable on mobile (44x44px minimum) */
+            @media (max-width: 768px) {
+                .touch-button {
+                    min-width: 48px !important;
+                    min-height: 48px !important;
+                    padding: 8px 12px !important;
+                }
+            }
+            
+            /* Increase tap target for tablets */
+            @media (min-width: 769px) and (max-width: 1024px) {
+                .touch-button {
+                    min-width: 50px !important;
+                    min-height: 50px !important;
+                    padding: 10px 14px !important;
+                }
             }
             
             /* Quad panel styling - professional focus indication without scale */
@@ -923,18 +982,24 @@ def update_entity_filter_options(n):
      Input("pred-date-filter", "end_date"),
      Input("pred-horizon-filter", "value"),
      Input("pred-surprise-filter", "value"),
-     Input("pred-confidence-filter", "value")]
+     Input("pred-confidence-filter", "value"),
+     Input("refresh-loading-state", "data")]
 )
-def update_predictions_table(entities, start_date, end_date, horizon, surprise_filter, min_conf):
+def update_predictions_table(entities, start_date, end_date, horizon, surprise_filter, min_conf, loading_state):
     """Update predictions table with filters (removed interval for performance)"""
     date_range = (start_date, end_date) if start_date or end_date else None
+
+    # Extract refreshing prediction ID from loading state
+    refreshing_id = loading_state.get("prediction_id") if loading_state else None
+
     return predictions.get_predictions_table(
         engine,
         entity_filter=entities,
         date_range=date_range,
         min_confidence=min_conf or 0,
         horizon=horizon or '5d',
-        surprise_filter=surprise_filter or 'all'
+        surprise_filter=surprise_filter or 'all',
+        refreshing_prediction_id=refreshing_id
     )
 
 
@@ -1000,10 +1065,8 @@ def toggle_prediction_modal(detail_clicks, close_click, refresh_click, is_open, 
 
 
 @app.callback(
-    [Output("predictions-table", "children", allow_duplicate=True),
-     Output("refresh-toast", "is_open"),
-     Output("refresh-toast", "children"),
-     Output("refresh-toast", "icon")],
+    [Output("refresh-loading-state", "data"),
+     Output("predictions-table", "children", allow_duplicate=True)],
     [Input({"type": "pred-refresh-btn", "index": ALL}, "n_clicks")],
     [State({"type": "pred-refresh-btn", "index": ALL}, "id"),
      State("pred-horizon-filter", "value"),
@@ -1014,115 +1077,118 @@ def toggle_prediction_modal(detail_clicks, close_click, refresh_click, is_open, 
      State("pred-confidence-filter", "value")],
     prevent_initial_call=True
 )
-def refresh_prediction_performance(refresh_clicks, button_ids, horizon, entities, start_date, end_date, surprise_filter, min_conf):
-    """Load and save performance data for a specific prediction"""
-    logger.info(f"=== REFRESH CALLBACK TRIGGERED === clicks: {refresh_clicks}, ids: {button_ids}, horizon: {horizon}")
-    
+def set_refresh_loading_state(refresh_clicks, button_ids, horizon, entities, start_date, end_date, surprise_filter, min_conf):
+    """Set loading state and show loading UI immediately"""
     from dash import callback_context
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from src.services.prediction_performance_service import prediction_performance_service
-    from src.models.predictions import Prediction
-    from src.models.entities import Entity
     import json
-    
+
     if not callback_context.triggered:
-        logger.info("No trigger context")
-        return dash.no_update, False, "", "info"
-    
+        return {}, dash.no_update
+
     trigger_id = callback_context.triggered[0]["prop_id"]
     trigger_value = callback_context.triggered[0].get("value")
-    
-    logger.info(f"Trigger ID: {trigger_id}, Value: {trigger_value}")
-    
-    # Check if button was actually clicked (value should be > 0)
+
     if trigger_value is None:
-        logger.info("Trigger value is None")
-        return dash.no_update, False, "", "info"
-    
+        return {}, dash.no_update
+
     # Extract prediction_id from the clicked button
     if "pred-refresh-btn" in trigger_id and ".n_clicks" in trigger_id:
         id_str = trigger_id.split('.')[0]
         id_dict = json.loads(id_str)
         prediction_id = id_dict.get("index")
-        
+
         if prediction_id:
-            # Create DB session
-            db_engine = create_engine(app.server.config.get('DATABASE_URI', 'sqlite:///trademeup.db'))
-            Session = sessionmaker(bind=db_engine)
-            db_session = Session()
-            
-            toast_msg = ""
-            toast_icon = "info"
-            
-            try:
-                # Load prediction and entity
-                pred = db_session.query(Prediction).filter(
-                    Prediction.prediction_id == prediction_id
-                ).first()
-                
-                if not pred:
-                    logger.error(f"Prediction {prediction_id} not found in database")
-                    db_session.close()
-                    toast_msg = "❌ Prediction not found"
-                    toast_icon = "danger"
-                    table = predictions.get_predictions_table(db_engine, entity_filter=None, date_range=None, min_confidence=0, horizon=horizon or '5d')
-                    return table, True, toast_msg, toast_icon
-                
-                entity = db_session.query(Entity).filter(
-                    Entity.entity_id == pred.entity_id
-                ).first()
-                
-                if not entity:
-                    logger.error(f"Entity {pred.entity_id} not found for prediction {prediction_id}")
-                    db_session.close()
-                    toast_msg = "❌ Entity not found"
-                    toast_icon = "danger"
-                    date_range = (start_date, end_date) if start_date or end_date else None
-                    table = predictions.get_predictions_table(
-                        db_engine, 
-                        entity_filter=entities, 
-                        date_range=date_range, 
-                        min_confidence=min_conf or 0, 
-                        horizon=horizon or '5d',
-                        surprise_filter=surprise_filter or 'all'
-                    )
-                    return table, True, toast_msg, toast_icon
-                
-                logger.info(f"Loading performance for {entity.entity_id} ({entity.entity_name}), prediction {prediction_id}")
-                
-                # Calculate performance
-                perf_data = prediction_performance_service.get_prediction_performance(pred, entity)
-                
-                if perf_data:
-                    # Save to database
-                    prediction_performance_service.save_prediction_performance(
-                        prediction_id, perf_data, db_session
-                    )
-                    logger.info(f"✅ Saved performance for {prediction_id}: {perf_data.get('total_return_pct')}%")
-                    
-                    # Success toast
-                    toast_msg = f"✅ {entity.entity_name}: {perf_data.get('total_return_pct'):+.2f}%"
-                    toast_icon = "success"
-                else:
-                    logger.warning(f"⚠️ Could not calculate performance for {prediction_id} - ticker: {entity.entity_id}")
-                    
-                    # Check if it's an invalid ticker
-                    invalid_tickers = ['OTHER', 'UNKNOWN', 'N/A', 'NONE', 'TEST', 'HEALTH', 'TAO']
-                    if entity.entity_id.upper() in invalid_tickers:
-                        toast_msg = f"⚠️ {entity.entity_name}: No market ticker"
-                    else:
-                        toast_msg = f"⚠️ {entity.entity_name}: Market data unavailable"
-                    toast_icon = "warning"
-                    
-            except Exception as e:
-                logger.error(f"Error refreshing prediction performance: {e}", exc_info=True)
-                toast_msg = f"❌ Error: {str(e)[:50]}"
-                toast_icon = "danger"
-            finally:
-                db_session.close()
-            
-            # Refresh the table with proper parameters (preserve filters)
+            logger.info(f"Setting loading state for prediction: {prediction_id}")
+
+            # Generate table with loading state
+            date_range = (start_date, end_date) if start_date or end_date else None
+            table_with_loading = predictions.get_predictions_table(
+                engine,
+                entity_filter=entities,
+                date_range=date_range,
+                min_confidence=min_conf or 0,
+                horizon=horizon or '5d',
+                surprise_filter=surprise_filter or 'all',
+                refreshing_prediction_id=prediction_id  # Show loading for this row
+            )
+
+            return {"prediction_id": prediction_id}, table_with_loading
+
+    return {}, dash.no_update
+
+
+@app.callback(
+    [Output("predictions-table", "children", allow_duplicate=True),
+     Output("refresh-toast", "is_open"),
+     Output("refresh-toast", "children"),
+     Output("refresh-toast", "icon"),
+     Output("refresh-loading-state", "data", allow_duplicate=True)],
+    [Input("refresh-loading-state", "data")],
+    [State("pred-horizon-filter", "value"),
+     State("pred-entity-filter", "value"),
+     State("pred-date-filter", "start_date"),
+     State("pred-date-filter", "end_date"),
+     State("pred-surprise-filter", "value"),
+     State("pred-confidence-filter", "value")],
+    prevent_initial_call=True
+)
+def refresh_prediction_performance(loading_state, horizon, entities, start_date, end_date, surprise_filter, min_conf):
+    """Load and save performance data for a specific prediction"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from src.services.prediction_performance_service import prediction_performance_service
+    from src.models.predictions import Prediction
+    from src.models.entities import Entity
+
+    # Check if loading_state has prediction_id
+    if not loading_state or "prediction_id" not in loading_state:
+        logger.info("No prediction_id in loading_state")
+        return dash.no_update, False, "", "info", {}
+
+    prediction_id = loading_state.get("prediction_id")
+    logger.info(f"=== REFRESH PERFORMANCE CALLBACK === prediction_id: {prediction_id}")
+
+    if not prediction_id:
+        return dash.no_update, False, "", "info", {}
+
+    # Create DB session
+    db_engine = create_engine(app.server.config.get('DATABASE_URI', 'sqlite:///trademeup.db'))
+    Session = sessionmaker(bind=db_engine)
+    db_session = Session()
+
+    toast_msg = ""
+    toast_icon = "info"
+
+    try:
+        # Load prediction and entity
+        pred = db_session.query(Prediction).filter(
+            Prediction.prediction_id == prediction_id
+        ).first()
+
+        if not pred:
+            logger.error(f"Prediction {prediction_id} not found in database")
+            db_session.close()
+            toast_msg = "❌ Prediction not found"
+            toast_icon = "danger"
+            table = predictions.get_predictions_table(
+                db_engine,
+                entity_filter=None,
+                date_range=None,
+                min_confidence=0,
+                horizon=horizon or '5d',
+                refreshing_prediction_id=None
+            )
+            return table, True, toast_msg, toast_icon, {}
+
+        entity = db_session.query(Entity).filter(
+            Entity.entity_id == pred.entity_id
+        ).first()
+
+        if not entity:
+            logger.error(f"Entity {pred.entity_id} not found for prediction {prediction_id}")
+            db_session.close()
+            toast_msg = "❌ Entity not found"
+            toast_icon = "danger"
             date_range = (start_date, end_date) if start_date or end_date else None
             table = predictions.get_predictions_table(
                 db_engine,
@@ -1130,12 +1196,57 @@ def refresh_prediction_performance(refresh_clicks, button_ids, horizon, entities
                 date_range=date_range,
                 min_confidence=min_conf or 0,
                 horizon=horizon or '5d',
-                surprise_filter=surprise_filter or 'all'
+                surprise_filter=surprise_filter or 'all',
+                refreshing_prediction_id=None
             )
-            
-            return table, True, toast_msg, toast_icon
-    
-    return dash.no_update, False, "", "info"
+            return table, True, toast_msg, toast_icon, {}
+
+        logger.info(f"Loading performance for {entity.entity_id} ({entity.entity_name}), prediction {prediction_id}")
+
+        # Calculate performance
+        perf_data = prediction_performance_service.get_prediction_performance(pred, entity)
+
+        if perf_data:
+            # Save to database
+            prediction_performance_service.save_prediction_performance(
+                prediction_id, perf_data, db_session
+            )
+            logger.info(f"✅ Saved performance for {prediction_id}: {perf_data.get('total_return_pct')}%")
+
+            # Success toast
+            toast_msg = f"✅ {entity.entity_name}: {perf_data.get('total_return_pct'):+.2f}%"
+            toast_icon = "success"
+        else:
+            logger.warning(f"⚠️ Could not calculate performance for {prediction_id} - ticker: {entity.entity_id}")
+
+            # Check if it's an invalid ticker
+            invalid_tickers = ['OTHER', 'UNKNOWN', 'N/A', 'NONE', 'TEST', 'HEALTH', 'TAO']
+            if entity.entity_id.upper() in invalid_tickers:
+                toast_msg = f"⚠️ {entity.entity_name}: No market ticker"
+            else:
+                toast_msg = f"⚠️ {entity.entity_name}: Market data unavailable"
+            toast_icon = "warning"
+
+    except Exception as e:
+        logger.error(f"Error refreshing prediction performance: {e}", exc_info=True)
+        toast_msg = f"❌ Error: {str(e)[:50]}"
+        toast_icon = "danger"
+    finally:
+        db_session.close()
+
+    # Refresh the table with proper parameters (preserve filters)
+    date_range = (start_date, end_date) if start_date or end_date else None
+    table = predictions.get_predictions_table(
+        db_engine,
+        entity_filter=entities,
+        date_range=date_range,
+        min_confidence=min_conf or 0,
+        horizon=horizon or '5d',
+        surprise_filter=surprise_filter or 'all',
+        refreshing_prediction_id=None  # Clear loading state after refresh completes
+    )
+
+    return table, True, toast_msg, toast_icon, {}
 
 
 @app.callback(
