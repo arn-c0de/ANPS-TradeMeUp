@@ -1,12 +1,7 @@
 name: "CodeQL Analysis"
 
 on:
-  push:
-    branches: [ main, 1.0.1 ]
-  pull_request:
-    branches: [ main ]
-  schedule:
-    - cron: '0 0 * * 1'  # Run weekly on Mondays
+  workflow_dispatch:
 
 jobs:
   analyze:
