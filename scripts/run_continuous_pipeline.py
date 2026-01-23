@@ -13,6 +13,8 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.models.database import SessionLocal
+from src.models.raw_news import RawNews
+from src.models.processed_news import ProcessedNews
 from src.agents.ingestion_agent import IngestionAgent
 from src.agents.data_quality_agent import DataQualityAgent
 from src.agents.content_understanding_agent import ContentUnderstandingAgent
@@ -77,14 +79,57 @@ class ContinuousPipeline:
                 logger.info(f"Iteration #{iteration} completed in {duration:.1f}s")
                 activity_logger.log_activity(f"Iteration #{iteration} completed in {duration:.1f}s", "SUCCESS")
                 
-                # Only wait if there were new articles or it's the first iteration
-                # Otherwise continue processing existing backlog immediately
-                if iteration == 1 or new_articles > 0:
-                    logger.info(f"Waiting {self.check_interval}s until next check...")
-                    time.sleep(self.check_interval)
+                # Check if there's any unprocessed work in the pipeline
+                check_db = SessionLocal()
+                try:
+                    from src.models.analysis import SurpriseScore, ImpactScore
+                    from src.models.predictions import Prediction
+                    from src.models.entities import NewsEntityMapping
+                    
+                    # Count articles at different pipeline stages that need processing
+                    # 1. RawNews without quality_score
+                    unassessed = check_db.query(RawNews).filter(RawNews.quality_score.is_(None)).count()
+                    
+                    # 2. Quality-checked RawNews without ProcessedNews
+                    unanalyzed = check_db.query(RawNews).filter(
+                        RawNews.quality_score.isnot(None)
+                    ).outerjoin(
+                        ProcessedNews, RawNews.news_id == ProcessedNews.news_id
+                    ).filter(ProcessedNews.news_id.is_(None)).count()
+                    
+                    # 3. ProcessedNews without entity mapping
+                    unmapped = check_db.query(ProcessedNews).outerjoin(
+                        NewsEntityMapping, ProcessedNews.news_id == NewsEntityMapping.news_id
+                    ).filter(NewsEntityMapping.news_id.is_(None)).count()
+                    
+                    # 4. ProcessedNews without surprise score
+                    unsurprised = check_db.query(ProcessedNews).outerjoin(
+                        SurpriseScore, ProcessedNews.news_id == SurpriseScore.news_id
+                    ).filter(SurpriseScore.news_id.is_(None)).count()
+                    
+                    # 5. ProcessedNews without impact score
+                    unscored = check_db.query(ProcessedNews).outerjoin(
+                        ImpactScore, ProcessedNews.news_id == ImpactScore.news_id
+                    ).filter(ImpactScore.news_id.is_(None)).count()
+                    
+                    # 6. ProcessedNews without predictions
+                    unpredicted = check_db.query(ProcessedNews).outerjoin(
+                        Prediction, ProcessedNews.news_id == Prediction.news_id
+                    ).filter(Prediction.news_id.is_(None)).count()
+                    
+                    total_pending = unassessed + unanalyzed + unmapped + unsurprised + unscored + unpredicted
+                finally:
+                    check_db.close()
+                
+                # If there's any unprocessed data, continue immediately
+                # Otherwise wait for new data
+                if total_pending > 0:
+                    logger.info(f"Found {total_pending} items pending (assessed:{unassessed}, analyzed:{unanalyzed}, mapped:{unmapped}, surprised:{unsurprised}, scored:{unscored}, predicted:{unpredicted})")
+                    logger.info("Continuing immediately to process backlog...")
+                    time.sleep(2)  # Brief pause to avoid overwhelming the system
                 else:
-                    logger.info("No new articles, checking again in 10 seconds...")
-                    time.sleep(10)
+                    logger.info(f"All articles fully processed, waiting {self.check_interval}s for new data...")
+                    time.sleep(self.check_interval)
                 
             except KeyboardInterrupt:
                 logger.info("Stopping continuous pipeline (keyboard interrupt)")

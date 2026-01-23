@@ -179,6 +179,13 @@ class PredictionAgent:
             {'driver': 'regime_sensitivity', 'importance': 0.10}
         ]
 
+        # Dynamic confidence based on impact and max probability
+        # Higher impact and stronger directional signal = higher confidence
+        max_prob = max(direction_probabilities.values())
+        base_confidence = 0.45 + (impact * 0.25)  # 0.45-0.70 based on impact
+        directional_boost = (max_prob - 0.33) * 0.3  # Boost if strong direction
+        confidence = np.clip(base_confidence + directional_boost, 0.40, 0.85)
+
         return {
             'direction_probabilities': direction_probabilities,
             'expected_return': {
@@ -188,7 +195,7 @@ class PredictionAgent:
                 'p75': expected_mean + 0.015,
                 'p95': expected_mean + 0.04
             },
-            'confidence': 0.60,  # Lower confidence for heuristic
+            'confidence': float(confidence),
             'key_drivers': key_drivers
         }
 

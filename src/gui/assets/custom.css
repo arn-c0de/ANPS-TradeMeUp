@@ -50,6 +50,128 @@ p, span, small, label, h1, h2, h3, h4, h5, h6 {
     color: inherit;
 }
 
+/* Multi-Panel Chart Styles */
+.chart-panel-container {
+    height: 500px;
+    overflow: hidden;
+}
+
+.chart-panel-header {
+    padding: 8px 12px;
+    background-color: #222;
+    border-bottom: 1px solid #444;
+}
+
+.btn-group button.active {
+    background-color: #0d6efd !important;
+    border-color: #0d6efd !important;
+    color: white !important;
+}
+
+.favorite-icon {
+    color: #ffc107;
+    cursor: pointer;
+}
+
+/* Clickable symbol labels */
+.symbol-clickable {
+    transition: color 0.2s ease, transform 0.1s ease;
+}
+
+.symbol-clickable:hover {
+    color: #00d9ff !important;
+    transform: scale(1.05);
+}
+
+.symbol-clickable:active {
+    transform: scale(0.98);
+}
+
+/* Panel Grid Layouts */
+.panel-single {
+    height: 600px;
+}
+
+.panel-split {
+    height: 500px;
+}
+
+.panel-quad {
+    height: 400px;
+}
+
+/* Fullscreen Chart Container */
+.chart-container-normal {
+    transition: all 0.3s ease;
+}
+
+.chart-container-fullscreen {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    background-color: #060606 !important;
+    overflow-y: auto;
+    padding: 20px;
+    transition: all 0.3s ease;
+}
+
+/* Fullscreen control bar styling */
+.chart-container-fullscreen .card {
+    box-shadow: 0 2px 10px rgba(0, 217, 255, 0.3);
+}
+
+.chart-container-fullscreen .card-body {
+    background-color: #1a1a1a !important;
+}
+
+/* Adjust card heights in fullscreen */
+.chart-container-fullscreen .card {
+    height: 100%;
+}
+
+.chart-container-fullscreen .card-body {
+    height: calc(100% - 50px);
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-container-fullscreen .card-body > div {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Ensure charts fill available space in fullscreen */
+.chart-container-fullscreen .js-plotly-plot {
+    height: 100% !important;
+}
+
+.chart-container-fullscreen .plotly {
+    height: 100% !important;
+}
+
+/* Make sure graphs are responsive */
+.js-plotly-plot {
+    width: 100%;
+}
+
+.plotly {
+    width: 100%;
+}
+
+/* Card heights based on content */
+.card-body .js-plotly-plot .plotly {
+    min-height: 400px;
+}
+
+.chart-container-fullscreen .card-body .js-plotly-plot .plotly {
+    height: 100% !important;
+    min-height: auto !important;
+}
+
 /* Enhanced Color Scheme */
 .text-primary { color: #00d9ff !important; }
 .text-success { color: #00ff88 !important; }

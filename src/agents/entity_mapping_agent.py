@@ -4,6 +4,8 @@ from typing import Dict, List, Optional
 from datetime import datetime
 from pathlib import Path
 from sqlalchemy.orm import Session
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
 import yfinance as yf
 
 from src.models.raw_news import RawNews
