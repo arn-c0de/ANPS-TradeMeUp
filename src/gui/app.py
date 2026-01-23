@@ -350,9 +350,7 @@ def update_live_status(n):
 )
 def control_continuous_pipeline(start_clicks, stop_clicks, current_state):
     """Start or stop continuous pipeline"""
-    import subprocess
-    import os
-    from pathlib import Path
+    from src.utils.process_utils import start_background_process, stop_process
     
     ctx = dash.callback_context
     if not ctx.triggered:
@@ -362,49 +360,53 @@ def control_continuous_pipeline(start_clicks, stop_clicks, current_state):
     
     if button_id == "btn-start-continuous":
         # Start continuous pipeline
-        try:
-            PROJECT_ROOT = Path(__file__).parent.parent.parent
-            python_exe = os.path.join(PROJECT_ROOT, "venv", "Scripts", "python.exe")
-            script = os.path.join(PROJECT_ROOT, "scripts", "run_continuous_pipeline.py")
-            
-            # Start process in background
-            process = subprocess.Popen(
-                [python_exe, "-u", script, "--interval", "300"],  # Check every 5 minutes
-                cwd=PROJECT_ROOT,
-                creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0
+        success, process, message = start_background_process(
+            script_path="scripts/run_continuous_pipeline.py",
+            args=["--interval", "300"],  # Check every 5 minutes
+            create_console=True
+        )
+        
+        if success and process:
+            activity_logger.log_activity(
+                f"Continuous Pipeline STARTED (PID: {process.pid})",
+                "SUCCESS"
             )
-            
-            activity_logger.log_activity(f"Continuous Pipeline STARTED (PID: {process.pid})", "SUCCESS")
-            
             return (
                 {"running": True, "pid": process.pid},
                 True,  # Disable start button
                 False  # Enable stop button
             )
-        except Exception as e:
-            activity_logger.log_activity(f"Failed to start continuous pipeline: {str(e)}", "ERROR")
+        else:
+            # Log and show error to user
+            activity_logger.log_activity(
+                f"Failed to start continuous pipeline: {message}",
+                "ERROR"
+            )
+            # Keep UI state unchanged, user sees log
             return dash.no_update
     
     elif button_id == "btn-stop-continuous":
         # Stop continuous pipeline
-        try:
-            if current_state.get("pid"):
-                import psutil
-                try:
-                    process = psutil.Process(current_state["pid"])
-                    process.terminate()
-                    activity_logger.log_activity(f"Continuous Pipeline STOPPED (PID: {current_state['pid']})", "INFO")
-                except psutil.NoSuchProcess:
-                    activity_logger.log_activity("Continuous Pipeline process not found", "WARNING")
+        if current_state.get("pid"):
+            success, message = stop_process(current_state["pid"])
             
-            return (
-                {"running": False, "pid": None},
-                False,  # Enable start button
-                True    # Disable stop button
-            )
-        except Exception as e:
-            activity_logger.log_activity(f"Failed to stop continuous pipeline: {str(e)}", "ERROR")
-            return dash.no_update
+            if success:
+                activity_logger.log_activity(
+                    f"Continuous Pipeline STOPPED: {message}",
+                    "INFO"
+                )
+            else:
+                activity_logger.log_activity(
+                    f"Warning stopping pipeline: {message}",
+                    "WARNING"
+                )
+        
+        # Always reset state (even if stop failed, process may be gone)
+        return (
+            {"running": False, "pid": None},
+            False,  # Enable start button
+            True    # Disable stop button
+        )
     
     return dash.no_update
 
@@ -1143,52 +1145,54 @@ def run_full_pipeline(n_clicks, limit, force, verbose):
     if not n_clicks:
         return dash.no_update
     
-    import subprocess
     from pathlib import Path
-    import os
+    from src.utils.process_utils import start_background_process, get_project_root
     
-    try:
-        # Log pipeline start
-        activity_logger.log_activity("User initiated Full MVP Pipeline from GUI", "INFO")
-        activity_logger.log_pipeline_start("TradeMeUp MVP Pipeline (GUI)")
+    # Log pipeline start
+    activity_logger.log_activity("User initiated Full MVP Pipeline from GUI", "INFO")
+    activity_logger.log_pipeline_start("TradeMeUp MVP Pipeline (GUI)")
+    
+    # Create log file for pipeline output
+    log_file = get_project_root() / "logs" / "pipeline_output.log"
+    
+    # Start process in background with output redirected to file
+    success, process, message = start_background_process(
+        script_path="scripts/run_mvp_pipeline.py",
+        args=[],
+        log_file=log_file,
+        create_console=False
+    )
+    
+    if not success or not process:
+        # Failed to start
+        error_log = f"[{datetime.now().strftime('%H:%M:%S')}] STARTUP ERROR\n"
+        error_log += f"Failed to start pipeline: {message}\n"
+        error_log += "\nPlease check:\n"
+        error_log += "  1. Python environment is activated\n"
+        error_log += "  2. Script exists: scripts/run_mvp_pipeline.py\n"
+        error_log += "  3. Required dependencies are installed\n"
         
-        PROJECT_ROOT = Path(__file__).parent.parent.parent
-        python_exe = os.path.join(PROJECT_ROOT, "venv", "Scripts", "python.exe")
-        script = os.path.join(PROJECT_ROOT, "scripts", "run_mvp_pipeline.py")
-        
-        # Create log file for pipeline output
-        log_file = PROJECT_ROOT / "logs" / "pipeline_output.log"
-        
-        # Start process in background with output redirected to file
-        with open(log_file, "w") as f:
-            process = subprocess.Popen(
-                [python_exe, "-u", script],  # -u for unbuffered output
-                stdout=f,
-                stderr=subprocess.STDOUT,
-                cwd=PROJECT_ROOT
-            )
-        
-        state = {
-            "running": True,
-            "process_id": process.pid,
-            "start_time": datetime.now().strftime("%H:%M:%S"),
-            "type": "full_pipeline"
-        }
-        
-        log = f"[{datetime.now().strftime('%H:%M:%S')}] Starting Full MVP Pipeline...\n"
-        log += f"Process ID: {process.pid}\n"
-        log += f"Articles to process: {limit}\n"
-        log += "-" * 60 + "\n"
-        log += "Pipeline is running... Logs will update every 5 seconds\n"
-        
-        activity_logger.log_activity(f"Pipeline process started (PID: {process.pid})", "SUCCESS")
-        
-        return state, log, "RUNNING", "warning"
-        
-    except Exception as e:
-        error_log = f"[{datetime.now().strftime('%H:%M:%S')}] ERROR: {str(e)}\n"
-        activity_logger.log_agent_error("Pipeline (GUI)", str(e))
+        activity_logger.log_agent_error("Pipeline (GUI)", message)
         return {"running": False}, error_log, "ERROR", "danger"
+    
+    # Successfully started
+    state = {
+        "running": True,
+        "process_id": process.pid,
+        "start_time": datetime.now().strftime("%H:%M:%S"),
+        "type": "full_pipeline"
+    }
+    
+    log = f"[{datetime.now().strftime('%H:%M:%S')}] Starting Full MVP Pipeline...\n"
+    log += f"Process ID: {process.pid}\n"
+    log += f"Articles to process: {limit}\n"
+    log += f"Log file: {log_file}\n"
+    log += "-" * 60 + "\n"
+    log += "Pipeline is running... Logs will update every 5 seconds\n"
+    
+    activity_logger.log_activity(f"Pipeline process started (PID: {process.pid})", "SUCCESS")
+    
+    return state, log, "RUNNING", "warning"
 
 
 # Run quick test
@@ -1205,51 +1209,58 @@ def run_quick_test(n_clicks):
     if not n_clicks:
         return dash.no_update
     
-    import subprocess
-    from pathlib import Path
-    import os
+    from src.utils.process_utils import start_background_process, validate_script_path
     
-    try:
-        # Log test start
-        activity_logger.log_activity("User initiated Quick Test from GUI", "INFO")
-        activity_logger.log_activity("Running quick test with 3 articles...", "INFO")
-        
-        PROJECT_ROOT = Path(__file__).parent.parent.parent
-        python_exe = os.path.join(PROJECT_ROOT, "venv", "Scripts", "python.exe")
-        script = os.path.join(PROJECT_ROOT, "test_quick.py")
-        
-        # Check if script exists
-        if not os.path.exists(script):
-            script = os.path.join(PROJECT_ROOT, "scripts", "run_mvp_pipeline.py")
-        
-        process = subprocess.Popen(
-            [python_exe, script],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            cwd=PROJECT_ROOT
+    # Log test start
+    activity_logger.log_activity("User initiated Quick Test from GUI", "INFO")
+    activity_logger.log_activity("Running quick test with 3 articles...", "INFO")
+    
+    # Try to find test script (prefer test_quick.py, fallback to MVP pipeline)
+    script_path = "test_quick.py"
+    valid, _ = validate_script_path(script_path)
+    
+    if not valid:
+        script_path = "scripts/run_mvp_pipeline.py"
+        activity_logger.log_activity(
+            "test_quick.py not found, using run_mvp_pipeline.py instead",
+            "WARNING"
         )
+    
+    # Start process
+    success, process, message = start_background_process(
+        script_path=script_path,
+        args=[],
+        create_console=False
+    )
+    
+    if not success or not process:
+        # Failed to start
+        error_log = f"[{datetime.now().strftime('%H:%M:%S')}] STARTUP ERROR\n"
+        error_log += f"Failed to start quick test: {message}\n"
+        error_log += "\nPlease check:\n"
+        error_log += "  1. Python environment is activated\n"
+        error_log += f"  2. Script exists: {script_path}\n"
+        error_log += "  3. Required dependencies are installed\n"
         
-        state = {
-            "running": True,
-            "process_id": process.pid,
-            "start_time": datetime.now().strftime("%H:%M:%S"),
-            "type": "quick_test"
-        }
-        
-        log = f"[{datetime.now().strftime('%H:%M:%S')}] Starting Quick Test Pipeline...\n"
-        log += f"Process ID: {process.pid}\n"
-        log += "Processing 3 articles with all agents...\n"
-        log += "-" * 60 + "\n"
-        
-        activity_logger.log_activity(f"Quick test started (PID: {process.pid})", "SUCCESS")
-        
-        return state, log, "RUNNING", "warning"
-        
-    except Exception as e:
-        error_log = f"[{datetime.now().strftime('%H:%M:%S')}] ERROR: {str(e)}\n"
-        activity_logger.log_agent_error("Quick Test (GUI)", str(e))
+        activity_logger.log_agent_error("Quick Test (GUI)", message)
         return {"running": False}, error_log, "ERROR", "danger"
+    
+    # Successfully started
+    state = {
+        "running": True,
+        "process_id": process.pid,
+        "start_time": datetime.now().strftime("%H:%M:%S"),
+        "type": "quick_test"
+    }
+    
+    log = f"[{datetime.now().strftime('%H:%M:%S')}] Starting Quick Test Pipeline...\n"
+    log += f"Process ID: {process.pid}\n"
+    log += "Processing 3 articles with all agents...\n"
+    log += "-" * 60 + "\n"
+    
+    activity_logger.log_activity(f"Quick test started (PID: {process.pid})", "SUCCESS")
+    
+    return state, log, "RUNNING", "warning"
 
 
 # Update recent executions
@@ -1899,13 +1910,33 @@ def execute_delete_action(n_clicks, action_data):
         return news_msg, pred_msg, all_msg
         
     except Exception as e:
-        activity_logger.log_activity(f"Error deleting data: {str(e)}", "ERROR")
-        error_msg = dbc.Alert(
-            f"❌ Error: {str(e)}",
-            color="danger",
-            dismissable=True
+        # Log detailed error
+        import traceback
+        error_detail = traceback.format_exc()
+        activity_logger.log_activity(
+            f"Error deleting data ({action}): {str(e)}",
+            "ERROR"
         )
+        activity_logger.log_activity(f"Traceback: {error_detail}", "ERROR")
         
+        # User-friendly error message
+        error_msg = dbc.Alert([
+            html.H5("❌ Delete Operation Failed", className="alert-heading"),
+            html.P(f"Error: {str(e)}"),
+            html.Hr(),
+            html.P([
+                "This may be caused by:",
+                html.Ul([
+                    html.Li("Database connection issues"),
+                    html.Li("Foreign key constraints"),
+                    html.Li("Insufficient permissions"),
+                    html.Li("Active transactions blocking deletion")
+                ]),
+                html.Small("Check logs/pipeline_activity.log for details.", className="text-muted")
+            ], className="mb-0")
+        ], color="danger", dismissable=True)
+        
+        # Return error in appropriate slot
         if action == "clear_news":
             return error_msg, dash.no_update, dash.no_update
         elif action == "clear_predictions":
