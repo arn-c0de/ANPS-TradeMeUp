@@ -564,15 +564,14 @@ def update_entity_filter_options(n):
 
 @app.callback(
     Output("predictions-table", "children"),
-    [Input("interval-component", "n_intervals"),
-     Input("pred-entity-filter", "value"),
+    [Input("pred-entity-filter", "value"),
      Input("pred-date-filter", "start_date"),
      Input("pred-date-filter", "end_date"),
      Input("pred-horizon-filter", "value"),
      Input("pred-confidence-filter", "value")]
 )
-def update_predictions_table(n, entities, start_date, end_date, horizon, min_conf):
-    """Update predictions table with filters"""
+def update_predictions_table(entities, start_date, end_date, horizon, min_conf):
+    """Update predictions table with filters (removed interval for performance)"""
     date_range = (start_date, end_date) if start_date or end_date else None
     return predictions.get_predictions_table(
         engine,
@@ -633,8 +632,8 @@ def toggle_prediction_modal(detail_clicks, close_click, refresh_click, is_open, 
         prediction_id = id_dict.get("index")
 
         if prediction_id:
-            # First load without performance for speed
-            return True, {"prediction_id": prediction_id, "load_performance": False}, prediction_id
+            # Load with live performance data for accurate calculations
+            return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id
 
     # No actual button was clicked (just re-render), don't update
     return dash.no_update, dash.no_update, dash.no_update
@@ -770,22 +769,41 @@ def refresh_prediction_performance(refresh_clicks, button_ids, horizon):
 
 @app.callback(
     [Output("prediction-modal-title", "children"),
-     Output("prediction-modal-body", "children")],
+     Output("prediction-modal-body", "children"),
+     Output("predictions-table", "children", allow_duplicate=True)],
     [Input("prediction-detail-cache", "data")],
-    [State("prediction-modal", "is_open")],
+    [State("prediction-modal", "is_open"),
+     State("pred-entity-filter", "value"),
+     State("pred-date-filter", "start_date"),
+     State("pred-date-filter", "end_date"),
+     State("pred-horizon-filter", "value"),
+     State("pred-confidence-filter", "value")],
     prevent_initial_call=True
 )
-def update_modal_content(cached_data, is_open):
-    """Update modal content from cached prediction_id (survives interval updates)"""
+def update_modal_content(cached_data, is_open, entities, start_date, end_date, horizon, min_conf):
+    """Update modal content from cached prediction_id and refresh table if performance was loaded"""
     # Only load if modal is open and we have a prediction_id
     if not is_open or not cached_data or "prediction_id" not in cached_data:
-        return dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update
 
     # Load fresh data from DB using cached prediction_id
     prediction_id = cached_data["prediction_id"]
     load_performance = cached_data.get("load_performance", False)
     title, body = predictions.get_prediction_details(engine, prediction_id, load_performance=load_performance)
-    return title, body
+    
+    # If we loaded live performance data, refresh the table to show updated values
+    if load_performance:
+        date_range = (start_date, end_date) if start_date or end_date else None
+        table = predictions.get_predictions_table(
+            engine,
+            entity_filter=entities,
+            date_range=date_range,
+            min_confidence=min_conf or 0,
+            horizon=horizon or '5d'
+        )
+        return title, body, table
+    
+    return title, body, dash.no_update
 
 
 # ============================================================================

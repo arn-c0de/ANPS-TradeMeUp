@@ -283,13 +283,14 @@ def get_entity_options(engine):
         return []
 
 
-def _format_saved_performance(pred, entity, outcome):
+def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
     """Format saved PredictionOutcome for display
     
     Args:
         pred: Prediction object
         entity: Entity object
         outcome: PredictionOutcome object from database
+        load_live_prices: Whether to load live prices (slow) or use only saved data (fast)
         
     Returns:
         dict: Performance data in same format as prediction_performance_service
@@ -300,52 +301,151 @@ def _format_saved_performance(pred, entity, outcome):
     probs = pred.direction_probabilities or {}
     predicted_direction = max(probs, key=probs.get) if probs else "flat"
     
-    # Determine actual direction from return
-    actual_return = outcome.actual_return or 0
-    if actual_return > 0.001:
-        actual_direction = "up"
-    elif actual_return < -0.001:
-        actual_direction = "down"
-    else:
-        actual_direction = "flat"
-    
-    # Get current price for 24h comparison
-    market_data = MarketDataProvider()
-    # Entity ID is the ticker (e.g., "TSLA")
+    # Initialize variables
     ticker = entity.entity_id if entity else None
     current_price = 0
+    prediction_price = 0
+    high_since = 0
+    low_since = 0
+    volatility = 0
     return_24h = 0
+    price_24h_ago = 0  # Add tracking for 24h ago price
     
-    if ticker:
+    logger.info(f"🔍 _format_saved_performance for ticker: {ticker}, load_live_prices: {load_live_prices}")
+    
+    # Only load live prices if explicitly requested (slow operation)
+    if ticker and load_live_prices:
         try:
-            price_data = market_data.get_live_price(ticker)
-            if price_data and 'current_price' in price_data:
-                current_price = price_data['current_price']
-                # Get 24h data
-                hist_data = market_data.get_historical_data(ticker, period="2d", interval="1d")
-                if hist_data is not None and len(hist_data) >= 2:
-                    price_24h_ago = hist_data.iloc[-2]['close'] if len(hist_data) > 1 else hist_data.iloc[-1]['close']
-                    return_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
+            market_data = MarketDataProvider()
+            
+            # Calculate days since prediction
+            days_since = (datetime.now() - pred.timestamp.replace(tzinfo=None)).days if pred.timestamp else 0
+            logger.info(f"   Days since prediction: {days_since}")
+            
+            # Get historical data since prediction
+            period_days = max(days_since + 5, 7)
+            if period_days <= 7:
+                period = "7d"
+            elif period_days <= 30:
+                period = "1mo"
+            elif period_days <= 90:
+                period = "3mo"
+            else:
+                period = "1y"
+            
+            logger.info(f"   Fetching historical data: period={period}")
+            hist_data = market_data.get_historical_data(ticker, period=period, interval="1d")
+            
+            if hist_data is not None and len(hist_data) > 0:
+                logger.info(f"   Got {len(hist_data)} days of historical data")
+                
+                # Get prediction date
+                prediction_date = pred.timestamp.date() if pred.timestamp else datetime.now().date()
+                logger.info(f"   Prediction date: {prediction_date}")
+                
+                # Filter data from prediction date onwards
+                hist_data_filtered = hist_data[hist_data.index >= prediction_date.strftime('%Y-%m-%d')]
+                
+                if len(hist_data_filtered) > 0:
+                    logger.info(f"   Found {len(hist_data_filtered)} days since prediction")
+                    prediction_price = hist_data_filtered.iloc[0]['Close']
+                    
+                    # Use the latest available close price (could be from today or yesterday)
+                    current_price = hist_data_filtered.iloc[-1]['Close']
+                    
+                    high_since = hist_data_filtered['High'].max()
+                    low_since = hist_data_filtered['Low'].min()
+                    
+                    if len(hist_data_filtered) > 1:
+                        returns = hist_data_filtered['Close'].pct_change().dropna()
+                        volatility = returns.std() * 100 if len(returns) > 0 else 0
+                    
+                    logger.info(f"   Entry: ${prediction_price:.2f}, Current: ${current_price:.2f}")
+                    logger.info(f"   High: ${high_since:.2f}, Low: ${low_since:.2f}, Vol: {volatility:.2f}%")
+                else:
+                    logger.warning(f"   No data since prediction date, using all available")
+                    prediction_price = hist_data.iloc[0]['Close']
+                    current_price = hist_data.iloc[-1]['Close']
+                    high_since = hist_data['High'].max()
+                    low_since = hist_data['Low'].min()
+                    if len(hist_data) > 1:
+                        returns = hist_data['Close'].pct_change().dropna()
+                        volatility = returns.std() * 100 if len(returns) > 0 else 0
+                
+                # Calculate 24h return - use the last 2 days of ALL historical data
+                if len(hist_data) >= 2:
+                    # Get yesterday's close and today's (or latest) close
+                    price_24h_ago = hist_data.iloc[-2]['Close']
+                    price_today = hist_data.iloc[-1]['Close']
+                    return_24h = ((price_today - price_24h_ago) / price_24h_ago) * 100
+                    logger.info(f"   24h return: {return_24h:+.2f}% (from ${price_24h_ago:.2f} to ${price_today:.2f})")
+                elif len(hist_data) == 1:
+                    # Only one day of data available
+                    price_24h_ago = hist_data.iloc[0]['Close']
+                    return_24h = 0
+                    logger.info(f"   24h return: Only 1 day of data available")
+                
+                # Try to get real-time current price (more accurate than historical close)
+                try:
+                    live_price_data = market_data.get_live_price(ticker)
+                    if live_price_data and 'current_price' in live_price_data:
+                        live_current_price = live_price_data['current_price']
+                        if live_current_price > 0:
+                            logger.info(f"   Got live price: ${live_current_price:.2f} (vs historical ${current_price:.2f})")
+                            current_price = live_current_price
+                            
+                            # Recalculate 24h return with live current price
+                            if price_24h_ago > 0:
+                                return_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
+                                logger.info(f"   Updated 24h return with live price: {return_24h:+.2f}%")
+                except Exception as live_error:
+                    logger.debug(f"   Could not get live price: {live_error}")
+            else:
+                logger.warning(f"   No historical data available for {ticker}")
+                    
         except Exception as e:
-            logger.warning(f"Could not get current price for {ticker}: {e}")
+            logger.error(f"❌ Error getting price data for {ticker}: {e}")
+            logger.exception(e)
+    elif ticker and not load_live_prices:
+        logger.info(f"   Skipping live price data for fast loading")
     
     # Calculate days since prediction
     days_since = (datetime.now() - pred.timestamp.replace(tzinfo=None)).days if pred.timestamp else 0
     
-    # Build strategy result message
-    strategy_result = "✅ CORRECT" if outcome.direction_correct else "❌ WRONG"
+    # Calculate actual return from live prices if available, otherwise use saved data
+    actual_return_pct = 0
+    if prediction_price > 0 and current_price > 0:
+        actual_return_pct = ((current_price - prediction_price) / prediction_price) * 100
+        logger.info(f"   Calculated return: {actual_return_pct:+.2f}%")
+    else:
+        # Fallback to saved outcome
+        actual_return_pct = (outcome.actual_return or 0) * 100
+        logger.info(f"   Using saved return: {actual_return_pct:+.2f}%")
+    
+    # Recalculate actual direction from current return
+    if actual_return_pct > 0.001:
+        actual_direction = "up"
+    elif actual_return_pct < -0.001:
+        actual_direction = "down"
+    else:
+        actual_direction = "flat"
+    
+    # Recalculate if prediction is correct
+    is_correct = (predicted_direction == actual_direction)
+    strategy_result = "✅ CORRECT" if is_correct else "❌ WRONG"
     
     return {
-        'total_return_pct': (outcome.actual_return or 0) * 100,
-        'is_correct': outcome.direction_correct or False,
+        'total_return_pct': actual_return_pct,
+        'is_correct': is_correct,
         'strategy_result': strategy_result,
         'return_24h_pct': return_24h,
         'days_since_prediction': days_since,
-        'prediction_price': 0,  # Not stored in outcome
+        'prediction_price': prediction_price,
         'current_price': current_price,
-        'high_since_prediction': 0,  # Not stored in outcome
-        'low_since_prediction': 0,  # Not stored in outcome
-        'volatility': 0,  # Not stored in outcome
+        'price_24h_ago': price_24h_ago,
+        'high_since_prediction': high_since,
+        'low_since_prediction': low_since,
+        'volatility': volatility,
         'predicted_direction': predicted_direction,
         'actual_direction': actual_direction
     }
@@ -398,8 +498,22 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
                 # Use saved performance data
                 try:
                     # Convert saved outcome to performance format
-                    logger.info(f"✅ Using saved performance for modal")
-                    performance = _format_saved_performance(pred, entity, saved_outcome)
+                    # Only load live prices if explicitly requested (load_performance=True)
+                    logger.info(f"✅ Using saved performance for modal (load_live_prices={load_performance})")
+                    performance = _format_saved_performance(pred, entity, saved_outcome, load_live_prices=load_performance)
+                    
+                    # If we loaded live prices, save them back to the database
+                    if load_performance and performance:
+                        try:
+                            logger.info(f"💾 Saving updated performance to database")
+                            prediction_performance_service.save_prediction_performance(
+                                prediction_id, performance, db
+                            )
+                            db.commit()
+                            logger.info(f"✅ Saved updated performance: {performance.get('total_return_pct'):.2f}%")
+                        except Exception as save_error:
+                            logger.warning(f"Could not save updated performance: {save_error}")
+                            db.rollback()
                 except Exception as e:
                     logger.warning(f"Could not format saved performance: {e}")
             elif load_performance:
@@ -407,6 +521,19 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
                 try:
                     logger.info(f"🔄 Loading live performance (load_performance=True)")
                     performance = prediction_performance_service.get_prediction_performance(pred, entity)
+                    
+                    # Save to database
+                    if performance:
+                        try:
+                            logger.info(f"💾 Saving new performance to database")
+                            prediction_performance_service.save_prediction_performance(
+                                prediction_id, performance, db
+                            )
+                            db.commit()
+                            logger.info(f"✅ Saved new performance: {performance.get('total_return_pct'):.2f}%")
+                        except Exception as save_error:
+                            logger.warning(f"Could not save performance: {save_error}")
+                            db.rollback()
                 except Exception as e:
                     logger.warning(f"Could not load performance: {e}")
             else:
@@ -571,18 +698,21 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
                                     ], width=4),
                                     dbc.Col([
                                         html.P([
+                                            html.Strong("24h Ago Price: "),
+                                            f"${performance.get('price_24h_ago', 0):.2f}",
+                                            html.Br(),
                                             html.Strong("High Since Entry: "),
                                             f"${performance['high_since_prediction']:.2f}",
                                             html.Br(),
                                             html.Strong("Low Since Entry: "),
-                                            f"${performance['low_since_prediction']:.2f}",
-                                            html.Br(),
-                                            html.Strong("Volatility: "),
-                                            f"{performance['volatility']:.2f}%"
+                                            f"${performance['low_since_prediction']:.2f}"
                                         ])
                                     ], width=4),
                                     dbc.Col([
                                         html.P([
+                                            html.Strong("Volatility: "),
+                                            f"{performance['volatility']:.2f}%",
+                                            html.Br(),
                                             html.Strong("Predicted: "),
                                             f"{performance['predicted_direction'].upper()}",
                                             html.Br(),
