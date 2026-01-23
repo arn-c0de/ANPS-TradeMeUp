@@ -29,7 +29,7 @@ def create_navbar():
             dbc.Row([
                 dbc.Col([
                     html.Div([
-                        html.H3("📊 TradeMeUp", className="text-primary mb-0"),
+                        html.H3("📊 TradeMeUp v1.0.2", className="text-primary mb-0"),
                         html.Small("AI Trading Intelligence Platform", className="text-muted")
                     ])
                 ], width="auto"),
