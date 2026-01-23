@@ -41,14 +41,13 @@ class DataQualityAgent:
     MAX_WORD_COUNT = 10000
     SIMILARITY_THRESHOLD = 0.85  # For duplicate detection
 
-    def __init__(self, db: Session):
+    def __init__(self):
         """
         Initialize data quality agent.
-
-        Args:
-            db: Database session
+        
+        Note: Uses scoped sessions internally for better isolation.
         """
-        self.db = db
+        pass
 
     def _count_words(self, text: str) -> int:
         """Count words in text."""
@@ -94,18 +93,19 @@ class DataQualityAgent:
             logger.warning("Language detection failed, assuming English")
             return "en", 0.5
 
-    def _check_duplicate_by_hash(self, content_hash: str, news_id: str) -> Optional[str]:
+    def _check_duplicate_by_hash(self, db: Session, content_hash: str, news_id: str) -> Optional[str]:
         """
         Check if article is duplicate by content hash.
 
         Args:
+            db: Database session
             content_hash: SHA-256 hash of content
             news_id: Current article ID
 
         Returns:
             UUID of duplicate article if found, None otherwise
         """
-        duplicate = self.db.query(RawNews).filter(
+        duplicate = db.query(RawNews).filter(
             RawNews.content_hash == content_hash,
             RawNews.news_id != news_id
         ).first()
@@ -116,18 +116,19 @@ class DataQualityAgent:
 
         return None
 
-    def _check_duplicate_by_url(self, url: str, news_id: str) -> Optional[str]:
+    def _check_duplicate_by_url(self, db: Session, url: str, news_id: str) -> Optional[str]:
         """
         Check if article is duplicate by URL.
 
         Args:
+            db: Database session
             url: Article URL
             news_id: Current article ID
 
         Returns:
             UUID of duplicate article if found, None otherwise
         """
-        duplicate = self.db.query(RawNews).filter(
+        duplicate = db.query(RawNews).filter(
             RawNews.url == url,
             RawNews.news_id != news_id
         ).first()
@@ -174,18 +175,19 @@ class DataQualityAgent:
         
         return min(score / 100, 1.0)  # Normalize to 0-1
 
-    def validate_article(self, news_id: str) -> Dict:
+    def validate_article(self, db: Session, news_id: str) -> Dict:
         """
         Validate a single article and calculate quality score.
 
         Args:
+            db: Database session
             news_id: UUID of the article to validate
 
         Returns:
             Dictionary with validation results
         """
         # Fetch article
-        article = self.db.query(RawNews).filter(
+        article = db.query(RawNews).filter(
             RawNews.news_id == news_id
         ).first()
 
@@ -232,10 +234,10 @@ class DataQualityAgent:
             quality_components.append(1.0)
 
         # 4. Duplicate detection by hash
-        duplicate_id = self._check_duplicate_by_hash(article.content_hash, str(article.news_id))
+        duplicate_id = self._check_duplicate_by_hash(db, article.content_hash, str(article.news_id))
         if not duplicate_id:
             # Also check by URL
-            duplicate_id = self._check_duplicate_by_url(article.url, str(article.news_id))
+            duplicate_id = self._check_duplicate_by_url(db, article.url, str(article.news_id))
 
         validation_flags['is_duplicate'] = bool(duplicate_id)
         if duplicate_id:
@@ -270,21 +272,36 @@ class DataQualityAgent:
             'source_reliability_score': source_reliability
         }
 
-    def process_article(self, news_id: str) -> DataQualityScore:
+    def _process_article_no_commit(self, db: Session, news_id: str) -> DataQualityScore:
         """
-        Process article and save quality assessment to database.
+        Process article without committing (for batch operations).
 
         Args:
+            db: Database session
             news_id: UUID of article to process
 
         Returns:
-            DataQualityScore object
+            DataQualityScore object (not yet committed)
         """
-        try:
-            # Validate article
-            result = self.validate_article(news_id)
+        # Validate article
+        result = self.validate_article(db, news_id)
 
-            # Create or update quality score
+        # Check if record exists
+        existing = db.query(DataQualityScore).filter(
+            DataQualityScore.news_id == result['news_id']
+        ).first()
+
+        if existing:
+            # Update existing
+            existing.quality_score = result['quality_score']
+            existing.duplicate_of = result['duplicate_of']
+            existing.validation_flags = result['validation_flags']
+            existing.quality_issues = result['quality_issues']
+            existing.source_reliability_score = result['source_reliability_score']
+            existing.created_at = datetime.utcnow()
+            return existing
+        else:
+            # Create new
             quality_score = DataQualityScore(
                 news_id=result['news_id'],
                 quality_score=result['quality_score'],
@@ -294,44 +311,44 @@ class DataQualityAgent:
                 source_reliability_score=result['source_reliability_score'],
                 created_at=datetime.utcnow()
             )
-
-            # Check if record exists
-            existing = self.db.query(DataQualityScore).filter(
-                DataQualityScore.news_id == result['news_id']
-            ).first()
-
-            if existing:
-                # Update existing
-                existing.quality_score = result['quality_score']
-                existing.duplicate_of = result['duplicate_of']
-                existing.validation_flags = result['validation_flags']
-                existing.quality_issues = result['quality_issues']
-                existing.source_reliability_score = result['source_reliability_score']
-                existing.created_at = datetime.utcnow()
-                quality_score = existing
-            else:
-                # Add new
-                self.db.add(quality_score)
-            
-            self.db.commit()
-            self.db.refresh(quality_score)
-
-            logger.info(
-                f"Processed article {news_id}: "
-                f"quality={quality_score.quality_score:.2f}, "
-                f"valid={result['validation_flags']['is_valid']}"
-            )
-
             return quality_score
 
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Error processing article {news_id}: {e}")
-            raise
+    def process_article(self, news_id: str) -> DataQualityScore:
+        """
+        Process article and save quality assessment to database.
+        
+        DEPRECATED: Use process_batch() for better performance.
+
+        Args:
+            news_id: UUID of article to process
+
+        Returns:
+            DataQualityScore object
+        """
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            try:
+                quality_score = self._process_article_no_commit(db, news_id)
+                
+                if quality_score not in db:
+                    db.add(quality_score)
+
+                logger.info(
+                    f"Processed article {news_id}: "
+                    f"quality={quality_score.quality_score:.2f}, "
+                    f"valid={quality_score.validation_flags.get('is_valid', False)}"
+                )
+
+                return quality_score
+
+            except Exception as e:
+                logger.error(f"Error processing article {news_id}: {e}")
+                raise
 
     def process_batch(self, limit: int = 100) -> Dict:
         """
-        Process batch of unprocessed articles.
+        Process batch of unprocessed articles with optimized single transaction.
 
         Args:
             limit: Maximum number of articles to process
@@ -339,75 +356,86 @@ class DataQualityAgent:
         Returns:
             Statistics dictionary
         """
-        # Find articles without quality scores (newest first)
-        articles = self.db.query(RawNews).outerjoin(
-            DataQualityScore,
-            RawNews.news_id == DataQualityScore.news_id
-        ).filter(
-            DataQualityScore.news_id.is_(None)
-        ).order_by(
-            RawNews.published_at.desc()
-        ).limit(limit).all()
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            # Find articles without quality scores (newest first)
+            articles = db.query(RawNews).outerjoin(
+                DataQualityScore,
+                RawNews.news_id == DataQualityScore.news_id
+            ).filter(
+                DataQualityScore.news_id.is_(None)
+            ).order_by(
+                RawNews.published_at.desc()
+            ).limit(limit).all()
 
-        logger.info(f"Processing {len(articles)} articles for quality assessment")
+            logger.info(f"Processing {len(articles)} articles for quality assessment")
 
-        stats = {
-            'processed': 0,
-            'valid': 0,
-            'duplicates': 0,
-            'low_quality': 0,
-            'errors': 0
-        }
+            stats = {
+                'processed': 0,
+                'valid': 0,
+                'duplicates': 0,
+                'low_quality': 0,
+                'errors': 0
+            }
 
-        for article in articles:
-            try:
-                quality_score = self.process_article(str(article.news_id))
-                stats['processed'] += 1
+            processed_items = []
 
-                if quality_score.validation_flags.get('is_duplicate'):
-                    stats['duplicates'] += 1
-                elif quality_score.validation_flags.get('is_valid'):
-                    stats['valid'] += 1
-                else:
-                    stats['low_quality'] += 1
+            for article in articles:
+                try:
+                    quality_score = self._process_article_no_commit(db, str(article.news_id))
+                    processed_items.append(quality_score)
+                    stats['processed'] += 1
 
-            except Exception as e:
-                stats['errors'] += 1
-                logger.error(f"Error processing article {article.news_id}: {e}")
-                continue
+                    if quality_score.validation_flags.get('is_duplicate'):
+                        stats['duplicates'] += 1
+                    elif quality_score.validation_flags.get('is_valid'):
+                        stats['valid'] += 1
+                    else:
+                        stats['low_quality'] += 1
 
-        logger.info(f"Quality assessment complete. Stats: {stats}")
-        return stats
+                except Exception as e:
+                    stats['errors'] += 1
+                    logger.error(f"Error processing article {article.news_id}: {e}")
+                    continue
+
+            # Bulk save all items
+            if processed_items:
+                db.bulk_save_objects([item for item in processed_items if item not in db])
+
+            logger.info(f"Quality assessment complete. Stats: {stats}")
+            return stats
 
     def get_statistics(self) -> Dict:
         """Get quality statistics."""
-        from sqlalchemy import func
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            total_assessed = db.query(DataQualityScore).count()
 
-        total_assessed = self.db.query(DataQualityScore).count()
+            # Count by quality tiers
+            high_quality = db.query(DataQualityScore).filter(
+                DataQualityScore.quality_score >= 0.8
+            ).count()
 
-        # Count by quality tiers
-        high_quality = self.db.query(DataQualityScore).filter(
-            DataQualityScore.quality_score >= 0.8
-        ).count()
+            medium_quality = db.query(DataQualityScore).filter(
+                DataQualityScore.quality_score >= 0.6,
+                DataQualityScore.quality_score < 0.8
+            ).count()
 
-        medium_quality = self.db.query(DataQualityScore).filter(
-            DataQualityScore.quality_score >= 0.6,
-            DataQualityScore.quality_score < 0.8
-        ).count()
+            low_quality = db.query(DataQualityScore).filter(
+                DataQualityScore.quality_score < 0.6
+            ).count()
 
-        low_quality = self.db.query(DataQualityScore).filter(
-            DataQualityScore.quality_score < 0.6
-        ).count()
+            duplicates = db.query(DataQualityScore).filter(
+                DataQualityScore.duplicate_of.isnot(None)
+            ).count()
 
-        duplicates = self.db.query(DataQualityScore).filter(
-            DataQualityScore.duplicate_of.isnot(None)
-        ).count()
-
-        return {
-            'total_assessed': total_assessed,
-            'high_quality': high_quality,
-            'medium_quality': medium_quality,
-            'low_quality': low_quality,
-            'duplicates': duplicates,
-            'duplicate_rate': duplicates / total_assessed if total_assessed > 0 else 0
-        }
+            return {
+                'total_assessed': total_assessed,
+                'high_quality': high_quality,
+                'medium_quality': medium_quality,
+                'low_quality': low_quality,
+                'duplicates': duplicates,
+                'duplicate_rate': duplicates / total_assessed if total_assessed > 0 else 0
+            }

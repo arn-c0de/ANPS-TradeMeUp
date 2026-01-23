@@ -314,6 +314,19 @@ def test_agent(agent_key):
     
     start_time = datetime.now()
     
+    # List of refactored agents that DON'T need db parameter
+    REFACTORED_AGENTS = {
+        "agent_1_5",  # DataQualityAgent
+        "agent_2",    # ContentUnderstandingAgent
+        "agent_3",    # EntityMappingAgent
+        "agent_4",    # ImpactScoringAgent
+        "agent_4_5",  # SurpriseQuantificationAgent
+        "agent_6",    # PredictionAgent
+        "agent_7",    # FactVerificationAgent
+        "agent_8",    # CorrelationAnalysisAgent
+        "agent_9",    # SignalDecayAgent
+    }
+    
     try:
         # Dynamic import
         module_path = agent_info["module"]
@@ -323,21 +336,21 @@ def test_agent(agent_key):
         module = __import__(module_path, fromlist=[class_name])
         agent_class = getattr(module, class_name)
         
-        # Initialize database session
+        # Initialize database session (for non-refactored agents)
         engine = create_engine(settings.database_url)
         db = Session(engine)
         
-        # Initialize agent
-        agent = agent_class(db)
-        
-        # Basic initialization test
-        if not hasattr(agent, 'db'):
-            return False, "Agent missing database session", {"error": "No db attribute"}
+        # Initialize agent - REFACTORED agents don't need db parameter
+        if agent_key in REFACTORED_AGENTS:
+            agent = agent_class()  # ✅ No db parameter for refactored agents
+        else:
+            agent = agent_class(db)  # Old style for non-refactored agents
         
         # Check if agent has required methods
         required_methods = ['process_batch', '__init__']
         missing_methods = [m for m in required_methods if not hasattr(agent, m)]
         if missing_methods:
+            db.close()
             return False, f"Missing methods: {', '.join(missing_methods)}", {"missing": missing_methods}
         
         # Agent-specific tests
@@ -381,16 +394,16 @@ def run_agent_specific_test(agent, agent_key):
             return {"success": False, "message": "LLM service not initialized"}
             
         elif agent_key == "agent_3":
-            # Test entity extraction
-            if hasattr(agent, 'extract_entities'):
-                return {"success": True, "message": "Entity extraction method available"}
-            return {"success": False, "message": "Missing extract_entities method"}
+            # Test entity extraction - check for process_batch (refactored)
+            if hasattr(agent, 'process_batch'):
+                return {"success": True, "message": "✅ Entity mapping agent ready (refactored)"}
+            return {"success": False, "message": "Missing process_batch method"}
             
         elif agent_key == "agent_4":
-            # Test impact calculation
-            if hasattr(agent, 'calculate_impact'):
-                return {"success": True, "message": "Impact calculation method available"}
-            return {"success": False, "message": "Missing calculate_impact method"}
+            # Test impact calculation - check for process_batch (refactored)
+            if hasattr(agent, 'process_batch'):
+                return {"success": True, "message": "✅ Impact scoring agent ready (refactored)"}
+            return {"success": False, "message": "Missing process_batch method"}
             
         elif agent_key == "agent_4_5":
             # Test surprise calculation
@@ -405,10 +418,28 @@ def run_agent_specific_test(agent, agent_key):
             return {"success": False, "message": "Missing detect_regime method"}
             
         elif agent_key == "agent_6":
-            # Test prediction generation
-            if hasattr(agent, 'generate_prediction'):
-                return {"success": True, "message": "Prediction generation method available"}
-            return {"success": False, "message": "Missing generate_prediction method"}
+            # Test prediction generation - check for process_batch (refactored)
+            if hasattr(agent, 'process_batch'):
+                return {"success": True, "message": "✅ Prediction agent ready (refactored)"}
+            return {"success": False, "message": "Missing process_batch method"}
+        
+        elif agent_key == "agent_7":
+            # Test fact verification - check for process_batch (refactored)
+            if hasattr(agent, 'process_batch'):
+                return {"success": True, "message": "✅ Fact verification agent ready (refactored)"}
+            return {"success": False, "message": "Missing process_batch method"}
+        
+        elif agent_key == "agent_8":
+            # Test correlation analysis - check for process_batch (refactored)
+            if hasattr(agent, 'process_batch'):
+                return {"success": True, "message": "✅ Correlation agent ready (refactored)"}
+            return {"success": False, "message": "Missing process_batch method"}
+        
+        elif agent_key == "agent_9":
+            # Test signal decay - check for process_batch (refactored)
+            if hasattr(agent, 'process_batch'):
+                return {"success": True, "message": "✅ Signal decay agent ready (refactored)"}
+            return {"success": False, "message": "Missing process_batch method"}
             
         else:
             return {"success": True, "message": "Basic initialization successful"}

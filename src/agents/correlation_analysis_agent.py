@@ -23,18 +23,17 @@ class CorrelationAnalysisAgent:
     - Detect unusual correlation patterns
     """
 
-    def __init__(self, db: Session):
+    def __init__(self):
         """
         Initialize correlation analysis agent.
-
-        Args:
-            db: Database session
+        
+        Note: Uses scoped sessions internally for better isolation.
         """
-        self.db = db
         self._correlation_cache = {}
 
     def calculate_price_correlation(
         self,
+        db: Session,
         entity_1: str,
         entity_2: str,
         lookback_days: int = 90
@@ -43,6 +42,7 @@ class CorrelationAnalysisAgent:
         Calculate price correlation between two entities.
 
         Args:
+            db: Database session
             entity_1: First entity ID (ticker)
             entity_2: Second entity ID (ticker)
             lookback_days: Historical period for calculation
@@ -58,12 +58,12 @@ class CorrelationAnalysisAgent:
         cutoff = datetime.utcnow() - timedelta(days=lookback_days)
 
         # Fetch price data for both entities
-        data_1 = self.db.query(MarketData).filter(
+        data_1 = db.query(MarketData).filter(
             MarketData.entity_id == entity_1,
             MarketData.timestamp >= cutoff
         ).order_by(MarketData.timestamp).all()
 
-        data_2 = self.db.query(MarketData).filter(
+        data_2 = db.query(MarketData).filter(
             MarketData.entity_id == entity_2,
             MarketData.timestamp >= cutoff
         ).order_by(MarketData.timestamp).all()
@@ -101,6 +101,7 @@ class CorrelationAnalysisAgent:
 
     def analyze_entity_relationships(
         self,
+        db: Session,
         entity_id: str,
         min_correlation: float = 0.5
     ) -> List[Dict]:
@@ -108,6 +109,7 @@ class CorrelationAnalysisAgent:
         Analyze relationships for a specific entity.
 
         Args:
+            db: Database session
             entity_id: Entity to analyze
             min_correlation: Minimum correlation threshold
 
@@ -115,7 +117,7 @@ class CorrelationAnalysisAgent:
             List of related entities with correlation scores
         """
         # Get all other entities
-        all_entities = self.db.query(Entity).filter(
+        all_entities = db.query(Entity).filter(
             Entity.entity_id != entity_id,
             Entity.entity_type == 'company'
         ).all()
@@ -124,6 +126,7 @@ class CorrelationAnalysisAgent:
 
         for other_entity in all_entities:
             correlation = self.calculate_price_correlation(
+                db,
                 entity_id,
                 other_entity.entity_id,
                 lookback_days=90
@@ -152,37 +155,43 @@ class CorrelationAnalysisAgent:
         Returns:
             Number of relationships updated
         """
-        logger.info(f"Updating relationships for {entity_id}")
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            logger.info(f"Updating relationships for {entity_id}")
 
-        relationships = self.analyze_entity_relationships(entity_id, min_correlation=0.4)
+            relationships = self.analyze_entity_relationships(db, entity_id, min_correlation=0.4)
 
-        # Delete existing relationships
-        self.db.query(EntityRelationship).filter(
-            EntityRelationship.entity_1 == entity_id
-        ).delete()
+            # Delete existing relationships
+            db.query(EntityRelationship).filter(
+                EntityRelationship.entity_1 == entity_id
+            ).delete()
 
-        # Create new relationships
-        count = 0
-        for rel in relationships[:20]:  # Top 20 correlations
-            relationship = EntityRelationship(
-                entity_1=entity_id,
-                entity_2=rel['entity_id'],
-                relationship_type='correlation',
-                strength=abs(rel['correlation']),
-                direction='positive' if rel['correlation'] > 0 else 'negative',
-                metadata={'lookback_days': 90},
-                created_at=datetime.utcnow()
-            )
-            self.db.add(relationship)
-            count += 1
+            # Create new relationships
+            relationship_objects = []
+            for rel in relationships[:20]:  # Top 20 correlations
+                relationship = EntityRelationship(
+                    entity_1=entity_id,
+                    entity_2=rel['entity_id'],
+                    relationship_type='correlation',
+                    strength=abs(rel['correlation']),
+                    direction='positive' if rel['correlation'] > 0 else 'negative',
+                    metadata={'lookback_days': 90},
+                    created_at=datetime.utcnow()
+                )
+                relationship_objects.append(relationship)
 
-        self.db.commit()
-        logger.info(f"Updated {count} relationships for {entity_id}")
+            # Bulk save
+            if relationship_objects:
+                db.bulk_save_objects(relationship_objects)
 
-        return count
+            logger.info(f"Updated {len(relationship_objects)} relationships for {entity_id}")
+
+            return len(relationship_objects)
 
     def detect_correlation_anomalies(
         self,
+        db: Session,
         entity_1: str,
         entity_2: str,
         window_days: int = 30
@@ -191,6 +200,7 @@ class CorrelationAnalysisAgent:
         Detect unusual correlation patterns.
 
         Args:
+            db: Database session
             entity_1: First entity
             entity_2: Second entity
             window_days: Rolling window for anomaly detection
@@ -199,9 +209,9 @@ class CorrelationAnalysisAgent:
             Anomaly detection results
         """
         # Calculate correlation over different timeframes
-        corr_30d = self.calculate_price_correlation(entity_1, entity_2, 30)
-        corr_90d = self.calculate_price_correlation(entity_1, entity_2, 90)
-        corr_180d = self.calculate_price_correlation(entity_1, entity_2, 180)
+        corr_30d = self.calculate_price_correlation(db, entity_1, entity_2, 30)
+        corr_90d = self.calculate_price_correlation(db, entity_1, entity_2, 90)
+        corr_180d = self.calculate_price_correlation(db, entity_1, entity_2, 180)
 
         if None in [corr_30d, corr_90d, corr_180d]:
             return {
@@ -242,87 +252,93 @@ class CorrelationAnalysisAgent:
         Returns:
             Statistics dictionary
         """
-        # Get top entities by mention count
+        from src.models.database import get_scoped_session
         from src.models.entities import NewsEntityMapping
+        
+        with get_scoped_session() as db:
+            # Get top entities by mention count
+            top_entities = db.query(
+                NewsEntityMapping.entity_id,
+                func.count(NewsEntityMapping.mapping_id).label('mentions')
+            ).join(
+                Entity,
+                NewsEntityMapping.entity_id == Entity.entity_id
+            ).filter(
+                Entity.entity_type == 'company'
+            ).group_by(
+                NewsEntityMapping.entity_id
+            ).order_by(
+                func.count(NewsEntityMapping.mapping_id).desc()
+            ).limit(limit).all()
 
-        top_entities = self.db.query(
-            NewsEntityMapping.entity_id,
-            func.count(NewsEntityMapping.mapping_id).label('mentions')
-        ).join(
-            Entity,
-            NewsEntityMapping.entity_id == Entity.entity_id
-        ).filter(
-            Entity.entity_type == 'company'
-        ).group_by(
-            NewsEntityMapping.entity_id
-        ).order_by(
-            func.count(NewsEntityMapping.mapping_id).desc()
-        ).limit(limit).all()
+            logger.info(f"Analyzing correlations for {len(top_entities)} entities")
 
-        logger.info(f"Analyzing correlations for {len(top_entities)} entities")
+            stats = {
+                'entities_processed': 0,
+                'total_relationships': 0,
+                'avg_relationships_per_entity': 0.0,
+                'errors': 0
+            }
 
-        stats = {
-            'entities_processed': 0,
-            'total_relationships': 0,
-            'avg_relationships_per_entity': 0.0,
-            'errors': 0
-        }
+            total_relationships = 0
 
-        total_relationships = 0
+            # Note: Each entity gets its own scoped session via update_entity_relationships
+            for entity_id, mentions in top_entities:
+                try:
+                    count = self.update_entity_relationships(entity_id)
+                    stats['entities_processed'] += 1
+                    total_relationships += count
 
-        for entity_id, mentions in top_entities:
-            try:
-                count = self.update_entity_relationships(entity_id)
-                stats['entities_processed'] += 1
-                total_relationships += count
+                except Exception as e:
+                    stats['errors'] += 1
+                    logger.error(f"Error analyzing correlations for {entity_id}: {e}")
+                    continue
 
-            except Exception as e:
-                stats['errors'] += 1
-                logger.error(f"Error analyzing correlations for {entity_id}: {e}")
-                continue
+            if stats['entities_processed'] > 0:
+                stats['total_relationships'] = total_relationships
+                stats['avg_relationships_per_entity'] = total_relationships / stats['entities_processed']
 
-        if stats['entities_processed'] > 0:
-            stats['total_relationships'] = total_relationships
-            stats['avg_relationships_per_entity'] = total_relationships / stats['entities_processed']
-
-        logger.info(f"Correlation analysis complete. Stats: {stats}")
-        return stats
+            logger.info(f"Correlation analysis complete. Stats: {stats}")
+            return stats
 
     def get_statistics(self) -> Dict:
         """Get correlation analysis statistics."""
-        total_relationships = self.db.query(EntityRelationship).filter(
-            EntityRelationship.relationship_type == 'correlation'
-        ).count()
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            total_relationships = db.query(EntityRelationship).filter(
+                EntityRelationship.relationship_type == 'correlation'
+            ).count()
 
-        if total_relationships == 0:
+            if total_relationships == 0:
+                return {
+                    'total_relationships': 0,
+                    'avg_strength': 0.0,
+                    'positive_count': 0,
+                    'negative_count': 0
+                }
+
+            # Average correlation strength
+            avg_strength = db.query(
+                func.avg(EntityRelationship.strength)
+            ).filter(
+                EntityRelationship.relationship_type == 'correlation'
+            ).scalar() or 0.0
+
+            # Positive/negative counts
+            positive = db.query(EntityRelationship).filter(
+                EntityRelationship.relationship_type == 'correlation',
+                EntityRelationship.direction == 'positive'
+            ).count()
+
+            negative = db.query(EntityRelationship).filter(
+                EntityRelationship.relationship_type == 'correlation',
+                EntityRelationship.direction == 'negative'
+            ).count()
+
             return {
-                'total_relationships': 0,
-                'avg_strength': 0.0,
-                'positive_count': 0,
-                'negative_count': 0
+                'total_relationships': total_relationships,
+                'avg_strength': float(avg_strength),
+                'positive_count': positive,
+                'negative_count': negative
             }
-
-        # Average correlation strength
-        avg_strength = self.db.query(
-            func.avg(EntityRelationship.strength)
-        ).filter(
-            EntityRelationship.relationship_type == 'correlation'
-        ).scalar() or 0.0
-
-        # Positive/negative counts
-        positive = self.db.query(EntityRelationship).filter(
-            EntityRelationship.relationship_type == 'correlation',
-            EntityRelationship.direction == 'positive'
-        ).count()
-
-        negative = self.db.query(EntityRelationship).filter(
-            EntityRelationship.relationship_type == 'correlation',
-            EntityRelationship.direction == 'negative'
-        ).count()
-
-        return {
-            'total_relationships': total_relationships,
-            'avg_strength': float(avg_strength),
-            'positive_count': positive,
-            'negative_count': negative
-        }

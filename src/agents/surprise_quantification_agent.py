@@ -50,14 +50,13 @@ class SurpriseQuantificationAgent:
         'guidance': 0.15
     }
 
-    def __init__(self, db: Session):
+    def __init__(self):
         """
         Initialize surprise quantification agent.
-
-        Args:
-            db: Database session
+        
+        Note: Uses scoped sessions internally for better isolation.
         """
-        self.db = db
+        pass
 
     def _extract_metric(self, text: str, metric_name: str) -> Optional[float]:
         """
@@ -241,22 +240,23 @@ class SurpriseQuantificationAgent:
             'expected_reaction': self._determine_expected_reaction(surprise_normalized)
         }
 
-    def analyze_article(self, news_id: str) -> List[Dict]:
+    def analyze_article(self, db: Session, news_id: str) -> List[Dict]:
         """
         Analyze article for surprises.
 
         Args:
+            db: Database session
             news_id: UUID of article
 
         Returns:
             List of surprise analysis results
         """
         # Fetch article and processed data
-        news = self.db.query(RawNews).filter(RawNews.news_id == news_id).first()
+        news = db.query(RawNews).filter(RawNews.news_id == news_id).first()
         if not news:
             raise ValueError(f"News {news_id} not found")
 
-        processed = self.db.query(ProcessedNews).filter(
+        processed = db.query(ProcessedNews).filter(
             ProcessedNews.news_id == news_id
         ).first()
 
@@ -266,7 +266,7 @@ class SurpriseQuantificationAgent:
             return []
 
         # Get entities
-        mappings = self.db.query(NewsEntityMapping).filter(
+        mappings = db.query(NewsEntityMapping).filter(
             NewsEntityMapping.news_id == news_id,
             NewsEntityMapping.exposure_type == 'direct'
         ).all()
@@ -354,9 +354,45 @@ class SurpriseQuantificationAgent:
 
         return surprises
 
+    def _process_article_no_commit(self, db: Session, news_id: str) -> List[SurpriseScore]:
+        """
+        Process article without committing (for batch operations).
+
+        Args:
+            db: Database session
+            news_id: UUID of article
+
+        Returns:
+            List of SurpriseScore objects (not yet committed)
+        """
+        surprises = self.analyze_article(db, news_id)
+
+        surprise_scores = []
+
+        for surprise in surprises:
+            score = SurpriseScore(
+                surprise_id=uuid.uuid4(),
+                news_id=news_id,
+                metric=surprise['metric'],
+                actual=surprise['actual'],
+                consensus=surprise['consensus'],
+                surprise_raw=surprise['surprise_raw'],
+                surprise_normalized=surprise['surprise_normalized'],
+                surprise_percentile=surprise['surprise_percentile'],
+                market_priced_in=surprise['market_priced_in'],
+                true_surprise=surprise['true_surprise'],
+                expected_reaction=surprise['expected_reaction'],
+                created_at=datetime.utcnow()
+            )
+            surprise_scores.append(score)
+
+        return surprise_scores
+
     def process_article(self, news_id: str) -> List[SurpriseScore]:
         """
         Process article and save surprise scores.
+        
+        DEPRECATED: Use process_batch() for better performance.
 
         Args:
             news_id: UUID of article
@@ -364,46 +400,25 @@ class SurpriseQuantificationAgent:
         Returns:
             List of SurpriseScore objects
         """
-        try:
-            surprises = self.analyze_article(news_id)
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            try:
+                surprise_scores = self._process_article_no_commit(db, news_id)
+                
+                if surprise_scores:
+                    db.add_all(surprise_scores)
+                    logger.info(f"Created {len(surprise_scores)} surprise scores for news {news_id}")
 
-            surprise_scores = []
+                return surprise_scores
 
-            for surprise in surprises:
-                score = SurpriseScore(
-                    surprise_id=uuid.uuid4(),
-                    news_id=news_id,
-                    metric=surprise['metric'],
-                    actual=surprise['actual'],
-                    consensus=surprise['consensus'],
-                    surprise_raw=surprise['surprise_raw'],
-                    surprise_normalized=surprise['surprise_normalized'],
-                    surprise_percentile=surprise['surprise_percentile'],
-                    market_priced_in=surprise['market_priced_in'],
-                    true_surprise=surprise['true_surprise'],
-                    expected_reaction=surprise['expected_reaction'],
-                    created_at=datetime.utcnow()
-                )
-
-                self.db.add(score)
-                surprise_scores.append(score)
-
-            # Commit
-            self.db.commit()
-
-            if surprise_scores:
-                logger.info(f"Created {len(surprise_scores)} surprise scores for news {news_id}")
-
-            return surprise_scores
-
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Error processing surprises for {news_id}: {e}")
-            raise
+            except Exception as e:
+                logger.error(f"Error processing surprises for {news_id}: {e}")
+                raise
 
     def process_batch(self, limit: int = 20) -> Dict:
         """
-        Process batch of earnings news for surprises.
+        Process batch of earnings news for surprises with optimized single transaction.
 
         Args:
             limit: Maximum number of articles to process
@@ -411,90 +426,103 @@ class SurpriseQuantificationAgent:
         Returns:
             Statistics dictionary
         """
-        # Find earnings news without surprise scores
-        articles = self.db.query(RawNews.news_id).join(
-            ProcessedNews,
-            RawNews.news_id == ProcessedNews.news_id
-        ).outerjoin(
-            SurpriseScore,
-            RawNews.news_id == SurpriseScore.news_id
-        ).filter(
-            ProcessedNews.event_type.in_(['earnings', 'guidance']),
-            SurpriseScore.surprise_id.is_(None)
-        ).order_by(
-            RawNews.published_at.desc()  # Newest first
-        ).limit(limit).all()
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            # Find earnings news without surprise scores
+            articles = db.query(RawNews.news_id).join(
+                ProcessedNews,
+                RawNews.news_id == ProcessedNews.news_id
+            ).outerjoin(
+                SurpriseScore,
+                RawNews.news_id == SurpriseScore.news_id
+            ).filter(
+                ProcessedNews.event_type.in_(['earnings', 'guidance']),
+                SurpriseScore.surprise_id.is_(None)
+            ).order_by(
+                RawNews.published_at.desc()  # Newest first
+            ).limit(limit).all()
 
-        logger.info(f"Processing {len(articles)} articles for surprise quantification")
+            logger.info(f"Processing {len(articles)} articles for surprise quantification")
 
-        stats = {
-            'processed': 0,
-            'surprises_found': 0,
-            'with_consensus': 0,
-            'without_consensus': 0,
-            'errors': 0
-        }
+            stats = {
+                'processed': 0,
+                'surprises_found': 0,
+                'with_consensus': 0,
+                'without_consensus': 0,
+                'errors': 0
+            }
 
-        for (news_id,) in articles:
-            try:
-                surprise_scores = self.process_article(str(news_id))
-                stats['processed'] += 1
-                stats['surprises_found'] += len(surprise_scores)
+            all_surprise_scores = []
 
-                for score in surprise_scores:
-                    if score.consensus is not None:
-                        stats['with_consensus'] += 1
-                    else:
-                        stats['without_consensus'] += 1
+            for (news_id,) in articles:
+                try:
+                    surprise_scores = self._process_article_no_commit(db, str(news_id))
+                    stats['processed'] += 1
+                    stats['surprises_found'] += len(surprise_scores)
 
-            except Exception as e:
-                stats['errors'] += 1
-                logger.error(f"Error processing {news_id}: {e}")
-                continue
+                    for score in surprise_scores:
+                        if score.consensus is not None:
+                            stats['with_consensus'] += 1
+                        else:
+                            stats['without_consensus'] += 1
+                    
+                    all_surprise_scores.extend(surprise_scores)
 
-        logger.info(f"Surprise quantification complete. Stats: {stats}")
-        return stats
+                except Exception as e:
+                    stats['errors'] += 1
+                    logger.error(f"Error processing {news_id}: {e}")
+                    continue
+
+            # Bulk save all surprise scores
+            if all_surprise_scores:
+                db.bulk_save_objects(all_surprise_scores)
+
+            logger.info(f"Surprise quantification complete. Stats: {stats}")
+            return stats
 
     def get_statistics(self) -> Dict:
         """Get surprise statistics."""
         from sqlalchemy import func
+        from src.models.database import get_scoped_session
+        
+        with get_scoped_session() as db:
+            total_surprises = db.query(SurpriseScore).count()
 
-        total_surprises = self.db.query(SurpriseScore).count()
+            # Count by metric
+            by_metric = db.query(
+                SurpriseScore.metric,
+                func.count(SurpriseScore.surprise_id).label('count')
+            ).group_by(SurpriseScore.metric).all()
 
-        # Count by metric
-        by_metric = self.db.query(
-            SurpriseScore.metric,
-            func.count(SurpriseScore.surprise_id).label('count')
-        ).group_by(SurpriseScore.metric).all()
+            # Average surprise magnitude
+            avg_surprise = db.query(
+                func.avg(func.abs(SurpriseScore.surprise_normalized))
+            ).scalar()
 
-        # Average surprise magnitude
-        avg_surprise = self.db.query(
-            func.avg(func.abs(SurpriseScore.surprise_normalized))
-        ).scalar()
+            # Largest surprises
+            top_surprises = db.query(
+                SurpriseScore.news_id,
+                SurpriseScore.metric,
+                SurpriseScore.surprise_normalized,
+                SurpriseScore.expected_reaction
+            ).filter(
+                SurpriseScore.surprise_normalized.isnot(None)
+            ).order_by(
+                func.abs(SurpriseScore.surprise_normalized).desc()
+            ).limit(10).all()
 
-        # Largest surprises
-        top_surprises = self.db.query(
-            SurpriseScore.news_id,
-            SurpriseScore.metric,
-            SurpriseScore.surprise_normalized,
-            SurpriseScore.expected_reaction
-        ).filter(
-            SurpriseScore.surprise_normalized.isnot(None)
-        ).order_by(
-            func.abs(SurpriseScore.surprise_normalized).desc()
-        ).limit(10).all()
-
-        return {
-            'total_surprises': total_surprises,
-            'by_metric': {metric: count for metric, count in by_metric},
-            'avg_surprise_magnitude': float(avg_surprise) if avg_surprise else 0.0,
-            'top_surprises': [
-                {
-                    'news_id': str(nid),
-                    'metric': metric,
-                    'surprise_std_devs': float(surprise),
-                    'expected_reaction': reaction
-                }
-                for nid, metric, surprise, reaction in top_surprises
-            ]
-        }
+            return {
+                'total_surprises': total_surprises,
+                'by_metric': {metric: count for metric, count in by_metric},
+                'avg_surprise_magnitude': float(avg_surprise) if avg_surprise else 0.0,
+                'top_surprises': [
+                    {
+                        'news_id': str(nid),
+                        'metric': metric,
+                        'surprise_std_devs': float(surprise),
+                        'expected_reaction': reaction
+                    }
+                    for nid, metric, surprise, reaction in top_surprises
+                ]
+            }

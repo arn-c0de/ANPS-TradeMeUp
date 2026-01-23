@@ -34,3 +34,36 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+def get_scoped_session():
+    """
+    Context manager for scoped database sessions with automatic transaction management.
+
+    Usage:
+        with get_scoped_session() as db:
+            # Do database operations
+            db.add(record)
+            # Commit happens automatically on success
+
+    On exception, automatically rolls back transaction.
+    Always closes session on exit.
+
+    Returns:
+        Context manager yielding database session
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def scoped_session_cm():
+        session = SessionLocal()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    return scoped_session_cm()
