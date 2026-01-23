@@ -543,37 +543,65 @@ def update_predictions_table(n, entities, start_date, end_date, horizon, min_con
 
 @app.callback(
     [Output("prediction-modal", "is_open"),
-     Output("prediction-modal-title", "children"),
-     Output("prediction-modal-body", "children")],
+     Output("prediction-detail-cache", "data")],
     [Input({"type": "pred-detail-btn", "index": ALL}, "n_clicks"),
      Input("close-prediction-modal", "n_clicks")],
     [State("prediction-modal", "is_open"),
-     State({"type": "pred-detail-btn", "index": ALL}, "id")],
+     State({"type": "pred-detail-btn", "index": ALL}, "id"),
+     State("prediction-detail-cache", "data")],
     prevent_initial_call=True
 )
-def toggle_prediction_modal(detail_clicks, close_click, is_open, button_ids):
-    """Open/close prediction detail modal"""
+def toggle_prediction_modal(detail_clicks, close_click, is_open, button_ids, cached_data):
+    """Open/close prediction detail modal and cache prediction_id"""
     from dash import callback_context
 
     if not callback_context.triggered:
-        return False, "", ""
+        return dash.no_update, dash.no_update
 
     trigger_id = callback_context.triggered[0]["prop_id"]
 
+    # Only process if the trigger value changed (not just a re-render)
+    trigger_value = callback_context.triggered[0].get("value")
+    if trigger_value is None or trigger_value == 0:
+        return dash.no_update, dash.no_update
+
     # Close button clicked
     if "close-prediction-modal" in trigger_id:
-        return False, "", ""
+        return False, dash.no_update
 
-    # Detail button clicked
-    if detail_clicks and any(detail_clicks):
-        # Find which button was clicked
-        for i, clicks in enumerate(detail_clicks):
-            if clicks:
-                prediction_id = button_ids[i]["index"]
-                title, body = predictions.get_prediction_details(engine, prediction_id)
-                return True, title, body
+    # Detail button clicked - parse the prop_id to get the index
+    if "pred-detail-btn" in trigger_id and ".n_clicks" in trigger_id:
+        # Extract prediction_id from triggered prop_id
+        import json
+        # prop_id format: '{"index":"uuid","type":"pred-detail-btn"}.n_clicks'
+        id_str = trigger_id.split('.')[0]
+        id_dict = json.loads(id_str)
+        prediction_id = id_dict.get("index")
 
-    return is_open, "", ""
+        if prediction_id:
+            return True, {"prediction_id": prediction_id}
+
+    # No actual button was clicked (just re-render), don't update
+    return dash.no_update, dash.no_update
+
+
+@app.callback(
+    [Output("prediction-modal-title", "children"),
+     Output("prediction-modal-body", "children")],
+    [Input("prediction-detail-cache", "data")],
+    [State("prediction-modal", "is_open")],
+    prevent_initial_call=True
+)
+def update_modal_content(cached_data, is_open):
+    """Update modal content from cached prediction_id (survives interval updates)"""
+    # Only load if modal is open and we have a prediction_id
+    if not is_open or not cached_data or "prediction_id" not in cached_data:
+        return dash.no_update, dash.no_update
+
+    # Load fresh data from DB using cached prediction_id
+    prediction_id = cached_data["prediction_id"]
+    title, body = predictions.get_prediction_details(engine, prediction_id)
+    return title, body
 
 
 # ============================================================================
@@ -856,49 +884,96 @@ def toggle_quick_edit_modal(label_clicks, cancel_click, apply_click, panels_conf
 
 
 @app.callback(
-    Output("symbol-search-results", "children"),
+    [Output("symbol-search-results", "children"),
+     Output("symbol-search-cache", "data")],
     Input("quick-edit-symbol-input", "value"),
     prevent_initial_call=True
 )
-def search_symbols(query):
-    """Search for stock symbols as user types"""
+def search_symbols_live(query):
+    """Search for stock symbols as user types (live search)"""
     if not query or len(query) < 1:
-        return html.Div()
-    
+        return html.Div([
+            html.Small("💡 Start typing to search symbols by ticker or company name",
+                      className="text-muted")
+        ]), []
+
     try:
         from src.gui.charts.market_data import market_data
-        results = market_data.search_symbol(query)
-        
+        results = market_data.search_symbols(query, limit=8)
+
         if not results:
             return dbc.Alert(
-                f"⚠️ No results found for '{query}'. Try a different symbol.",
+                f"No results found for '{query}'. Try a different search term.",
                 color="warning",
-                className="mt-2"
-            )
-        
-        # Display search results
+                className="mt-2",
+                style={"fontSize": "0.9rem"}
+            ), []
+
+        # Cache symbols for later retrieval
+        symbols_cache = [r.get('symbol', '') for r in results]
+
+        # Display search results as clickable buttons
         result_items = []
-        for result in results:
+        for i, result in enumerate(results):
+            symbol = result.get('symbol', 'N/A')
+            name = result.get('name', 'Unknown')
+            result_type = result.get('type', 'EQUITY')
+
             result_items.append(
                 dbc.ListGroupItem([
-                    html.Strong(result.get('symbol', 'N/A'), className="me-2"),
-                    html.Span(result.get('name', 'Unknown'), className="text-muted"),
-                    html.Br(),
-                    html.Small(f"{result.get('exchange', 'N/A')} | {result.get('type', 'EQUITY')}", className="text-muted")
-                ])
+                    html.Div([
+                        html.Div([
+                            html.Strong(symbol, className="text-primary", style={"fontSize": "1.1rem"}),
+                            html.Span(f" · {name}", className="text-muted ms-2")
+                        ]),
+                        html.Small(result_type, className="badge bg-secondary mt-1")
+                    ]),
+                    dbc.Button("Select",
+                              id={"type": "symbol-result-btn", "index": i},
+                              size="sm",
+                              color="primary",
+                              outline=True,
+                              className="mt-2",
+                              n_clicks=0)
+                ], className="mb-1", action=True, style={"cursor": "pointer"})
             )
-        
+
         return html.Div([
-            html.P("Search Results:", className="fw-bold mb-2 mt-2"),
-            dbc.ListGroup(result_items, className="mb-2")
-        ])
-    
+            html.P([
+                html.Strong(f"{len(results)} Result{'s' if len(results) != 1 else ''}"),
+                html.Small(" (click Select to choose)", className="text-muted ms-2")
+            ], className="mb-2 mt-2"),
+            dbc.ListGroup(result_items, flush=True)
+        ]), symbols_cache
+
     except Exception as e:
         return dbc.Alert(
-            f"⚠️ Error searching: {str(e)}",
+            f"Error searching: {str(e)}",
             color="danger",
             className="mt-2"
-        )
+        ), []
+
+
+@app.callback(
+    Output("quick-edit-symbol-input", "value", allow_duplicate=True),
+    Input({"type": "symbol-result-btn", "index": ALL}, "n_clicks"),
+    State("symbol-search-cache", "data"),
+    prevent_initial_call=True
+)
+def select_symbol_from_search(clicks, symbols_cache):
+    """Update input when user clicks on a search result"""
+    from dash import callback_context
+
+    if not callback_context.triggered or not any(clicks) or not symbols_cache:
+        return dash.no_update
+
+    # Find which button was clicked
+    for i, click_count in enumerate(clicks):
+        if click_count and click_count > 0:
+            if i < len(symbols_cache):
+                return symbols_cache[i]
+
+    return dash.no_update
 
 
 @app.callback(
