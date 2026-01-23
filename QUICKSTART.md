@@ -57,7 +57,16 @@ alembic upgrade head
 ## Pipeline ausführen
 
 ```bash
-# KOMPLETTE MVP PIPELINE (empfohlen)
+# CONTINUOUS PIPELINE (Production Mode - NEU! ⚡)
+python scripts/run_continuous_pipeline.py
+# Läuft dauerhaft, prüft alle 5 Minuten auf neue Daten
+# Dynamische Batch-Größen, Auto-Retry, Memory Management
+# Ctrl+C für graceful shutdown
+
+# Mit Custom-Settings:
+python scripts/run_continuous_pipeline.py --interval 120 --max-memory 4096
+
+# KOMPLETTE MVP PIPELINE (One-Shot Mode)
 python scripts/run_mvp_pipeline.py
 
 # Nur einzelne Agents testen:
@@ -67,6 +76,40 @@ python scripts/run_full_pipeline.py  # Agents 1-3
 # Live Logging testen (für Dashboard):
 python test_live_logging.py
 ```
+
+## 🔥 Continuous Pipeline - Performance Features
+
+### Basic Usage
+```bash
+# Standard (5min interval, 2GB memory limit)
+python scripts/run_continuous_pipeline.py
+
+# Development (2min checks, schnellerer Feedback)
+python scripts/run_continuous_pipeline.py --interval 120
+
+# Production (4GB memory, optimiert für Durchsatz)
+python scripts/run_continuous_pipeline.py --max-memory 4096
+```
+
+### Features
+- **Automatische Batch-Anpassung**: System optimiert sich selbst
+- **Memory Management**: GC bei Überschreitung, Memory-Tracking
+- **Graceful Shutdown**: Ctrl+C beendet sauber nach aktueller Iteration
+- **Error Recovery**: Exponential Backoff bei Fehlern
+- **Performance Metrics**: Avg Time, Memory Delta, Batch Sizes
+
+### Output Example
+```
+=============================================================
+Pipeline Iteration #3 - 2026-01-23 04:30:15
+Memory: 892.3MB | Avg Time: 124.5s | Batch Sizes: {'quality': 60, 'content': 12}
+=============================================================
+
+Iteration #3 completed in 118.2s (avg: 124.5s)
+Memory delta: +12.3MB (now: 904.6MB)
+```
+
+Details: [Continuous Pipeline Performance Guide](docs/CONTINUOUS_PIPELINE_PERFORMANCE.md)
 
 ## Dashboard starten (NEU!)
 

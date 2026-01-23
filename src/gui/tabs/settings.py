@@ -120,6 +120,61 @@ def create_layout():
             ], md=8)
         ], className="mb-4"),
         
+        # LLM Configuration Section
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader(html.H5("🤖 LLM Configuration", className="mb-0")),
+                    dbc.CardBody([
+                        html.P("Configure AI model for content analysis", className="text-muted mb-3"),
+
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label("LLM Provider:", className="fw-bold"),
+                                dcc.Dropdown(
+                                    id="settings-llm-provider",
+                                    options=[
+                                        {'label': '🏠 Ollama (Local)', 'value': 'ollama'},
+                                        {'label': '🌐 OpenAI', 'value': 'openai'},
+                                        {'label': '🧠 Anthropic (Claude)', 'value': 'anthropic'}
+                                    ],
+                                    value='ollama',
+                                    clearable=False,
+                                    className="mb-3"
+                                )
+                            ], md=6),
+                            dbc.Col([
+                                dbc.Label("Model:", className="fw-bold"),
+                                dcc.Dropdown(
+                                    id="settings-llm-model",
+                                    placeholder="Select a model...",
+                                    clearable=False,
+                                    className="mb-3"
+                                )
+                            ], md=6)
+                        ]),
+
+                        # Provider-specific settings
+                        html.Div(id="llm-provider-settings"),
+
+                        # Cost & Performance Info
+                        dbc.Alert(id="llm-cost-info", color="info", className="mt-3"),
+
+                        html.Hr(),
+
+                        dbc.Button(
+                            "💾 Save LLM Settings",
+                            id="btn-save-llm-settings",
+                            color="primary",
+                            className="w-100"
+                        ),
+
+                        html.Div(id="llm-settings-save-status", className="mt-3")
+                    ])
+                ])
+            ], md=8)
+        ], className="mb-4"),
+
         # Pipeline Configuration Section
         dbc.Row([
             dbc.Col([
@@ -127,7 +182,7 @@ def create_layout():
                     dbc.CardHeader(html.H5("⚙️ Pipeline Configuration", className="mb-0")),
                     dbc.CardBody([
                         html.H6("Continuous Pipeline Settings", className="mb-3"),
-                        
+
                         dbc.Row([
                             dbc.Col([
                                 dbc.Label("Check Interval (minutes):"),
@@ -154,16 +209,16 @@ def create_layout():
                                 )
                             ], md=6)
                         ]),
-                        
+
                         html.Hr(),
-                        
+
                         dbc.Button(
-                            "💾 Save Settings",
+                            "💾 Save Pipeline Settings",
                             id="btn-save-settings",
                             color="success",
                             className="w-100"
                         ),
-                        
+
                         html.Div(id="settings-save-status", className="mt-3")
                     ])
                 ])

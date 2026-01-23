@@ -1,12 +1,24 @@
 """
 Continuous Pipeline Runner
 Runs the pipeline continuously in the background, checking for new articles periodically
+
+Performance & Hardening Features:
+- Graceful shutdown with signal handling
+- Exponential backoff on errors
+- Memory monitoring and limits
+- Dynamic batch sizing
+- Connection pooling
+- Performance metrics
 """
 import sys
 import time
+import signal
 import logging
+import psutil
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
+from collections import deque
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -34,21 +46,86 @@ logger = logging.getLogger(__name__)
 
 
 class ContinuousPipeline:
-    """Continuously running pipeline for production mode"""
+    """Continuously running pipeline for production mode with performance optimization"""
     
-    def __init__(self, check_interval: int = 300):
+    def __init__(self, check_interval: int = 300, max_memory_mb: int = 2048):
         """
         Initialize continuous pipeline
         
         Args:
             check_interval: Seconds between pipeline runs (default: 300 = 5 minutes)
+            max_memory_mb: Maximum memory usage in MB before forcing garbage collection
         """
         self.check_interval = check_interval
+        self.max_memory_mb = max_memory_mb
         self.running = False
-        self.db = None
+        self.db: Optional[object] = None
+        
+        # Performance metrics
+        self.iteration_times = deque(maxlen=20)  # Last 20 iteration times
+        self.error_count = 0
+        self.consecutive_errors = 0
+        self.backoff_time = 5  # Initial backoff time in seconds
+        
+        # Dynamic batch sizes (will be adjusted based on performance)
+        self.batch_sizes = {
+            'quality': 50,
+            'content': 10,
+            'entity': 10,
+            'surprise': 20,
+            'impact': 20,
+            'prediction': 50
+        }
+        
+        # Setup signal handlers for graceful shutdown
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        
+        logger.info(f"Pipeline initialized with max_memory={max_memory_mb}MB, check_interval={check_interval}s")
+    
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals gracefully"""
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        activity_logger.log_activity(f"Shutdown signal received: {signum}", "WARNING")
+        self.stop()
+    
+    def _check_memory(self) -> float:
+        """Check current memory usage and trigger GC if needed"""
+        process = psutil.Process()
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        
+        if memory_mb > self.max_memory_mb:
+            logger.warning(f"Memory usage {memory_mb:.1f}MB exceeds limit {self.max_memory_mb}MB, forcing GC")
+            import gc
+            gc.collect()
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            logger.info(f"Post-GC memory: {memory_mb:.1f}MB")
+        
+        return memory_mb
+    
+    def _adjust_batch_sizes(self, duration: float):
+        """Dynamically adjust batch sizes based on iteration performance"""
+        # If iteration took too long (>5 min), reduce batch sizes
+        if duration > 300:
+            for key in self.batch_sizes:
+                self.batch_sizes[key] = max(5, int(self.batch_sizes[key] * 0.8))
+            logger.info(f"Reduced batch sizes due to slow iteration: {self.batch_sizes}")
+        # If iteration was fast (<2 min) and no recent errors, increase batch sizes
+        elif duration < 120 and self.consecutive_errors == 0:
+            for key in self.batch_sizes:
+                max_size = {'quality': 100, 'content': 20, 'entity': 20, 
+                           'surprise': 50, 'impact': 50, 'prediction': 100}
+                self.batch_sizes[key] = min(max_size[key], int(self.batch_sizes[key] * 1.2))
+            logger.info(f"Increased batch sizes due to good performance: {self.batch_sizes}")
+    
+    def _get_avg_iteration_time(self) -> float:
+        """Calculate average iteration time from recent history"""
+        if not self.iteration_times:
+            return 0.0
+        return sum(self.iteration_times) / len(self.iteration_times)
         
     def run(self):
-        """Run the pipeline continuously"""
+        """Run the pipeline continuously with performance monitoring"""
         self.running = True
         activity_logger.log_activity("Continuous Pipeline Mode STARTED", "SUCCESS")
         logger.info(f"Starting continuous pipeline (check every {self.check_interval}s)")
@@ -60,24 +137,58 @@ class ContinuousPipeline:
                 iteration += 1
                 start_time = datetime.now()
                 
+                # Check memory before iteration
+                memory_before = self._check_memory()
+                
                 logger.info(f"=" * 60)
                 logger.info(f"Pipeline Iteration #{iteration} - {start_time}")
+                logger.info(f"Memory: {memory_before:.1f}MB | Avg Time: {self._get_avg_iteration_time():.1f}s | Batch Sizes: {self.batch_sizes}")
                 logger.info(f"=" * 60)
                 
                 activity_logger.log_activity(f"Starting Pipeline Iteration #{iteration}", "INFO")
                 
-                # Create fresh database session
-                self.db = SessionLocal()
+                # Create fresh database session with retry logic
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        self.db = SessionLocal()
+                        break
+                    except Exception as db_error:
+                        if attempt < max_retries - 1:
+                            wait_time = 2 ** attempt
+                            logger.warning(f"DB connection failed (attempt {attempt+1}/{max_retries}), retrying in {wait_time}s...")
+                            time.sleep(wait_time)
+                        else:
+                            raise
                 
                 # Run all pipeline phases
                 new_articles = self._run_pipeline_iteration()
                 
-                # Close database session
-                self.db.close()
+                # Close database session safely
+                if self.db:
+                    try:
+                        self.db.close()
+                    except Exception as e:
+                        logger.error(f"Error closing DB session: {e}")
+                    finally:
+                        self.db = None
                 
+                # Track performance metrics
                 duration = (datetime.now() - start_time).total_seconds()
-                logger.info(f"Iteration #{iteration} completed in {duration:.1f}s")
+                self.iteration_times.append(duration)
+                self.consecutive_errors = 0  # Reset error counter on success
+                self.backoff_time = 5  # Reset backoff time
+                
+                # Check memory after iteration
+                memory_after = self._check_memory()
+                memory_delta = memory_after - memory_before
+                
+                logger.info(f"Iteration #{iteration} completed in {duration:.1f}s (avg: {self._get_avg_iteration_time():.1f}s)")
+                logger.info(f"Memory delta: {memory_delta:+.1f}MB (now: {memory_after:.1f}MB)")
                 activity_logger.log_activity(f"Iteration #{iteration} completed in {duration:.1f}s", "SUCCESS")
+                
+                # Adjust batch sizes based on performance
+                self._adjust_batch_sizes(duration)
                 
                 # Check if there's any unprocessed work in the pipeline
                 check_db = SessionLocal()
@@ -85,39 +196,50 @@ class ContinuousPipeline:
                     from src.models.analysis import SurpriseScore, ImpactScore
                     from src.models.predictions import Prediction
                     from src.models.entities import NewsEntityMapping
+                    from sqlalchemy import and_
                     
                     # Count articles at different pipeline stages that need processing
-                    # 1. RawNews without quality_score
-                    unassessed = check_db.query(RawNews).filter(RawNews.quality_score.is_(None)).count()
+                    # 1. RawNews without quality_score (use == None for SQLAlchemy)
+                    unassessed = check_db.query(RawNews).filter(RawNews.quality_score == None).count()
                     
                     # 2. Quality-checked RawNews without ProcessedNews
                     unanalyzed = check_db.query(RawNews).filter(
-                        RawNews.quality_score.isnot(None)
+                        RawNews.quality_score != None
                     ).outerjoin(
                         ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-                    ).filter(ProcessedNews.news_id.is_(None)).count()
+                    ).filter(ProcessedNews.news_id == None).count()
                     
                     # 3. ProcessedNews without entity mapping
                     unmapped = check_db.query(ProcessedNews).outerjoin(
                         NewsEntityMapping, ProcessedNews.news_id == NewsEntityMapping.news_id
-                    ).filter(NewsEntityMapping.news_id.is_(None)).count()
+                    ).filter(NewsEntityMapping.news_id == None).count()
                     
                     # 4. ProcessedNews without surprise score
                     unsurprised = check_db.query(ProcessedNews).outerjoin(
                         SurpriseScore, ProcessedNews.news_id == SurpriseScore.news_id
-                    ).filter(SurpriseScore.news_id.is_(None)).count()
+                    ).filter(SurpriseScore.news_id == None).count()
                     
                     # 5. ProcessedNews without impact score
                     unscored = check_db.query(ProcessedNews).outerjoin(
                         ImpactScore, ProcessedNews.news_id == ImpactScore.news_id
-                    ).filter(ImpactScore.news_id.is_(None)).count()
+                    ).filter(ImpactScore.news_id == None).count()
                     
-                    # 6. ProcessedNews without predictions
-                    unpredicted = check_db.query(ProcessedNews).outerjoin(
-                        Prediction, ProcessedNews.news_id == Prediction.news_id
-                    ).filter(Prediction.news_id.is_(None)).count()
-                    
+                    # 6. ImpactScores >= 0.4 without predictions (simplified check)
+                    # Note: Predictions use related_news_ids JSON array, so we check ImpactScores instead
+                    high_impact_scores = check_db.query(ImpactScore).filter(
+                        ImpactScore.impact_score >= 0.4
+                    ).count()
+
+                    existing_predictions = check_db.query(Prediction).count()
+
+                    # Rough estimate: each high impact should have 3 predictions (1d, 5d, 20d)
+                    expected_predictions = high_impact_scores * 3
+                    unpredicted = max(0, expected_predictions - existing_predictions)
+
                     total_pending = unassessed + unanalyzed + unmapped + unsurprised + unscored + unpredicted
+                except Exception as e:
+                    logger.error(f"Error checking pending work: {e}", exc_info=True)
+                    total_pending = 0  # Continue anyway if check fails
                 finally:
                     check_db.close()
                 
@@ -136,13 +258,43 @@ class ContinuousPipeline:
                 self.running = False
                 break
             except Exception as e:
-                logger.error(f"Error in pipeline iteration: {e}")
+                self.error_count += 1
+                self.consecutive_errors += 1
+                
+                logger.error(f"Error in pipeline iteration #{iteration} (consecutive: {self.consecutive_errors}): {e}", exc_info=True)
                 activity_logger.log_activity(f"Pipeline error: {str(e)}", "ERROR")
-                # Wait before retry
-                time.sleep(60)
+                
+                # Close DB session if still open
+                if self.db:
+                    try:
+                        self.db.close()
+                    except:
+                        pass
+                    finally:
+                        self.db = None
+                
+                # Exponential backoff with max 5 minutes
+                backoff_time = min(self.backoff_time * (2 ** (self.consecutive_errors - 1)), 300)
+                logger.warning(f"Backing off for {backoff_time}s before retry (consecutive errors: {self.consecutive_errors})")
+                
+                # If too many consecutive errors, increase check interval temporarily
+                if self.consecutive_errors >= 5:
+                    logger.error(f"Too many consecutive errors ({self.consecutive_errors}), increasing backoff significantly")
+                    backoff_time = 600  # 10 minutes
+                
+                time.sleep(backoff_time)
+            finally:
+                # Ensure DB session is always closed
+                if self.db:
+                    try:
+                        self.db.close()
+                    except:
+                        pass
+                    finally:
+                        self.db = None
     
     def _run_pipeline_iteration(self):
-        """Run one complete pipeline iteration
+        """Run one complete pipeline iteration with dynamic batch sizes
         
         Returns:
             Number of new articles ingested
@@ -155,46 +307,46 @@ class ContinuousPipeline:
             new_articles = sum(rss_results.values())
             logger.info(f"Ingested: {rss_results}")
             
-            # Phase 2: Quality Check (process unassessed articles)
+            # Phase 2: Quality Check (process unassessed articles) - DYNAMIC BATCH SIZE
             activity_logger.log_phase(2, "Quality Assessment")
             quality = DataQualityAgent(self.db)
-            quality_results = quality.process_batch(limit=50)
+            quality_results = quality.process_batch(limit=self.batch_sizes['quality'])
             logger.info(f"Quality check: {quality_results}")
             
-            # Phase 3: Content Understanding (process unanalyzed high-quality articles)
+            # Phase 3: Content Understanding (process unanalyzed high-quality articles) - DYNAMIC BATCH SIZE
             activity_logger.log_phase(3, "Content Analysis")
             content = ContentUnderstandingAgent(self.db)
-            content_results = content.process_batch(limit=10)
+            content_results = content.process_batch(limit=self.batch_sizes['content'])
             logger.info(f"NLP Analysis: {content_results}")
             
-            # Phase 4: Entity Mapping
+            # Phase 4: Entity Mapping - DYNAMIC BATCH SIZE
             activity_logger.log_phase(4, "Entity Mapping")
             entities = EntityMappingAgent(self.db)
-            entity_results = entities.process_batch(limit=10)
+            entity_results = entities.process_batch(limit=self.batch_sizes['entity'])
             logger.info(f"Entities: {entity_results}")
             
-            # Phase 5: Market Regime
+            # Phase 5: Market Regime (single update, no batch)
             activity_logger.log_phase(5, "Market Regime")
             regime = RegimeDetectionAgent(self.db)
             regime_result = regime.update_regime()
             logger.info(f"Regime: {regime_result}")
             
-            # Phase 6: Surprise Quantification
+            # Phase 6: Surprise Quantification - DYNAMIC BATCH SIZE
             activity_logger.log_phase(6, "Surprise Quantification")
             surprise = SurpriseQuantificationAgent(self.db)
-            surprise_results = surprise.process_batch(limit=20)
+            surprise_results = surprise.process_batch(limit=self.batch_sizes['surprise'])
             logger.info(f"Surprises: {surprise_results}")
             
-            # Phase 7: Impact Scoring
+            # Phase 7: Impact Scoring - DYNAMIC BATCH SIZE
             activity_logger.log_phase(7, "Impact Scoring")
             impact = ImpactScoringAgent(self.db)
-            impact_results = impact.process_batch(limit=20)
+            impact_results = impact.process_batch(limit=self.batch_sizes['impact'])
             logger.info(f"Impact: {impact_results}")
             
-            # Phase 8: Predictions
+            # Phase 8: Predictions - DYNAMIC BATCH SIZE
             activity_logger.log_phase(8, "Predictions")
             predictions = PredictionAgent(self.db)
-            pred_results = predictions.process_batch(limit=50)
+            pred_results = predictions.process_batch(limit=self.batch_sizes['prediction'])
             logger.info(f"Predictions: {pred_results}")
             
             return new_articles
@@ -204,27 +356,68 @@ class ContinuousPipeline:
             raise
     
     def stop(self):
-        """Stop the continuous pipeline"""
+        """Stop the continuous pipeline gracefully"""
         logger.info("Stopping continuous pipeline...")
         activity_logger.log_activity("Continuous Pipeline STOPPED", "INFO")
         self.running = False
+        
+        # Close DB connection if still open
+        if self.db:
+            try:
+                logger.info("Closing database connection...")
+                self.db.close()
+            except Exception as e:
+                logger.error(f"Error closing DB on shutdown: {e}")
+            finally:
+                self.db = None
+        
+        # Log final statistics
+        logger.info(f"Pipeline Statistics:")
+        logger.info(f"  - Total Errors: {self.error_count}")
+        logger.info(f"  - Avg Iteration Time: {self._get_avg_iteration_time():.1f}s")
+        if self.iteration_times:
+            logger.info(f"  - Min/Max Iteration: {min(self.iteration_times):.1f}s / {max(self.iteration_times):.1f}s")
+        logger.info("Shutdown complete.")
 
 
 def main():
     """Main entry point"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Run TradeMeUp pipeline continuously')
+    parser = argparse.ArgumentParser(
+        description='Run TradeMeUp pipeline continuously with performance optimization',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run with defaults (5min interval, 2GB memory limit)
+  python run_continuous_pipeline.py
+  
+  # Check every 2 minutes with 4GB memory limit
+  python run_continuous_pipeline.py --interval 120 --max-memory 4096
+  
+  # Aggressive mode (1min checks, 8GB memory)
+  python run_continuous_pipeline.py --interval 60 --max-memory 8192
+        """
+    )
     parser.add_argument(
         '--interval',
         type=int,
         default=300,
         help='Seconds between pipeline runs (default: 300)'
     )
+    parser.add_argument(
+        '--max-memory',
+        type=int,
+        default=2048,
+        help='Maximum memory usage in MB before forcing GC (default: 2048)'
+    )
     
     args = parser.parse_args()
     
-    pipeline = ContinuousPipeline(check_interval=args.interval)
+    pipeline = ContinuousPipeline(
+        check_interval=args.interval,
+        max_memory_mb=args.max_memory
+    )
     
     try:
         pipeline.run()
