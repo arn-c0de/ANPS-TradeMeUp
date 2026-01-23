@@ -99,18 +99,34 @@ def get_metrics(engine):
     """Get dashboard metrics"""
     try:
         with Session(engine) as db:
+            # Use UTC time (naive) for consistency with database timestamps
+            now = datetime.utcnow()  # UTC time without timezone info
+            hour_ago = now - timedelta(hours=1)
+            day_ago = now - timedelta(hours=24)
+            
+            # Total counts
             total_news = db.query(func.count(RawNews.news_id)).scalar() or 0
             total_processed = db.query(func.count(ProcessedNews.news_id)).scalar() or 0
             total_predictions = db.query(func.count(Prediction.prediction_id)).scalar() or 0
             total_surprises = db.query(func.count(SurpriseScore.surprise_id)).scalar() or 0
             total_fact_checks = db.query(func.count(FactVerification.verification_id)).scalar() or 0
             
+            # Hourly increments
+            news_1h = db.query(func.count(RawNews.news_id)).filter(RawNews.fetched_at >= hour_ago).scalar() or 0
+            processed_1h = db.query(func.count(ProcessedNews.news_id)).filter(ProcessedNews.processing_timestamp >= hour_ago).scalar() or 0
+            predictions_1h = db.query(func.count(Prediction.prediction_id)).filter(Prediction.created_at >= hour_ago).scalar() or 0
+            surprises_1h = db.query(func.count(SurpriseScore.surprise_id)).filter(SurpriseScore.created_at >= hour_ago).scalar() or 0
+            fact_checks_1h = db.query(func.count(FactVerification.verification_id)).filter(FactVerification.verified_at >= hour_ago).scalar() or 0
+            
+            # Daily increments
+            news_24h = db.query(func.count(RawNews.news_id)).filter(RawNews.fetched_at >= day_ago).scalar() or 0
+            processed_24h = db.query(func.count(ProcessedNews.news_id)).filter(ProcessedNews.processing_timestamp >= day_ago).scalar() or 0
+            predictions_24h = db.query(func.count(Prediction.prediction_id)).filter(Prediction.created_at >= day_ago).scalar() or 0
+            surprises_24h = db.query(func.count(SurpriseScore.surprise_id)).filter(SurpriseScore.created_at >= day_ago).scalar() or 0
+            fact_checks_24h = db.query(func.count(FactVerification.verification_id)).filter(FactVerification.verified_at >= day_ago).scalar() or 0
+            
             avg_quality = db.query(func.avg(DataQualityScore.quality_score)).scalar()
             avg_quality = round(avg_quality, 2) if avg_quality else 0
-            
-            recent_news = db.query(func.count(RawNews.news_id)).filter(
-                RawNews.fetched_at >= datetime.now() - timedelta(hours=24)
-            ).scalar() or 0
         
         # Show different layout depending on whether data exists
         if total_news == 0:
@@ -133,52 +149,102 @@ def get_metrics(engine):
         return html.Div([
             dbc.Row([
                 dbc.Col([
-                    create_metric_card("Total Articles", f"{total_news:,}", "in database", "📰")
-                ], width=3),
-                dbc.Col([
-                    create_metric_card("LLM Processed", f"{total_processed:,}", "articles analyzed", "🧠", "success")
-                ], width=3),
-                dbc.Col([
-                    create_metric_card("Avg Quality", f"{avg_quality:.2f}", "out of 1.0", "⭐", "warning")
-                ], width=3),
-                dbc.Col([
-                    create_metric_card("Last 24h", f"+{recent_news}", "new articles", "🔥", "danger")
-                ], width=3)
-            ], className="mb-3"),
-            dbc.Row([
-                dbc.Col([
                     dbc.Card([
                         dbc.CardBody([
                             html.Div([
-                                html.Span("🎯 ", style={"fontSize": "20px"}),
-                                html.Strong(f"{total_surprises:,}", className="text-warning me-2"),
-                                html.Small("Surprise Scores", className="text-muted")
-                            ])
+                                html.Span("📰 ", style={"fontSize": "20px"}),
+                                html.Div([
+                                    html.H6("Total Articles", className="text-muted mb-1"),
+                                    html.H3(f"{total_news:,}", className="text-primary mb-0"),
+                                    html.Small([
+                                        html.Span(f"+{news_1h} ", className="text-success me-2"),
+                                        html.Span("last hour", className="text-muted me-3"),
+                                        html.Span(f"+{news_24h} ", className="text-info me-2"),
+                                        html.Span("last 24h", className="text-muted")
+                                    ], className="d-block mt-1")
+                                ], className="d-inline-block")
+                            ], className="d-flex align-items-center")
                         ])
-                    ], className="bg-dark border-warning")
+                    ], className="mb-3")
                 ], width=4),
                 dbc.Col([
                     dbc.Card([
                         dbc.CardBody([
                             html.Div([
-                                html.Span("✅ ", style={"fontSize": "20px"}),
-                                html.Strong(f"{total_fact_checks:,}", className="text-success me-2"),
-                                html.Small("Fact Checks", className="text-muted")
-                            ])
+                                html.Span("🧠 ", style={"fontSize": "20px"}),
+                                html.Div([
+                                    html.H6("LLM Processed", className="text-muted mb-1"),
+                                    html.H3(f"{total_processed:,}", className="text-success mb-0"),
+                                    html.Small([
+                                        html.Span(f"+{processed_1h} ", className="text-success me-2"),
+                                        html.Span("last hour", className="text-muted me-3"),
+                                        html.Span(f"+{processed_24h} ", className="text-info me-2"),
+                                        html.Span("last 24h", className="text-muted")
+                                    ], className="d-block mt-1")
+                                ], className="d-inline-block")
+                            ], className="d-flex align-items-center")
                         ])
-                    ], className="bg-dark border-success")
+                    ], className="mb-3")
                 ], width=4),
                 dbc.Col([
                     dbc.Card([
                         dbc.CardBody([
                             html.Div([
                                 html.Span("🔮 ", style={"fontSize": "20px"}),
-                                html.Strong(f"{total_predictions:,}", className="text-info me-2"),
-                                html.Small("Predictions", className="text-muted")
-                            ])
+                                html.Div([
+                                    html.H6("Predictions", className="text-muted mb-1"),
+                                    html.H3(f"{total_predictions:,}", className="text-info mb-0"),
+                                    html.Small([
+                                        html.Span(f"+{predictions_1h} ", className="text-success me-2"),
+                                        html.Span("last hour", className="text-muted me-3"),
+                                        html.Span(f"+{predictions_24h} ", className="text-info me-2"),
+                                        html.Span("last 24h", className="text-muted")
+                                    ], className="d-block mt-1")
+                                ], className="d-inline-block")
+                            ], className="d-flex align-items-center")
                         ])
-                    ], className="bg-dark border-info")
+                    ], className="mb-3")
                 ], width=4)
+            ]),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div([
+                                html.Span("🎯 ", style={"fontSize": "20px"}),
+                                html.Div([
+                                    html.H6("Surprise Scores", className="text-muted mb-1"),
+                                    html.H3(f"{total_surprises:,}", className="text-warning mb-0"),
+                                    html.Small([
+                                        html.Span(f"+{surprises_1h} ", className="text-success me-2"),
+                                        html.Span("last hour", className="text-muted me-3"),
+                                        html.Span(f"+{surprises_24h} ", className="text-info me-2"),
+                                        html.Span("last 24h", className="text-muted")
+                                    ], className="d-block mt-1")
+                                ], className="d-inline-block")
+                            ], className="d-flex align-items-center")
+                        ])
+                    ], className="mb-3")
+                ], width=6),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div([
+                                html.Span("✅ ", style={"fontSize": "20px"}),
+                                html.Div([
+                                    html.H6("Fact Checks", className="text-muted mb-1"),
+                                    html.H3(f"{total_fact_checks:,}", className="text-success mb-0"),
+                                    html.Small([
+                                        html.Span(f"+{fact_checks_1h} ", className="text-success me-2"),
+                                        html.Span("last hour", className="text-muted me-3"),
+                                        html.Span(f"+{fact_checks_24h} ", className="text-info me-2"),
+                                        html.Span("last 24h", className="text-muted")
+                                    ], className="d-block mt-1")
+                                ], className="d-inline-block")
+                            ], className="d-flex align-items-center")
+                        ])
+                    ], className="mb-3")
+                ], width=6)
             ])
         ])
     except Exception as e:
@@ -192,11 +258,11 @@ def get_metrics(engine):
         ])
 
 
-def get_recent_news(engine):
-    """Get recent news table"""
+def get_recent_news(engine, limit=50):
+    """Get recent news table with configurable limit"""
     try:
         with Session(engine) as db:
-            recent = db.query(RawNews).order_by(desc(RawNews.fetched_at)).limit(10).all()
+            recent = db.query(RawNews).order_by(desc(RawNews.fetched_at)).limit(limit).all()
             
             if not recent:
                 return html.P("No news available. Run Agent 1 (Ingestion) to fetch news.", className="text-muted")

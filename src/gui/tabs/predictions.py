@@ -73,7 +73,10 @@ def create_layout():
                     dbc.CardHeader(html.H5("🎯 Active Predictions")),
                     dbc.CardBody([
                         html.P("Click on a prediction to see details", className="text-muted mb-3"),
-                        html.Div(id="predictions-table")
+                        html.Div(
+                            id="predictions-table",
+                            style={"maxHeight": "800px", "overflowY": "auto"}
+                        )
                     ])
                 ])
             ], width=12)
@@ -134,7 +137,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
             if min_confidence > 0:
                 query = query.filter(Prediction.confidence >= min_confidence / 100)
             
-            predictions = query.limit(50).all()
+            predictions = query.limit(200).all()
 
             if not predictions:
                 return dbc.Alert("No predictions match the current filters.", color="info")

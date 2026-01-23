@@ -75,41 +75,43 @@ def start_background_process(
 ) -> Tuple[bool, Optional[subprocess.Popen], str]:
     """
     Start a Python script as background process with robust error handling.
-    
+
     Args:
         script_path: Path to Python script (relative to project root)
         args: Optional command-line arguments
         log_file: Optional log file for output redirection
         create_console: Whether to create new console (Windows only)
-        
+
     Returns:
         Tuple of (success: bool, process: Optional[Popen], message: str)
     """
     try:
         # Get Python executable
         python_exe = get_python_executable()
-        
+
         # Validate script
         success, result = validate_script_path(script_path)
         if not success:
             return False, None, result
-        
+
         script_abs = result
-        
+
         # Build command
         cmd = [python_exe, "-u", script_abs]  # -u for unbuffered output
         if args:
             cmd.extend(args)
-        
+
         # Get project root for working directory
         cwd = get_project_root()
-        
+
         # Prepare process arguments
         popen_kwargs = {
             "cwd": str(cwd),
-            "text": True
+            "text": True,
+            # Explicitly inherit environment to ensure venv is available
+            "env": os.environ.copy()
         }
-        
+
         # Handle output redirection
         if log_file:
             log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -119,16 +121,17 @@ def start_background_process(
         else:
             popen_kwargs["stdout"] = subprocess.PIPE
             popen_kwargs["stderr"] = subprocess.STDOUT
-        
+
         # Windows: create new console if requested
+        # Note: When creating new console, subprocess inherits parent environment
         if create_console and os.name == 'nt':
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
-        
+
         # Start process
         process = subprocess.Popen(cmd, **popen_kwargs)
-        
+
         return True, process, f"Process started successfully (PID: {process.pid})"
-        
+
     except FileNotFoundError as e:
         return False, None, f"Python executable or script not found: {e}"
     except PermissionError as e:

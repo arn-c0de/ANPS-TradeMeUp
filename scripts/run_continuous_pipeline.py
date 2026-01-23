@@ -35,6 +35,15 @@ from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
 from src.agents.regime_detection_agent import RegimeDetectionAgent
 from src.agents.impact_scoring_agent import ImpactScoringAgent
 from src.agents.prediction_agent import PredictionAgent
+# NEW AGENTS from Phase 2
+from src.agents.fact_verification_agent import FactVerificationAgent
+from src.agents.signal_decay_agent import SignalDecayAgent
+from src.agents.correlation_analysis_agent import CorrelationAnalysisAgent
+from src.agents.confidence_calibration_agent import ConfidenceCalibrationAgent
+from src.agents.meta_strategy_agent import MetaStrategyAgent
+from src.agents.scenario_generation_agent import ScenarioGenerationAgent
+from src.agents.model_performance_monitor import ModelPerformanceMonitor
+from src.agents.ab_testing_agent import ABTestingAgent
 from src.config.settings import settings
 from src.utils.activity_logger import activity_logger
 
@@ -70,11 +79,16 @@ class ContinuousPipeline:
         # Dynamic batch sizes (will be adjusted based on performance)
         self.batch_sizes = {
             'quality': 50,
-            'content': 10,
-            'entity': 10,
-            'surprise': 20,
-            'impact': 20,
-            'prediction': 50
+            'content': 30,  # Increased from 10 to 30
+            'entity': 20,   # Increased from 10 to 20
+            'surprise': 30,  # Increased from 20 to 30
+            'impact': 30,    # Increased from 20 to 30
+            'prediction': 50,
+            # NEW AGENTS
+            'fact_verification': 30,
+            'correlation': 10,  # Lower because it's computation-heavy
+            'calibration': 20,
+            'meta_strategy': 10  # Creates ensemble predictions
         }
         
         # Setup signal handlers for graceful shutdown
@@ -113,9 +127,19 @@ class ContinuousPipeline:
         # If iteration was fast (<2 min) and no recent errors, increase batch sizes
         elif duration < 120 and self.consecutive_errors == 0:
             for key in self.batch_sizes:
-                max_size = {'quality': 100, 'content': 20, 'entity': 20, 
-                           'surprise': 50, 'impact': 50, 'prediction': 100}
-                self.batch_sizes[key] = min(max_size[key], int(self.batch_sizes[key] * 1.2))
+                max_size = {
+                    'quality': 100,
+                    'content': 50,  # Increased max
+                    'entity': 30,   # Increased max
+                    'surprise': 50,
+                    'impact': 50,
+                    'prediction': 100,
+                    'fact_verification': 50,
+                    'correlation': 20,
+                    'calibration': 30,
+                    'meta_strategy': 20
+                }
+                self.batch_sizes[key] = min(max_size.get(key, 50), int(self.batch_sizes[key] * 1.2))
             logger.info(f"Increased batch sizes due to good performance: {self.batch_sizes}")
     
     def _get_avg_iteration_time(self) -> float:
@@ -160,7 +184,11 @@ class ContinuousPipeline:
                             time.sleep(wait_time)
                         else:
                             raise
-                
+
+                # Verify DB session was created successfully
+                if self.db is None:
+                    raise RuntimeError("Database session is None - failed to create connection")
+
                 # Run all pipeline phases
                 new_articles = self._run_pipeline_iteration()
                 
@@ -342,13 +370,64 @@ class ContinuousPipeline:
             impact = ImpactScoringAgent(self.db)
             impact_results = impact.process_batch(limit=self.batch_sizes['impact'])
             logger.info(f"Impact: {impact_results}")
+
+            # Phase 7.5: Signal Decay Modeling (apply to impact scores)
+            activity_logger.log_phase(7.5, "Signal Decay Modeling")
+            signal_decay = SignalDecayAgent(self.db)
+            decay_stats = signal_decay.get_statistics()
+            logger.info(f"Signal Decay: {decay_stats}")
+
+            # Phase 7.6: Correlation Analysis (between entities)
+            activity_logger.log_phase(7.6, "Correlation Analysis")
+            correlation = CorrelationAnalysisAgent(self.db)
+            corr_stats = correlation.get_statistics()
+            logger.info(f"Correlation: {corr_stats}")
             
             # Phase 8: Predictions - DYNAMIC BATCH SIZE
             activity_logger.log_phase(8, "Predictions")
             predictions = PredictionAgent(self.db)
             pred_results = predictions.process_batch(limit=self.batch_sizes['prediction'])
             logger.info(f"Predictions: {pred_results}")
-            
+
+            # ===== NEW PHASES (Phase 2 Agents) =====
+
+            # Phase 8.5: Scenario Generation (stress test predictions)
+            activity_logger.log_phase(8.5, "Scenario Generation")
+            scenario_gen = ScenarioGenerationAgent(self.db)
+            scenario_stats = scenario_gen.get_statistics()
+            logger.info(f"Scenarios: {scenario_stats}")
+
+            # Phase 9: Fact Verification
+            activity_logger.log_phase(9, "Fact Verification")
+            fact_verifier = FactVerificationAgent(self.db)
+            fact_results = fact_verifier.process_batch(limit=self.batch_sizes['fact_verification'])
+            logger.info(f"Fact Verification: {fact_results}")
+
+            # Phase 10: Confidence Calibration (for predictions)
+            activity_logger.log_phase(10, "Confidence Calibration")
+            calibrator = ConfidenceCalibrationAgent(self.db)
+            calibration_stats = calibrator.get_statistics()
+            logger.info(f"Calibration: {calibration_stats}")
+
+            # Phase 11: Meta-Strategy (Ensemble Predictions)
+            activity_logger.log_phase(11, "Meta-Strategy Ensemble")
+            meta_strategy = MetaStrategyAgent(self.db)
+            # Get entities that have multiple predictions for ensemble
+            ensemble_results = meta_strategy.get_statistics()
+            logger.info(f"Meta-Strategy: {ensemble_results}")
+
+            # Phase 12: Model Performance Monitoring
+            activity_logger.log_phase(12, "Performance Monitoring")
+            monitor = ModelPerformanceMonitor(self.db)
+            perf_stats = monitor.get_statistics()
+            logger.info(f"Performance: {perf_stats}")
+
+            # Phase 13: A/B Testing (compare model versions)
+            activity_logger.log_phase(13, "A/B Testing")
+            ab_testing = ABTestingAgent(self.db)
+            ab_stats = ab_testing.get_statistics()
+            logger.info(f"A/B Testing: {ab_stats}")
+
             return new_articles
             
         except Exception as e:

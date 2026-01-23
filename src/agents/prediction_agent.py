@@ -299,7 +299,7 @@ class PredictionAgent:
         impact_scores = self.db.query(ImpactScore).filter(
             ImpactScore.impact_score >= 0.4  # Only significant impact
         ).order_by(
-            ImpactScore.impact_score.desc()
+            ImpactScore.created_at.desc()  # Newest first
         ).limit(limit * 2).all()  # Get more candidates
         
         # Filter out those that already have predictions for ALL horizons

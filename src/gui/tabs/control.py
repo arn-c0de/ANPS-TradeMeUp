@@ -67,13 +67,21 @@ def create_layout():
                                             id="agent-selector",
                                             options=[
                                                 {"label": "Agent 1: Ingestion", "value": "ingestion"},
-                                                {"label": "Agent 1.5: Quality", "value": "quality"},
+                                                {"label": "Agent 1.5: Data Quality", "value": "quality"},
                                                 {"label": "Agent 2: Content Understanding", "value": "content"},
                                                 {"label": "Agent 3: Entity Mapping", "value": "entity"},
                                                 {"label": "Agent 4: Impact Scoring", "value": "impact"},
-                                                {"label": "Agent 4.5: Surprise", "value": "surprise"},
+                                                {"label": "Agent 4.5: Surprise Quantification", "value": "surprise"},
                                                 {"label": "Agent 5: Regime Detection", "value": "regime"},
-                                                {"label": "Agent 6: Predictions", "value": "predictions"}
+                                                {"label": "Agent 6: Predictions", "value": "predictions"},
+                                                {"label": "Agent 7: Fact Verification", "value": "fact_verification"},
+                                                {"label": "Agent 8: Correlation Analysis", "value": "correlation"},
+                                                {"label": "Agent 9: Signal Decay", "value": "signal_decay"},
+                                                {"label": "Agent 10: Scenario Generation", "value": "scenarios"},
+                                                {"label": "Agent 11: Confidence Calibration", "value": "calibration"},
+                                                {"label": "Agent 12: Meta Strategy", "value": "meta_strategy"},
+                                                {"label": "Agent 13: Model Performance", "value": "performance"},
+                                                {"label": "Agent 14: A/B Testing", "value": "ab_testing"}
                                             ],
                                             placeholder="Select agent...",
                                             className="mb-2"
@@ -84,6 +92,93 @@ def create_layout():
                                             color="info",
                                             className="w-100",
                                             disabled=True
+                                        )
+                                    ])
+                                ], className="h-100")
+                            ], width=4)
+                        ])
+                    ])
+                ])
+            ], width=12)
+        ], className="mb-3"),
+        
+        # Backfill Operations Section
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader(html.H5("🔄 Backfill Operations")),
+                    dbc.CardBody([
+                        html.P("Process existing articles for missing analyses", className="text-muted mb-3"),
+                        dbc.Row([
+                            # Full Backfill
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardBody([
+                                        html.H6("🔄 Full Backfill", className="text-warning"),
+                                        html.P("Complete all missing analyses", className="text-muted small"),
+                                        dbc.Button(
+                                            "Run Full Backfill",
+                                            id="btn-run-full-backfill",
+                                            color="warning",
+                                            className="w-100 mb-2"
+                                        ),
+                                        html.Small("All phases", className="text-muted")
+                                    ])
+                                ], className="h-100")
+                            ], width=3),
+                            
+                            # Selective Backfill
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardBody([
+                                        html.H6("🎯 Selective Backfill", className="text-info"),
+                                        html.P("Choose specific analyses", className="text-muted small"),
+                                        dbc.Checklist(
+                                            id="check-backfill-phases",
+                                            options=[
+                                                {"label": " Quality Assessment", "value": "quality"},
+                                                {"label": " Content Understanding", "value": "content"},
+                                                {"label": " Entity Mapping", "value": "entities"},
+                                                {"label": " Fact Verification", "value": "facts"},
+                                                {"label": " Surprise Scoring", "value": "surprises"},
+                                                {"label": " Impact Scoring", "value": "impact"},
+                                                {"label": " Predictions", "value": "predictions"}
+                                            ],
+                                            value=["facts", "surprises", "predictions"],
+                                            className="small"
+                                        ),
+                                        dbc.Button(
+                                            "Run Selected Phases",
+                                            id="btn-run-selective-backfill",
+                                            color="info",
+                                            className="w-100 mt-2",
+                                            size="sm"
+                                        )
+                                    ])
+                                ], className="h-100")
+                            ], width=5),
+                            
+                            # Backfill Options
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardBody([
+                                        html.H6("⚙️ Backfill Settings", className="text-secondary"),
+                                        dbc.Label("Batch Size:", className="small"),
+                                        dcc.Slider(
+                                            id="slider-backfill-batch",
+                                            min=10,
+                                            max=100,
+                                            step=10,
+                                            value=50,
+                                            marks={10: "10", 50: "50", 100: "100"},
+                                            tooltip={"placement": "bottom", "always_visible": True}
+                                        ),
+                                        html.Small("Articles per batch", className="text-muted d-block mb-2"),
+                                        dbc.Checklist(
+                                            id="check-backfill-openai",
+                                            options=[{"label": " Use OpenAI (faster)", "value": "openai"}],
+                                            value=["openai"],
+                                            className="small"
                                         )
                                     ])
                                 ], className="h-100")
@@ -224,8 +319,8 @@ def run_pipeline_command(command_type, options=None):
     Execute pipeline command
     
     Args:
-        command_type: 'full', 'quick', or agent name
-        options: dict with limit, force, verbose flags
+        command_type: 'full', 'quick', 'backfill', 'backfill_selective', or agent name
+        options: dict with limit, force, verbose flags, backfill phases, batch_size
     """
     options = options or {}
     
@@ -239,6 +334,26 @@ def run_pipeline_command(command_type, options=None):
     elif command_type == "quick":
         script = os.path.join(PROJECT_ROOT, "scripts", "run_mvp_pipeline.py")
         cmd = [python_exe, script, "--quick"]
+    elif command_type == "backfill":
+        # Full backfill - all phases
+        script = os.path.join(PROJECT_ROOT, "scripts", "backfill_all_agents.py")
+        cmd = [python_exe, script]
+        if options.get("batch_size"):
+            cmd.extend(["--batch-size", str(options["batch_size"])])
+    elif command_type == "backfill_selective":
+        # Selective backfill - skip phases not selected
+        script = os.path.join(PROJECT_ROOT, "scripts", "backfill_all_agents.py")
+        cmd = [python_exe, script]
+        
+        # Add skip flags for unselected phases
+        all_phases = ["quality", "content", "entities", "facts", "surprises", "impact", "predictions"]
+        selected_phases = options.get("phases", [])
+        for phase in all_phases:
+            if phase not in selected_phases:
+                cmd.append(f"--skip-{phase}")
+        
+        if options.get("batch_size"):
+            cmd.extend(["--batch-size", str(options["batch_size"])])
     elif command_type == "ingestion":
         script = os.path.join(PROJECT_ROOT, "scripts", "run_ingestion.py")
         cmd = [python_exe, script]

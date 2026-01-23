@@ -2,13 +2,14 @@
 from typing import List, Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=".env.local",
+        env_file=str(Path(__file__).parent.parent.parent / ".env.local"),
         env_file_encoding="utf-8",
         case_sensitive=False
     )
@@ -26,7 +27,11 @@ class Settings(BaseSettings):
     )
 
     # Database - supports both SQLite and PostgreSQL
-    database_url: str = Field(default="sqlite:///./trademeup.db", alias="DATABASE_URL")
+    # Use absolute path for SQLite to avoid multiple databases
+    database_url: str = Field(
+        default=f"sqlite:///{Path(__file__).parent.parent.parent / 'trademeup.db'}", 
+        alias="DATABASE_URL"
+    )
 
     # Redis (optional for local dev)
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
