@@ -9,7 +9,7 @@ warnings.filterwarnings('ignore', category=DeprecationWarning, module='yfinance'
 warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
 
 import dash
-from dash import dcc, html, Input, Output, State
+from dash import dcc, html, Input, Output, State, ALL, MATCH
 import dash_bootstrap_components as dbc
 from datetime import datetime
 from pathlib import Path
@@ -539,6 +539,41 @@ def update_predictions_table(n, entities, start_date, end_date, horizon, min_con
         min_confidence=min_conf or 0,
         horizon=horizon or '5d'
     )
+
+
+@app.callback(
+    [Output("prediction-modal", "is_open"),
+     Output("prediction-modal-title", "children"),
+     Output("prediction-modal-body", "children")],
+    [Input({"type": "pred-detail-btn", "index": ALL}, "n_clicks"),
+     Input("close-prediction-modal", "n_clicks")],
+    [State("prediction-modal", "is_open"),
+     State({"type": "pred-detail-btn", "index": ALL}, "id")],
+    prevent_initial_call=True
+)
+def toggle_prediction_modal(detail_clicks, close_click, is_open, button_ids):
+    """Open/close prediction detail modal"""
+    from dash import callback_context
+
+    if not callback_context.triggered:
+        return False, "", ""
+
+    trigger_id = callback_context.triggered[0]["prop_id"]
+
+    # Close button clicked
+    if "close-prediction-modal" in trigger_id:
+        return False, "", ""
+
+    # Detail button clicked
+    if detail_clicks and any(detail_clicks):
+        # Find which button was clicked
+        for i, clicks in enumerate(detail_clicks):
+            if clicks:
+                prediction_id = button_ids[i]["index"]
+                title, body = predictions.get_prediction_details(engine, prediction_id)
+                return True, title, body
+
+    return is_open, "", ""
 
 
 # ============================================================================
