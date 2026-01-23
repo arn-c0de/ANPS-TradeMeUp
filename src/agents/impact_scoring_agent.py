@@ -422,7 +422,9 @@ class ImpactScoringAgent:
             RawNews.news_id == ImpactScore.news_id
         ).filter(
             ImpactScore.score_id.is_(None)
-        ).group_by(RawNews.news_id).limit(limit).all()
+        ).group_by(RawNews.news_id).order_by(
+            RawNews.published_at.desc()  # Newest first
+        ).limit(limit).all()
 
         logger.info(f"Processing {len(articles)} articles for impact scoring")
 

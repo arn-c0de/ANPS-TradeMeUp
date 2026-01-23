@@ -526,16 +526,18 @@ def update_entity_filter_options(n):
      Input("pred-entity-filter", "value"),
      Input("pred-date-filter", "start_date"),
      Input("pred-date-filter", "end_date"),
+     Input("pred-horizon-filter", "value"),
      Input("pred-confidence-filter", "value")]
 )
-def update_predictions_table(n, entities, start_date, end_date, min_conf):
+def update_predictions_table(n, entities, start_date, end_date, horizon, min_conf):
     """Update predictions table with filters"""
     date_range = (start_date, end_date) if start_date or end_date else None
     return predictions.get_predictions_table(
         engine,
         entity_filter=entities,
         date_range=date_range,
-        min_confidence=min_conf or 0
+        min_confidence=min_conf or 0,
+        horizon=horizon or '5d'
     )
 
 
