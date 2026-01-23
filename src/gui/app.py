@@ -595,59 +595,356 @@ def update_market_indices(n):
 
 
 @app.callback(
-    Output("price-indicator-card", "children"),
-    [Input("update-chart-btn", "n_clicks"),
-     Input("chart-update-interval", "n_intervals")],
-    State("chart-symbol-input", "value"),
-    prevent_initial_call='initial_duplicate'
+    [Output("layout-single", "outline"),
+     Output("layout-split-h", "outline"),
+     Output("layout-split-v", "outline"),
+     Output("layout-quad", "outline")],
+    Input("chart-panels-config", "data")
 )
-def update_price_indicator(n_clicks, n_intervals, symbol):
-    """Update price indicator card"""
-    if not symbol:
-        symbol = "AAPL"
-    return charts.get_price_indicator(symbol.upper().strip())
+def highlight_active_layout(config):
+    """Highlight the currently active layout button"""
+    layout = config.get('layout', 'single')
+    return (
+        layout != 'single',  # outline=True means not active (inverted logic for outline buttons)
+        layout != 'split-horizontal',
+        layout != 'split-vertical',
+        layout != 'quad'
+    )
 
 
 @app.callback(
-    Output("main-price-chart", "children"),
-    [Input("update-chart-btn", "n_clicks"),
-     Input("chart-update-interval", "n_intervals")],
-    [State("chart-symbol-input", "value"),
-     State("chart-timeframe-selector", "value"),
-     State("chart-type-selector", "value")],
-    prevent_initial_call='initial_duplicate'
-)
-def update_main_chart(n_clicks, n_intervals, symbol, timeframe, chart_type):
-    """Update main price chart"""
-    if not symbol:
-        symbol = "AAPL"
-    if not timeframe:
-        timeframe = "1mo"
-    if not chart_type:
-        chart_type = "candlestick"
-    
-    return charts.get_stock_chart(symbol.upper().strip(), timeframe, chart_type)
-
-
-@app.callback(
-    Output("comparison-chart", "children"),
-    Input("compare-btn", "n_clicks"),
-    [State("compare-symbols-input", "value"),
-     State("chart-timeframe-selector", "value")],
+    Output("market-overview-collapse", "is_open"),
+    Input("toggle-market-overview", "n_clicks"),
+    State("market-overview-collapse", "is_open"),
     prevent_initial_call=True
 )
-def update_comparison_chart(n_clicks, symbols_input, timeframe):
-    """Update comparison chart"""
-    if not symbols_input:
-        from src.gui.charts import create_empty_chart
-        from dash import dcc
-        return dcc.Graph(figure=create_empty_chart("Enter symbols to compare"))
+def toggle_market_overview(n_clicks, is_open):
+    """Toggle market overview section"""
+    return not is_open
+
+
+@app.callback(
+    [Output("chart-fullscreen-state", "data"),
+     Output("toggle-fullscreen-btn", "children"),
+     Output("toggle-fullscreen-btn", "outline"),
+     Output("toggle-fullscreen-btn", "color")],
+    Input("toggle-fullscreen-btn", "n_clicks"),
+    State("chart-fullscreen-state", "data"),
+    prevent_initial_call=True
+)
+def toggle_fullscreen(n_clicks, fullscreen_state):
+    """Toggle fullscreen mode for charts"""
+    is_fullscreen = fullscreen_state.get('fullscreen', False)
+    new_state = not is_fullscreen
     
-    symbols = [s.strip() for s in symbols_input.split(',') if s.strip()]
-    if not timeframe:
-        timeframe = "3mo"
+    if new_state:
+        button_text = "⬇ Exit Fullscreen"
+        outline = False  # Solid button when in fullscreen
+        color = "danger"
+    else:
+        button_text = "⛶ Fullscreen"
+        outline = True  # Outline button in normal mode
+        color = "info"
     
-    return charts.get_comparison_chart(symbols, timeframe)
+    return {'fullscreen': new_state}, button_text, outline, color
+
+
+@app.callback(
+    Output("chart-panels-config", "data"),
+    [Input("layout-single", "n_clicks"),
+     Input("layout-split-h", "n_clicks"),
+     Input("layout-split-v", "n_clicks"),
+     Input("layout-quad", "n_clicks"),
+     Input("config-apply-btn", "n_clicks"),
+     Input({"type": "favorite-btn", "index": dash.dependencies.ALL}, "n_clicks"),
+     Input("refresh-all-panels", "n_clicks")],
+    [State("chart-panels-config", "data"),
+     State("current-config-panel", "children"),
+     State("config-symbol-input", "value"),
+     State("config-timeframe-selector", "value"),
+     State("config-chart-type-selector", "value"),
+     State("config-favorite-checkbox", "value")],
+    prevent_initial_call=True
+)
+def update_chart_config(layout_single, layout_h, layout_v, layout_quad, 
+                       apply_config, favorite_clicks, refresh_all,
+                       current_config, panel_id, symbol, timeframe, chart_type, is_favorite):
+    """Update chart panels configuration"""
+    from dash import callback_context
+    
+    if not callback_context.triggered:
+        return current_config
+    
+    trigger_id = callback_context.triggered[0]['prop_id']
+    
+    # Handle layout changes
+    if 'layout-single' in trigger_id:
+        current_config['layout'] = 'single'
+    elif 'layout-split-h' in trigger_id:
+        current_config['layout'] = 'split-horizontal'
+    elif 'layout-split-v' in trigger_id:
+        current_config['layout'] = 'split-vertical'
+    elif 'layout-quad' in trigger_id:
+        current_config['layout'] = 'quad'
+    
+    # Handle panel configuration updates
+    elif 'config-apply-btn' in trigger_id and panel_id:
+        if panel_id in current_config.get('panels', {}):
+            current_config['panels'][panel_id] = {
+                'symbol': (symbol or 'AAPL').upper().strip(),
+                'timeframe': timeframe or '1mo',
+                'chart_type': chart_type or 'candlestick',
+                'favorite': bool(is_favorite)
+            }
+    
+    # Handle favorite toggles
+    elif 'favorite-btn' in trigger_id:
+        import json
+        btn_data = json.loads(trigger_id.split('.')[0])
+        panel_id = btn_data['index']
+        if panel_id in current_config.get('panels', {}):
+            current_config['panels'][panel_id]['favorite'] = not current_config['panels'][panel_id].get('favorite', False)
+    
+    return current_config
+
+
+@app.callback(
+    [Output("multi-panel-chart-area", "children"),
+     Output("multi-panel-chart-area", "className")],
+    [Input("chart-panels-config", "data"),
+     Input("chart-update-interval", "n_intervals"),
+     Input("refresh-all-panels", "n_clicks"),
+     Input("chart-fullscreen-state", "data")],
+    prevent_initial_call='initial_duplicate'
+)
+def render_chart_panels(config, n_intervals, refresh_clicks, fullscreen_state):
+    """Render the multi-panel chart layout with fullscreen support"""
+    layout = config.get('layout', 'single')
+    panels = config.get('panels', {})
+    is_fullscreen = fullscreen_state.get('fullscreen', False)
+    
+    # Set container class based on fullscreen state
+    container_class = 'chart-container-fullscreen' if is_fullscreen else 'chart-container-normal'
+    
+    chart_layout = charts.render_multi_panel_layout(layout, panels, is_fullscreen)
+    return chart_layout, container_class
+
+
+@app.callback(
+    [Output("config-panel-modal", "is_open"),
+     Output("current-config-panel", "children"),
+     Output("config-symbol-input", "value"),
+     Output("config-timeframe-selector", "value"),
+     Output("config-chart-type-selector", "value"),
+     Output("config-favorite-checkbox", "value")],
+    [Input({"type": "config-btn", "index": dash.dependencies.ALL}, "n_clicks"),
+     Input("config-cancel-btn", "n_clicks"),
+     Input("config-apply-btn", "n_clicks")],
+    [State("chart-panels-config", "data"),
+     State("config-panel-modal", "is_open")],
+    prevent_initial_call=True
+)
+def toggle_config_modal(config_clicks, cancel_click, apply_click, panels_config, is_open):
+    """Toggle configuration modal and populate with panel data"""
+    from dash import callback_context
+    import json
+    
+    if not callback_context.triggered:
+        raise dash.exceptions.PreventUpdate
+    
+    trigger_id = callback_context.triggered[0]['prop_id']
+    
+    # Open modal with panel config - only if button was actually clicked
+    if 'config-btn' in trigger_id:
+        # Check if this is a real click (not just initialization)
+        if config_clicks and any(click for click in config_clicks if click):
+            btn_data = json.loads(trigger_id.split('.')[0])
+            panel_id = btn_data['index']
+            panel_config = panels_config.get('panels', {}).get(panel_id, {})
+            
+            return (True, panel_id, 
+                    panel_config.get('symbol', ''),
+                    panel_config.get('timeframe', '1mo'),
+                    panel_config.get('chart_type', 'candlestick'),
+                    panel_config.get('favorite', False))
+        else:
+            raise dash.exceptions.PreventUpdate
+    
+    # Close modal
+    elif 'cancel-btn' in trigger_id or 'apply-btn' in trigger_id:
+        return False, None, "", "1mo", "candlestick", False
+    
+    raise dash.exceptions.PreventUpdate
+
+
+@app.callback(
+    [Output("quick-edit-modal", "is_open"),
+     Output("current-quick-edit-panel", "children"),
+     Output("quick-edit-symbol-input", "value")],
+    [Input({"type": "symbol-label", "index": dash.dependencies.ALL}, "n_clicks"),
+     Input("quick-edit-cancel-btn", "n_clicks"),
+     Input("quick-edit-apply-btn", "n_clicks")],
+    [State("chart-panels-config", "data"),
+     State("quick-edit-modal", "is_open")],
+    prevent_initial_call=True
+)
+def toggle_quick_edit_modal(label_clicks, cancel_click, apply_click, panels_config, is_open):
+    """Toggle quick edit modal when clicking on symbol name"""
+    from dash import callback_context
+    import json
+    
+    if not callback_context.triggered:
+        raise dash.exceptions.PreventUpdate
+    
+    trigger_id = callback_context.triggered[0]['prop_id']
+    
+    # Open modal when symbol label is clicked
+    if 'symbol-label' in trigger_id:
+        # Check if this is a real click
+        if label_clicks and any(click for click in label_clicks if click):
+            btn_data = json.loads(trigger_id.split('.')[0])
+            panel_id = btn_data['index']
+            panel_config = panels_config.get('panels', {}).get(panel_id, {})
+            current_symbol = panel_config.get('symbol', '')
+            
+            return True, panel_id, current_symbol
+        else:
+            raise dash.exceptions.PreventUpdate
+    
+    # Close modal
+    elif 'cancel-btn' in trigger_id or 'apply-btn' in trigger_id:
+        return False, None, ""
+    
+    raise dash.exceptions.PreventUpdate
+
+
+@app.callback(
+    Output("symbol-search-results", "children"),
+    Input("quick-edit-symbol-input", "value"),
+    prevent_initial_call=True
+)
+def search_symbols(query):
+    """Search for stock symbols as user types"""
+    if not query or len(query) < 1:
+        return html.Div()
+    
+    try:
+        from src.gui.charts.market_data import market_data
+        results = market_data.search_symbol(query)
+        
+        if not results:
+            return dbc.Alert(
+                f"⚠️ No results found for '{query}'. Try a different symbol.",
+                color="warning",
+                className="mt-2"
+            )
+        
+        # Display search results
+        result_items = []
+        for result in results:
+            result_items.append(
+                dbc.ListGroupItem([
+                    html.Strong(result.get('symbol', 'N/A'), className="me-2"),
+                    html.Span(result.get('name', 'Unknown'), className="text-muted"),
+                    html.Br(),
+                    html.Small(f"{result.get('exchange', 'N/A')} | {result.get('type', 'EQUITY')}", className="text-muted")
+                ])
+            )
+        
+        return html.Div([
+            html.P("Search Results:", className="fw-bold mb-2 mt-2"),
+            dbc.ListGroup(result_items, className="mb-2")
+        ])
+    
+    except Exception as e:
+        return dbc.Alert(
+            f"⚠️ Error searching: {str(e)}",
+            color="danger",
+            className="mt-2"
+        )
+
+
+@app.callback(
+    Output("chart-panels-config", "data", allow_duplicate=True),
+    Input("quick-edit-apply-btn", "n_clicks"),
+    [State("current-quick-edit-panel", "children"),
+     State("quick-edit-symbol-input", "value"),
+     State("chart-panels-config", "data")],
+    prevent_initial_call=True
+)
+def apply_quick_symbol_edit(n_clicks, panel_id, new_symbol, current_config):
+    """Apply symbol change from quick edit modal"""
+    if not panel_id or not new_symbol:
+        raise dash.exceptions.PreventUpdate
+    
+    # Update the symbol for the specified panel
+    if panel_id in current_config.get('panels', {}):
+        current_config['panels'][panel_id]['symbol'] = new_symbol.upper().strip()
+    
+    return current_config
+
+
+@app.callback(
+    [Output("favorites-modal", "is_open"),
+     Output("favorites-list", "children")],
+    [Input("show-favorites-modal", "n_clicks"),
+     Input("favorites-close-btn", "n_clicks")],
+    [State("chart-panels-config", "data"),
+     State("favorites-modal", "is_open")],
+    prevent_initial_call=True
+)
+def toggle_favorites_modal(show_click, close_click, panels_config, is_open):
+    """Toggle favorites modal and show favorite symbols"""
+    from dash import callback_context
+    
+    if not callback_context.triggered:
+        return False, []
+    
+    trigger_id = callback_context.triggered[0]['prop_id']
+    
+    if 'show-favorites' in trigger_id:
+        # Collect favorite symbols
+        favorites = []
+        for panel_id, config in panels_config.get('panels', {}).items():
+            if config.get('favorite', False):
+                favorites.append(
+                    dbc.ListGroupItem([
+                        html.Div([
+                            html.Strong(f"⭐ {config['symbol']}", className="me-3"),
+                            html.Span(f"{config['timeframe']} | {config['chart_type']}", className="text-muted")
+                        ])
+                    ])
+                )
+        
+        if not favorites:
+            favorites = [dbc.Alert("No favorite symbols yet. Mark symbols as favorites using the ⭐ button on chart panels.", color="info")]
+        
+        return True, favorites
+    
+    elif 'close-btn' in trigger_id:
+        return False, []
+    
+    return is_open, []
+
+
+# Dynamic callbacks for individual panel actions
+@app.callback(
+    Output({"type": "chart-content", "index": dash.dependencies.MATCH}, "children"),
+    Input({"type": "refresh-btn", "index": dash.dependencies.MATCH}, "n_clicks"),
+    [State({"type": "chart-content", "index": dash.dependencies.MATCH}, "id"),
+     State("chart-panels-config", "data")],
+    prevent_initial_call=True
+)
+def refresh_individual_panel(n_clicks, component_id, panels_config):
+    """Refresh individual chart panel"""
+    panel_id = component_id['index']
+    panel_config = panels_config.get('panels', {}).get(panel_id, {})
+    
+    symbol = panel_config.get('symbol', 'AAPL')
+    timeframe = panel_config.get('timeframe', '1mo')
+    chart_type = panel_config.get('chart_type', 'candlestick')
+    
+    return charts.get_stock_chart(symbol, timeframe, chart_type)
 
 
 @app.callback(
@@ -655,23 +952,8 @@ def update_comparison_chart(n_clicks, symbols_input, timeframe):
     Input("interval-component", "n_intervals")
 )
 def update_news_volume_chart(n):
-    """Update news volume chart (placeholder)"""
-    fig = go.Figure()
-    fig.add_annotation(
-        text="News volume chart - coming soon",
-        xref="paper", yref="paper",
-        x=0.5, y=0.5, showarrow=False,
-        font=dict(size=16, color="#666")
-    )
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(10,10,10,1)',
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        height=400
-    )
-    return fig
+    """Update news volume over time chart"""
+    return statistics.get_news_volume_chart(engine)
 
 
 # ============================================================================

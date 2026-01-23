@@ -69,7 +69,8 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "") -> 
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(10,10,10,1)',
         xaxis_rangeslider_visible=False,
-        height=600,
+        height=None,  # Allow dynamic height
+        autosize=True,
         margin=dict(l=50, r=50, t=50, b=50),
         hovermode='x unified',
         legend=dict(
@@ -131,7 +132,8 @@ def create_line_chart(df: pd.DataFrame, symbol: str, column: str = 'Close') -> g
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(10,10,10,1)',
         title=f'{symbol} {column}',
-        height=400,
+        height=None,  # Allow dynamic height
+        autosize=True,
         margin=dict(l=50, r=50, t=50, b=50),
         hovermode='x unified',
         xaxis=dict(gridcolor='#333', showgrid=True),
@@ -171,7 +173,8 @@ def create_multi_line_chart(data_dict: dict, title: str = "Comparison") -> go.Fi
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(10,10,10,1)',
         title=title,
-        height=500,
+        height=None,  # Allow dynamic height
+        autosize=True,
         margin=dict(l=50, r=50, t=50, b=50),
         hovermode='x unified',
         xaxis=dict(gridcolor='#333', showgrid=True),
@@ -250,7 +253,8 @@ def create_empty_chart(message: str = "No data available") -> go.Figure:
         plot_bgcolor='rgba(10,10,10,1)',
         xaxis=dict(visible=False),
         yaxis=dict(visible=False),
-        height=400
+        height=None,  # Allow dynamic height
+        autosize=True
     )
     
     return fig
@@ -280,7 +284,8 @@ def create_heatmap(data: pd.DataFrame, title: str = "Correlation Heatmap") -> go
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(10,10,10,1)',
         title=title,
-        height=500,
+        height=None,  # Allow dynamic height
+        autosize=True,
         margin=dict(l=100, r=50, t=100, b=100)
     )
     

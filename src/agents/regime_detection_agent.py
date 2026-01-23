@@ -4,6 +4,8 @@ from typing import Dict, Optional
 from datetime import datetime, timedelta
 import uuid
 from sqlalchemy.orm import Session
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
 import yfinance as yf
 import numpy as np
 

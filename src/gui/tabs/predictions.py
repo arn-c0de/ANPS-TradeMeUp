@@ -85,48 +85,56 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
             if date_range and len(date_range) == 2:
                 start, end = date_range
                 if start:
-                    query = query.filter(Prediction.created_at >= start)
+                    # Convert string to date if needed
+                    if isinstance(start, str):
+                        start = datetime.fromisoformat(start).date()
+                    # Start of day
+                    query = query.filter(Prediction.created_at >= datetime.combine(start, datetime.min.time()))
                 if end:
-                    query = query.filter(Prediction.created_at <= end)
+                    # Convert string to date if needed
+                    if isinstance(end, str):
+                        end = datetime.fromisoformat(end).date()
+                    # End of day (23:59:59)
+                    query = query.filter(Prediction.created_at <= datetime.combine(end, datetime.max.time()))
             
             if min_confidence > 0:
                 query = query.filter(Prediction.confidence >= min_confidence / 100)
             
             predictions = query.limit(50).all()
-            
+
             if not predictions:
                 return dbc.Alert("No predictions match the current filters.", color="info")
-        
-        rows = []
-        for pred in predictions:
-            entity = db.query(Entity).filter(Entity.entity_id == pred.entity_id).first()
-            
-            # Get direction from probabilities
-            probs = pred.direction_probabilities or {}
-            direction = max(probs, key=probs.get) if probs else "unknown"
-            direction_emoji = {"up": "🔼", "down": "🔽", "flat": "➡️"}.get(direction, "❓")
-            
-            # Get confidence color
-            conf_color = "text-success" if pred.confidence and pred.confidence > 0.7 else "text-warning"
-            
-            rows.append(html.Tr([
-                html.Td(pred.created_at.strftime("%Y-%m-%d %H:%M") if pred.created_at else "N/A"),
-                html.Td(entity.entity_name if entity else "Unknown", className="text-primary"),
-                html.Td([direction_emoji, " ", direction.upper()]),
-                html.Td(f"{pred.confidence:.2%}" if pred.confidence else "N/A", className=conf_color),
-                html.Td(pred.horizon if pred.horizon else "N/A")
-            ]))
-        
-        return dbc.Table([
-            html.Thead(html.Tr([
-                html.Th("Timestamp"),
-                html.Th("Entity"),
-                html.Th("Direction"),
-                html.Th("Confidence"),
-                html.Th("Horizon")
-            ])),
-            html.Tbody(rows)
-        ], bordered=True, hover=True, striped=True, className="table-dark")
+
+            rows = []
+            for pred in predictions:
+                entity = db.query(Entity).filter(Entity.entity_id == pred.entity_id).first()
+
+                # Get direction from probabilities
+                probs = pred.direction_probabilities or {}
+                direction = max(probs, key=probs.get) if probs else "unknown"
+                direction_emoji = {"up": "🔼", "down": "🔽", "flat": "➡️"}.get(direction, "❓")
+
+                # Get confidence color
+                conf_color = "text-success" if pred.confidence and pred.confidence > 0.7 else "text-warning"
+
+                rows.append(html.Tr([
+                    html.Td(pred.created_at.strftime("%Y-%m-%d %H:%M") if pred.created_at else "N/A"),
+                    html.Td(entity.entity_name if entity else "Unknown", className="text-primary"),
+                    html.Td([direction_emoji, " ", direction.upper()]),
+                    html.Td(f"{pred.confidence:.2%}" if pred.confidence else "N/A", className=conf_color),
+                    html.Td(pred.horizon if pred.horizon else "N/A")
+                ]))
+
+            return dbc.Table([
+                html.Thead(html.Tr([
+                    html.Th("Timestamp"),
+                    html.Th("Entity"),
+                    html.Th("Direction"),
+                    html.Th("Confidence"),
+                    html.Th("Horizon")
+                ])),
+                html.Tbody(rows)
+            ], bordered=True, hover=True, striped=True, className="table-dark")
     except Exception as e:
         return dbc.Alert(
             f"⚠️ Unable to load predictions: {str(e)}",

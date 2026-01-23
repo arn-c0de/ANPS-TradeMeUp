@@ -2,7 +2,8 @@
 Live Market Data Provider
 Fetches real-time stock market data from various sources
 """
-
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta

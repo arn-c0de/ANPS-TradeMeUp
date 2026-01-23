@@ -211,3 +211,81 @@ def get_quality_distribution_chart(engine):
             yaxis=dict(visible=False)
         )
         return fig
+
+
+def get_news_volume_chart(engine):
+    """Get news volume over time chart"""
+    try:
+        with Session(engine) as db:
+            # Query news by date (SQLite-compatible)
+            from sqlalchemy import func as sql_func
+            
+            volume_data = db.query(
+                sql_func.date(RawNews.fetched_at).label('date'),
+                sql_func.count(RawNews.news_id).label('count')
+            ).filter(
+                RawNews.fetched_at.isnot(None)
+            ).group_by(
+                sql_func.date(RawNews.fetched_at)
+            ).order_by('date').all()
+        
+        if not volume_data:
+            import plotly.graph_objects as go
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No data available yet<br>Run the pipeline to ingest news",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False)
+            )
+            return fig
+        
+        volume_df = pd.DataFrame(volume_data, columns=['date', 'count'])
+        
+        fig = px.line(
+            volume_df,
+            x='date',
+            y='count',
+            template="plotly_dark",
+            markers=True
+        )
+        fig.update_traces(
+            line=dict(color='#00d9ff', width=2),
+            marker=dict(size=6)
+        )
+        fig.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis_title="Date",
+            yaxis_title="Number of Articles",
+            hovermode='x unified',
+            margin=dict(l=40, r=40, t=40, b=40)
+        )
+        return fig
+    except Exception as e:
+        import plotly.graph_objects as go
+        import logging
+        logging.error(f"Error creating news volume chart: {e}", exc_info=True)
+        
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"Error loading chart<br>{str(e)[:50]}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color="red")
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False)
+        )
+        return fig
