@@ -347,18 +347,64 @@ textarea {
 }
 
 /* Modals */
+.modal {
+    z-index: 10000 !important;
+    pointer-events: auto !important;
+}
+
+.modal-backdrop {
+    z-index: 9999 !important;
+    pointer-events: auto !important;
+}
+
+.modal-dialog {
+    pointer-events: auto !important;
+}
+
 .modal-content {
     background-color: #1a1a1a !important;
     border: 1px solid #444 !important;
     color: #ffffff !important;
+    pointer-events: auto !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+    -moz-user-select: text !important;
 }
+
+/* Ensure modal body is scrollable even on mobile/trackpad (override possible inherited rules) */
+.modal-body {
+    max-height: 70vh !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: thin !important;
+    pointer-events: auto !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+    -moz-user-select: text !important;
+}
+
+/* Specific styling for prediction modal body */
+.prediction-modal-body-scroll {
+    max-height: 70vh !important;
+    overflow-y: scroll !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    position: relative !important;
+    pointer-events: auto !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+}
+
 
 .modal-header {
     border-bottom: 1px solid #444 !important;
+    pointer-events: auto !important;
 }
 
 .modal-footer {
     border-top: 1px solid #444 !important;
+    pointer-events: auto !important;
 }
 
 /* Scrollbar */
