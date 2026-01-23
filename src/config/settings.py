@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     # Model Settings
     model_path: str = Field(default="./models", alias="MODEL_PATH")
     default_temperature: float = Field(default=0.1, alias="DEFAULT_TEMPERATURE")
-    max_tokens: int = Field(default=2000, alias="MAX_TOKENS")
+    max_tokens: int = Field(default=4096, alias="MAX_TOKENS")
 
 
 # Global settings instance
