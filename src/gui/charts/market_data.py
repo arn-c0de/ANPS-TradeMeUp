@@ -15,10 +15,34 @@ logger = logging.getLogger(__name__)
 
 class MarketDataProvider:
     """Provides real-time and historical market data"""
-    
+
     def __init__(self):
         self.cache = {}
         self.cache_timeout = 60  # seconds
+
+        # Common stock symbols for quick search
+        self.common_symbols = {
+            # Tech
+            'AAPL': 'Apple Inc.', 'MSFT': 'Microsoft Corporation', 'GOOGL': 'Alphabet Inc.',
+            'AMZN': 'Amazon.com Inc.', 'META': 'Meta Platforms Inc.', 'NVDA': 'NVIDIA Corporation',
+            'TSLA': 'Tesla Inc.', 'NFLX': 'Netflix Inc.', 'AMD': 'Advanced Micro Devices',
+            'INTC': 'Intel Corporation', 'ORCL': 'Oracle Corporation', 'CRM': 'Salesforce Inc.',
+            # Finance
+            'JPM': 'JPMorgan Chase', 'BAC': 'Bank of America', 'WFC': 'Wells Fargo',
+            'GS': 'Goldman Sachs', 'MS': 'Morgan Stanley', 'V': 'Visa Inc.', 'MA': 'Mastercard',
+            # Healthcare
+            'JNJ': 'Johnson & Johnson', 'UNH': 'UnitedHealth Group', 'PFE': 'Pfizer Inc.',
+            'ABBV': 'AbbVie Inc.', 'TMO': 'Thermo Fisher', 'ABT': 'Abbott Laboratories',
+            # Consumer
+            'WMT': 'Walmart Inc.', 'PG': 'Procter & Gamble', 'KO': 'Coca-Cola Company',
+            'PEP': 'PepsiCo Inc.', 'COST': 'Costco Wholesale', 'HD': 'Home Depot',
+            # Energy
+            'XOM': 'Exxon Mobil', 'CVX': 'Chevron Corporation', 'COP': 'ConocoPhillips',
+            # Industrial
+            'BA': 'Boeing Company', 'CAT': 'Caterpillar Inc.', 'GE': 'General Electric',
+            # Indices
+            '^GSPC': 'S&P 500', '^DJI': 'Dow Jones', '^IXIC': 'NASDAQ', '^RUT': 'Russell 2000'
+        }
     
     def get_live_price(self, symbol: str) -> Optional[Dict]:
         """
@@ -80,11 +104,11 @@ class MarketDataProvider:
     def get_intraday_data(self, symbol: str, days: int = 1) -> Optional[pd.DataFrame]:
         """
         Get intraday data with 1-minute intervals
-        
+
         Args:
             symbol: Stock ticker
             days: Number of days (max 7 for 1m interval)
-            
+
         Returns:
             DataFrame with intraday data
         """
@@ -95,7 +119,53 @@ class MarketDataProvider:
         except Exception as e:
             logger.error(f"Error fetching intraday data for {symbol}: {e}")
             return None
-    
+
+    def search_symbols(self, query: str, limit: int = 10) -> List[Dict]:
+        """
+        Search for stock symbols matching query
+
+        Args:
+            query: Search string (symbol or company name)
+            limit: Maximum number of results
+
+        Returns:
+            List of matching symbols with metadata
+        """
+        if not query or len(query) < 1:
+            return []
+
+        query_upper = query.upper().strip()
+        query_lower = query.lower()
+        results = []
+
+        # Search in common symbols
+        for symbol, name in self.common_symbols.items():
+            if query_upper in symbol or query_lower in name.lower():
+                results.append({
+                    'symbol': symbol,
+                    'name': name,
+                    'type': 'INDEX' if symbol.startswith('^') else 'EQUITY'
+                })
+
+                if len(results) >= limit:
+                    break
+
+        # If no results, try yfinance ticker validation
+        if not results and len(query) >= 1:
+            try:
+                ticker = yf.Ticker(query_upper)
+                info = ticker.info
+                if info and info.get('symbol'):
+                    results.append({
+                        'symbol': info.get('symbol', query_upper),
+                        'name': info.get('longName', 'Unknown'),
+                        'type': info.get('quoteType', 'EQUITY')
+                    })
+            except Exception as e:
+                logger.debug(f"Symbol lookup failed for {query}: {e}")
+
+        return results
+
     def get_multiple_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
         """
         Get quotes for multiple symbols at once

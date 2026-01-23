@@ -174,8 +174,9 @@ def create_layout():
         
         # Hidden divs to store state
         html.Div(id="current-config-panel", style={'display': 'none'}),
-        html.Div(id="current-quick-edit-panel", style={'display': 'none'})
-        
+        html.Div(id="current-quick-edit-panel", style={'display': 'none'}),
+        dcc.Store(id="symbol-search-cache", data=[])
+
     ], fluid=True)
 
 

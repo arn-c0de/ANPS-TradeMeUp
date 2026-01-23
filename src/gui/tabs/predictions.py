@@ -86,7 +86,10 @@ def create_layout():
             dbc.ModalFooter(
                 dbc.Button("Close", id="close-prediction-modal", className="ms-auto", n_clicks=0)
             )
-        ], id="prediction-modal", size="xl", is_open=False)
+        ], id="prediction-modal", size="xl", is_open=False),
+
+        # Hidden store for cached prediction details
+        dcc.Store(id="prediction-detail-cache", data={})
     ], fluid=True)
 
 
