@@ -96,6 +96,19 @@ Respond ONLY with JSON."""
             logger.info(f"Analyzing article {news_id} with {self.llm.provider}")
             analysis = self.llm.generate_json(prompt, temperature=0.1)
 
+            # Validate required fields
+            required_fields = ['summary_short', 'event_type', 'sentiment']
+            missing_fields = [f for f in required_fields if f not in analysis]
+            if missing_fields:
+                logger.warning(f"LLM response missing fields {missing_fields}, using defaults")
+                # Add defaults for missing fields
+                if 'summary_short' not in analysis:
+                    analysis['summary_short'] = article.title[:200]
+                if 'event_type' not in analysis:
+                    analysis['event_type'] = 'other'
+                if 'sentiment' not in analysis:
+                    analysis['sentiment'] = {'overall': 0.0, 'confidence': 0.0}
+
             # Generate embedding
             logger.info(f"Generating embedding for article {news_id}")
             embedding = self.llm.get_embedding(article.full_text[:1000])
@@ -112,6 +125,31 @@ Respond ONLY with JSON."""
 
             return analysis
 
+        except ValueError as e:
+            # JSON parsing failed - log but create minimal analysis
+            logger.error(f"Error analyzing article {news_id}: {e}")
+            logger.warning(f"Creating fallback analysis for article {news_id}")
+            
+            # Return minimal valid analysis
+            embedding = self.llm.get_embedding(article.full_text[:1000])
+            return {
+                'news_id': str(news_id),
+                'summary_short': article.title[:200],
+                'summary_medium': article.full_text[:500],
+                'key_facts': [],
+                'sentiment': {'overall': 0.0, 'confidence': 0.0},
+                'event_type': 'other',
+                'event_subtype': None,
+                'confidence': 0.0,
+                'embedding': embedding,
+                'llm_metadata': {
+                    'provider': self.llm.provider,
+                    'model': self.llm.model,
+                    'error': str(e),
+                    'fallback': True,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+            }
         except Exception as e:
             logger.error(f"Error analyzing article {news_id}: {e}")
             raise
