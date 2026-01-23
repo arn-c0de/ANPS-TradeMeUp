@@ -100,3 +100,30 @@ class SignalDecayModel(Base):
 
     def __repr__(self):
         return f"<SignalDecayModel(news={self.news_id}, half_life={self.half_life_days})>"
+
+
+class FactVerification(Base):
+    """Model for fact verification results."""
+
+    __tablename__ = "fact_verifications"
+
+    verification_id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    news_id = Column(GUID, ForeignKey('raw_news.news_id'), nullable=False)
+    claims_verified = Column(JSON, nullable=False)  # List of verified claims
+    contradictions_found = Column(Integer, default=0)  # Boolean as int
+    contradiction_details = Column(JSON)  # Details of contradictions
+    credibility_score = Column(Float, nullable=False)  # 0-1 scale
+    verification_method = Column(String(50))  # llm_cross_check, manual, etc.
+    verified_at = Column(DateTime(timezone=True), nullable=False)
+    verification_notes = Column(String(1000))
+
+    # Relationships
+    news = relationship("RawNews", backref="fact_verifications")
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_fact_verification_news', 'news_id'),
+    )
+
+    def __repr__(self):
+        return f"<FactVerification(news={self.news_id}, credibility={self.credibility_score})>"
