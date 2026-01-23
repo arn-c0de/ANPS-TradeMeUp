@@ -383,38 +383,59 @@ class PredictionAgent:
         Returns:
             List of ImpactScore objects
         """
-        # Get high-impact scores
+        # Get high-impact scores that are recent (last 7 days)
+        from datetime import datetime, timedelta
+        cutoff_date = datetime.now() - timedelta(days=7)
+        
         impact_scores = db.query(ImpactScore).filter(
-            ImpactScore.impact_score >= 0.4  # Only significant impact
+            ImpactScore.impact_score >= 0.4,  # Only significant impact
+            ImpactScore.created_at >= cutoff_date  # Recent only
         ).order_by(
             ImpactScore.created_at.desc()  # Newest first
-        ).limit(limit * 3).all()  # Get more candidates for filtering
+        ).limit(limit * 5).all()  # Get more candidates for filtering
+        
+        if not impact_scores:
+            logger.info("No high-impact scores found (impact >= 0.4)")
+            return []
+
+        logger.info(f"Found {len(impact_scores)} high-impact scores to check")
 
         # Filter out those that already have predictions for ALL horizons
         to_predict = []
-        news_id_str = None
         
         for impact in impact_scores:
             news_id_str = str(impact.news_id)
             
-            # Get all predictions for this entity
-            predictions = db.query(Prediction).filter(
-                Prediction.entity_id == impact.entity_id
-            ).all()
-            
-            # Check if predictions exist for this news_id in any horizon
-            # Note: related_news_ids is a JSON array, need to parse it
+            # Count existing predictions for this entity+news combination
+            # Check each horizon separately
             existing_horizons = set()
-            for pred in predictions:
-                if pred.related_news_ids and news_id_str in pred.related_news_ids:
-                    existing_horizons.add(pred.horizon)
+            
+            for horizon in self.horizons:
+                # Query predictions with this entity, horizon, and news_id in related_news_ids
+                # SQLite/PostgreSQL JSON handling
+                existing = db.query(Prediction).filter(
+                    Prediction.entity_id == impact.entity_id,
+                    Prediction.horizon == horizon
+                ).all()
+                
+                # Check if any prediction includes this news_id
+                for pred in existing:
+                    if pred.related_news_ids:
+                        # related_news_ids can be list or None
+                        news_ids = pred.related_news_ids if isinstance(pred.related_news_ids, list) else []
+                        if news_id_str in news_ids or str(news_id_str) in [str(x) for x in news_ids]:
+                            existing_horizons.add(horizon)
+                            break
             
             # If not all horizons are covered, add to list
-            if len(existing_horizons) < len(self.horizons):
+            missing_horizons = set(self.horizons) - existing_horizons
+            if missing_horizons:
+                logger.debug(f"Entity {impact.entity_id} missing predictions for {missing_horizons}")
                 to_predict.append(impact)
                 if len(to_predict) >= limit:
                     break
-
+        
+        logger.info(f"Found {len(to_predict)} impact scores needing predictions")
         return to_predict
 
     def _generate_prediction_no_commit(
