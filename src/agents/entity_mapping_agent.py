@@ -197,8 +197,22 @@ Respond ONLY with JSON."""
             logger.info(f"Extracting entities from article {news_id}")
             result = self.llm.generate_json(prompt, temperature=0.1)
 
+            # Validate structure
+            if not isinstance(result, dict):
+                logger.warning(f"LLM returned non-dict result, using empty entities")
+                return {'entities': []}
+            
+            if 'entities' not in result or not isinstance(result.get('entities'), list):
+                logger.warning(f"LLM result missing or invalid 'entities' field")
+                return {'entities': []}
+
             return result
 
+        except ValueError as e:
+            # JSON parsing failed - return empty result
+            logger.error(f"Error extracting entities from {news_id}: {e}")
+            logger.warning(f"Returning empty entity list for article {news_id}")
+            return {'entities': []}
         except Exception as e:
             logger.error(f"Error extracting entities from {news_id}: {e}")
             raise
@@ -293,6 +307,12 @@ Respond ONLY with JSON."""
             logger.info(f"Created {len(mappings)} entity mappings for article {news_id}")
             return mappings
 
+        except ValueError as e:
+            # JSON parsing or extraction failed - log but don't crash
+            self.db.rollback()
+            logger.error(f"Error processing entities for {news_id}: {e}")
+            logger.warning(f"Skipping entity mapping for article {news_id}")
+            return []
         except Exception as e:
             self.db.rollback()
             logger.error(f"Error processing entities for {news_id}: {e}")
