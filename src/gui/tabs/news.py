@@ -4,7 +4,7 @@ News Feed Tab - Browse and Filter News Articles
 
 from dash import dcc, html
 import dash_bootstrap_components as dbc
-from sqlalchemy import desc
+from sqlalchemy import desc, cast, Float
 from sqlalchemy.orm import Session
 
 from src.models.raw_news import RawNews
@@ -81,19 +81,52 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
     with Session(engine) as db:
         query = db.query(RawNews, ProcessedNews).outerjoin(
             ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-        ).order_by(desc(RawNews.fetched_at)).limit(50)
+        )
         
+        # Apply filters
+        if sources:
+            query = query.filter(RawNews.source.in_(sources))
+        
+        if events:
+            query = query.filter(ProcessedNews.event_type.in_(events))
+        
+        # Note: Sentiment filtering done in Python (post-query) due to SQLite JSON limitations
+        
+        if search and len(search) > 0:
+            search_term = f"%{search.lower()}%"
+            query = query.filter(
+                (RawNews.title.ilike(search_term)) |
+                (RawNews.full_text.ilike(search_term))
+            )
+        
+        query = query.order_by(desc(RawNews.fetched_at)).limit(100)
         results = query.all()
         
+        # Apply sentiment filter in Python
+        if sentiment and results:
+            filtered_results = []
+            for raw_news, processed in results:
+                if processed and processed.sentiment:
+                    sent_val = processed.sentiment.get('overall', 0) if isinstance(processed.sentiment, dict) else 0
+                    if sentiment == "positive" and sent_val > 0.3:
+                        filtered_results.append((raw_news, processed))
+                    elif sentiment == "negative" and sent_val < -0.3:
+                        filtered_results.append((raw_news, processed))
+                    elif sentiment == "neutral" and -0.3 <= sent_val <= 0.3:
+                        filtered_results.append((raw_news, processed))
+            results = filtered_results[:50]
+        else:
+            results = results[:50]
+        
         if not results:
-            return dbc.Alert("No news available.", color="info")
+            return dbc.Alert("No news articles match your filters.", color="info")
         
         cards = []
         for raw_news, processed in results:
             # Sentiment badge
             sentiment_badge = None
-            if processed and processed.sentiment is not None:
-                sent_val = processed.sentiment
+            if processed and processed.sentiment:
+                sent_val = processed.sentiment.get('overall', 0) if isinstance(processed.sentiment, dict) else 0
                 if sent_val > 0.3:
                     sentiment_badge = dbc.Badge("😊 Positive", color="success", className="ms-2")
                 elif sent_val < -0.3:

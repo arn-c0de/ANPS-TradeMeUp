@@ -68,7 +68,7 @@ class ContinuousPipeline:
                 self.db = SessionLocal()
                 
                 # Run all pipeline phases
-                self._run_pipeline_iteration()
+                new_articles = self._run_pipeline_iteration()
                 
                 # Close database session
                 self.db.close()
@@ -77,9 +77,14 @@ class ContinuousPipeline:
                 logger.info(f"Iteration #{iteration} completed in {duration:.1f}s")
                 activity_logger.log_activity(f"Iteration #{iteration} completed in {duration:.1f}s", "SUCCESS")
                 
-                # Wait before next iteration
-                logger.info(f"Waiting {self.check_interval}s until next check...")
-                time.sleep(self.check_interval)
+                # Only wait if there were new articles or it's the first iteration
+                # Otherwise continue processing existing backlog immediately
+                if iteration == 1 or new_articles > 0:
+                    logger.info(f"Waiting {self.check_interval}s until next check...")
+                    time.sleep(self.check_interval)
+                else:
+                    logger.info("No new articles, checking again in 10 seconds...")
+                    time.sleep(10)
                 
             except KeyboardInterrupt:
                 logger.info("Stopping continuous pipeline (keyboard interrupt)")
@@ -92,12 +97,17 @@ class ContinuousPipeline:
                 time.sleep(60)
     
     def _run_pipeline_iteration(self):
-        """Run one complete pipeline iteration"""
+        """Run one complete pipeline iteration
+        
+        Returns:
+            Number of new articles ingested
+        """
         try:
             # Phase 1: Data Ingestion
             activity_logger.log_phase(1, "Data Ingestion")
             ingestion = IngestionAgent(self.db)
             rss_results = ingestion.fetch_all_rss_feeds()
+            new_articles = sum(rss_results.values())
             logger.info(f"Ingested: {rss_results}")
             
             # Phase 2: Quality Check (process unassessed articles)
@@ -141,6 +151,8 @@ class ContinuousPipeline:
             predictions = PredictionAgent(self.db)
             pred_results = predictions.process_batch(limit=50)
             logger.info(f"Predictions: {pred_results}")
+            
+            return new_articles
             
         except Exception as e:
             logger.error(f"Error in pipeline iteration: {e}", exc_info=True)
