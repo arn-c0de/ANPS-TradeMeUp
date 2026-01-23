@@ -778,6 +778,59 @@ def update_entity_details_table(n, search_term):
     return statistics.get_entity_details_table(engine, search_term or "")
 
 
+# Entity Details Modal Callbacks
+@app.callback(
+    [Output("entity-details-modal", "is_open"),
+     Output("selected-entity-store", "data")],
+    [Input({"type": "entity-detail-btn", "index": dash.dependencies.ALL}, "n_clicks"),
+     Input("close-entity-modal", "n_clicks")],
+    [State("entity-details-modal", "is_open"),
+     State({"type": "entity-detail-btn", "index": dash.dependencies.ALL}, "id")],
+    prevent_initial_call=True
+)
+def toggle_entity_modal(detail_clicks, close_click, is_open, button_ids):
+    """Open/close entity details modal"""
+    from dash import callback_context
+    
+    if not callback_context.triggered:
+        return dash.no_update, dash.no_update
+    
+    trigger_id = callback_context.triggered[0]["prop_id"]
+    
+    # Close button clicked
+    if "close-entity-modal" in trigger_id:
+        return False, None
+    
+    # Entity button clicked
+    if "entity-detail-btn" in trigger_id:
+        # Check if any button was actually clicked (not just re-render)
+        if detail_clicks and any(click for click in detail_clicks if click):
+            # Find which button was clicked
+            for i, click_count in enumerate(detail_clicks):
+                if click_count and click_count > 0:
+                    entity_name = button_ids[i]["index"]
+                    return True, {"entity_name": entity_name}
+    
+    return dash.no_update, dash.no_update
+
+
+@app.callback(
+    [Output("entity-modal-title", "children"),
+     Output("entity-modal-body", "children")],
+    Input("selected-entity-store", "data"),
+    State("entity-details-modal", "is_open"),
+    prevent_initial_call=True
+)
+def update_entity_modal_content(entity_data, is_open):
+    """Load entity details into modal"""
+    if not is_open or not entity_data or "entity_name" not in entity_data:
+        return dash.no_update, dash.no_update
+    
+    entity_name = entity_data["entity_name"]
+    title, body = statistics.get_entity_full_details(engine, entity_name)
+    return title, body
+
+
 # ============================================================================
 # CALLBACKS - CHARTS TAB
 # ============================================================================

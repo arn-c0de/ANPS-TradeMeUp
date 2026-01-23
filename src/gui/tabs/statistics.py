@@ -162,7 +162,19 @@ def create_layout():
                     ])
                 ])
             ], width=12)
-        ])
+        ]),
+        
+        # Entity Details Modal
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle(id="entity-modal-title")),
+            dbc.ModalBody(id="entity-modal-body"),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="close-entity-modal", className="ms-auto")
+            )
+        ], id="entity-details-modal", size="xl", scrollable=True),
+        
+        # Store for selected entity
+        dcc.Store(id="selected-entity-store", data=None)
     ], fluid=True)
 
 
@@ -515,9 +527,15 @@ def get_top_entities_list(engine):
             rows.append(
                 html.Div([
                     dbc.Badge(f"#{i}", color=badge_color, className="me-2"),
-                    html.Span(name, className="text-light"),
+                    dbc.Button(
+                        name,
+                        id={"type": "entity-detail-btn", "index": name},
+                        color="link",
+                        className="text-light p-0 text-start",
+                        style={"textDecoration": "none", "flex": "1"}
+                    ),
                     html.Small(f" ({entity_id})" if entity_id else "", className="text-muted ms-1"),
-                    dbc.Badge(f"{mentions}", color="info", className="ms-auto")
+                    dbc.Badge(f"{mentions}", color="info", className="ms-2")
                 ], className="d-flex align-items-center mb-2")
             )
         
@@ -732,7 +750,13 @@ def get_top_positive_entities(engine):
                 html.Div([
                     html.Div([
                         dbc.Badge(f"#{i}", color=badge_color, className="me-2"),
-                        html.Span(name, className="text-light fw-bold")
+                        dbc.Button(
+                            name,
+                            id={"type": "entity-detail-btn", "index": name},
+                            color="link",
+                            className="text-light fw-bold p-0 text-start",
+                            style={"textDecoration": "none"}
+                        )
                     ], className="mb-1"),
                     html.Div([
                         dbc.Badge(f"{stats['positive']} Positive", color="success", className="me-1"),
@@ -823,7 +847,13 @@ def get_top_negative_entities(engine):
                 html.Div([
                     html.Div([
                         dbc.Badge(f"#{i}", color=badge_color, className="me-2"),
-                        html.Span(name, className="text-light fw-bold")
+                        dbc.Button(
+                            name,
+                            id={"type": "entity-detail-btn", "index": name},
+                            color="link",
+                            className="text-light fw-bold p-0 text-start",
+                            style={"textDecoration": "none"}
+                        )
                     ], className="mb-1"),
                     html.Div([
                         dbc.Badge(f"{stats['negative']} Negative", color="danger", className="me-1"),
@@ -1020,3 +1050,219 @@ def get_news_volume_chart(engine):
             yaxis=dict(visible=False)
         )
         return fig
+
+
+def get_entity_full_details(engine, entity_name):
+    """Get comprehensive entity details for modal display"""
+    try:
+        from datetime import datetime, timedelta
+        import json
+        from sqlalchemy import desc, and_
+        
+        with Session(engine) as db:
+            # Get entity basic info
+            entity = db.query(Entity).filter(Entity.entity_name == entity_name).first()
+            
+            if not entity:
+                return "Entity not found", html.P("No data available", className="text-muted")
+            
+            # Get all news articles mentioning this entity
+            news_mappings = db.query(
+                RawNews.title,
+                RawNews.source,
+                RawNews.url,
+                RawNews.fetched_at,
+                ProcessedNews.sentiment,
+                ProcessedNews.event_type,
+                ProcessedNews.summary_short,
+                ImpactScore.impact_score,
+                NewsEntityMapping.confidence,
+                NewsEntityMapping.exposure_type
+            ).join(
+                NewsEntityMapping, RawNews.news_id == NewsEntityMapping.news_id
+            ).outerjoin(
+                ProcessedNews, RawNews.news_id == ProcessedNews.news_id
+            ).outerjoin(
+                ImpactScore, and_(
+                    ImpactScore.news_id == RawNews.news_id,
+                    ImpactScore.entity_id == entity.entity_id
+                )
+            ).filter(
+                NewsEntityMapping.entity_id == entity.entity_id
+            ).order_by(desc(RawNews.fetched_at)).limit(50).all()
+            
+            # Calculate statistics
+            total_mentions = len(news_mappings)
+            
+            sentiment_stats = {'positive': 0, 'neutral': 0, 'negative': 0, 'avg': 0, 'total': 0}
+            impact_scores = []
+            event_types = {}
+            
+            for mapping in news_mappings:
+                # Sentiment
+                if mapping.sentiment:
+                    try:
+                        sent_dict = mapping.sentiment if isinstance(mapping.sentiment, dict) else json.loads(mapping.sentiment)
+                        if 'overall' in sent_dict:
+                            score = sent_dict['overall']
+                            sentiment_stats['avg'] += score
+                            sentiment_stats['total'] += 1
+                            if score > 0.3:
+                                sentiment_stats['positive'] += 1
+                            elif score < -0.3:
+                                sentiment_stats['negative'] += 1
+                            else:
+                                sentiment_stats['neutral'] += 1
+                    except:
+                        pass
+                
+                # Impact
+                if mapping.impact_score is not None:
+                    impact_scores.append(mapping.impact_score)
+                
+                # Event types
+                if mapping.event_type:
+                    event_types[mapping.event_type] = event_types.get(mapping.event_type, 0) + 1
+            
+            if sentiment_stats['total'] > 0:
+                sentiment_stats['avg'] /= sentiment_stats['total']
+            
+            avg_impact = sum(impact_scores) / len(impact_scores) if impact_scores else 0
+            
+            # Parse metadata
+            metadata_display = []
+            if entity.metadata_:
+                try:
+                    meta = entity.metadata_ if isinstance(entity.metadata_, dict) else json.loads(entity.metadata_)
+                    metadata_display = [html.Li(f"{k}: {v}") for k, v in meta.items()]
+                except:
+                    pass
+        
+        # Build modal title
+        title = html.Div([
+            html.H4(entity_name, className="mb-0"),
+            html.Small(f"{entity.entity_type.upper()} | {entity.entity_id}", className="text-muted")
+        ])
+        
+        # Build modal body
+        body = html.Div([
+            # Statistics Overview
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H3(f"{total_mentions}", className="text-primary mb-0"),
+                            html.Small("Total Mentions", className="text-muted")
+                        ], className="text-center")
+                    ])
+                ], width=3),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H3(f"{sentiment_stats['avg']:.2f}", className="text-info mb-0"),
+                            html.Small("Avg Sentiment", className="text-muted")
+                        ], className="text-center")
+                    ])
+                ], width=3),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H3(f"{avg_impact:.2f}", className="text-warning mb-0"),
+                            html.Small("Avg Impact", className="text-muted")
+                        ], className="text-center")
+                    ])
+                ], width=3),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H3(f"{len(impact_scores)}", className="text-success mb-0"),
+                            html.Small("Impact Scores", className="text-muted")
+                        ], className="text-center")
+                    ])
+                ], width=3)
+            ], className="mb-4"),
+            
+            # Sentiment Breakdown & Event Types
+            dbc.Row([
+                dbc.Col([
+                    html.H5("📊 Sentiment Breakdown"),
+                    html.Div([
+                        dbc.Progress([
+                            dbc.Progress(value=sentiment_stats['positive'], color="success", bar=True),
+                            dbc.Progress(value=sentiment_stats['neutral'], color="secondary", bar=True),
+                            dbc.Progress(value=sentiment_stats['negative'], color="danger", bar=True)
+                        ], className="mb-2", style={"height": "30px"}),
+                        html.Div([
+                            dbc.Badge(f"{sentiment_stats['positive']} Positive", color="success", className="me-2"),
+                            dbc.Badge(f"{sentiment_stats['neutral']} Neutral", color="secondary", className="me-2"),
+                            dbc.Badge(f"{sentiment_stats['negative']} Negative", color="danger")
+                        ])
+                    ])
+                ], width=6),
+                dbc.Col([
+                    html.H5("📈 Event Types"),
+                    html.Div([
+                        dbc.Badge(f"{event_type}: {count}", color="info", className="me-1 mb-1") 
+                        for event_type, count in sorted(event_types.items(), key=lambda x: x[1], reverse=True)[:10]
+                    ]) if event_types else html.P("No event types classified", className="text-muted")
+                ], width=6)
+            ], className="mb-4"),
+            
+            # Metadata
+            html.Div([
+                html.H5("ℹ️ Metadata"),
+                html.Ul(metadata_display, className="text-muted") if metadata_display else html.P("No metadata available", className="text-muted")
+            ], className="mb-4") if metadata_display or entity.metadata_ else None,
+            
+            # News Articles List
+            html.H5(f"📰 Recent News Articles (Last {len(news_mappings)})"),
+            html.Div([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.A(
+                                html.Strong(mapping.title or "No title", className="text-light"),
+                                href=mapping.url if mapping.url else "#",
+                                target="_blank",
+                                className="text-decoration-none"
+                            ),
+                            html.Div([
+                                dbc.Badge(mapping.source or "Unknown", color="info", className="me-2"),
+                                dbc.Badge(mapping.event_type or "No type", color="secondary", className="me-2") if mapping.event_type else None,
+                                dbc.Badge(
+                                    f"Sent: {(mapping.sentiment if isinstance(mapping.sentiment, dict) else json.loads(mapping.sentiment))['overall']:.2f}",
+                                    color="success" if mapping.sentiment and (mapping.sentiment if isinstance(mapping.sentiment, dict) else json.loads(mapping.sentiment)).get('overall', 0) > 0.3 else "danger" if mapping.sentiment and (mapping.sentiment if isinstance(mapping.sentiment, dict) else json.loads(mapping.sentiment)).get('overall', 0) < -0.3 else "secondary",
+                                    className="me-2"
+                                ) if mapping.sentiment else None,
+                                dbc.Badge(
+                                    f"Impact: {mapping.impact_score:.2f}",
+                                    color="danger" if mapping.impact_score >= 0.7 else "warning" if mapping.impact_score >= 0.4 else "info",
+                                    className="me-2"
+                                ) if mapping.impact_score is not None else None,
+                                dbc.Badge(
+                                    f"{mapping.exposure_type}",
+                                    color="warning",
+                                    className="me-2"
+                                ) if mapping.exposure_type else None,
+                                html.Small(
+                                    mapping.fetched_at.strftime("%Y-%m-%d %H:%M") if mapping.fetched_at else "Unknown date",
+                                    className="text-muted"
+                                )
+                            ], className="mt-2"),
+                            html.P(
+                                mapping.summary_short or "No summary available",
+                                className="text-muted mt-2 mb-0 small"
+                            ) if mapping.summary_short else None
+                        ])
+                    ])
+                ], className="mb-2")
+                for mapping in news_mappings
+            ], style={"maxHeight": "400px", "overflowY": "auto"}) if news_mappings else html.P("No news articles found", className="text-muted text-center")
+        ])
+        
+        return title, body
+        
+    except Exception as e:
+        import logging
+        logging.error(f"Error loading entity details for {entity_name}: {e}", exc_info=True)
+        return "Error", html.P(f"Error loading details: {str(e)[:100]}", className="text-danger")
