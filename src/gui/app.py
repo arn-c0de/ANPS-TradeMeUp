@@ -719,6 +719,19 @@ app.clientside_callback(
     Input("chart-fullscreen-state", "data")
 )
 
+# Create New Simulations collapse – instant toggle (no server round-trip)
+app.clientside_callback(
+    """
+    function(n_clicks, is_open) {
+        if (n_clicks == null || n_clicks === 0) return window.dash_clientside.no_update;
+        return !is_open;
+    }
+    """,
+    Output("create-sim-collapse", "is_open"),
+    Input("toggle-create-sim", "n_clicks"),
+    State("create-sim-collapse", "is_open")
+)
+
 
 # ============================================================================
 # CALLBACKS - COMMON
@@ -3097,7 +3110,7 @@ def jump_to_overlay_chart(n_clicks, button_ids, tabs_data, overlays_data):
     import json
     import copy
 
-    if not callback_context.triggered:
+    if not callback_context.triggered or not any(n_clicks or []):
         return dash.no_update
 
     trigger = callback_context.triggered[0]["prop_id"].split(".")[0]
@@ -3195,6 +3208,7 @@ def jump_to_overlay_chart(n_clicks, button_ids, tabs_data, overlays_data):
 def switch_chart_tab(n_clicks_list, tabs_data):
     """Switch to clicked tab"""
     from dash import callback_context
+    import copy
     
     if not callback_context.triggered or not any(n_clicks_list):
         return dash.no_update
@@ -3205,8 +3219,17 @@ def switch_chart_tab(n_clicks_list, tabs_data):
     button_id = json.loads(triggered_id)
     tab_id = button_id["index"]
     
-    tabs_data['active_tab'] = tab_id
-    return tabs_data
+    # Verify that the tab exists before switching
+    tabs = tabs_data.get('tabs', [])
+    tab_exists = any(tab.get('id') == tab_id for tab in tabs)
+    
+    if not tab_exists:
+        return dash.no_update
+    
+    # Return a copy to avoid reference issues
+    updated_data = copy.deepcopy(tabs_data)
+    updated_data['active_tab'] = tab_id
+    return updated_data
 
 
 @app.callback(
@@ -3218,6 +3241,7 @@ def switch_chart_tab(n_clicks_list, tabs_data):
 def close_chart_tab(n_clicks_list, tabs_data):
     """Close clicked tab"""
     from dash import callback_context
+    import copy
     
     if not callback_context.triggered or not any(n_clicks_list):
         return dash.no_update
@@ -3232,17 +3256,20 @@ def close_chart_tab(n_clicks_list, tabs_data):
     if len(tabs_data.get('tabs', [])) <= 1:
         return dash.no_update
     
+    # Return a copy to avoid reference issues
+    updated_data = copy.deepcopy(tabs_data)
+    
     # Remove the tab
-    tabs_data['tabs'] = [t for t in tabs_data['tabs'] if t['id'] != tab_id_to_close]
+    updated_data['tabs'] = [t for t in updated_data['tabs'] if t['id'] != tab_id_to_close]
     
     # If we closed the active tab, switch to the first remaining tab
-    if tabs_data['active_tab'] == tab_id_to_close:
-        if tabs_data['tabs']:
-            tabs_data['active_tab'] = tabs_data['tabs'][0]['id']
+    if updated_data['active_tab'] == tab_id_to_close:
+        if updated_data['tabs']:
+            updated_data['active_tab'] = updated_data['tabs'][0]['id']
         else:
-            tabs_data['active_tab'] = None
+            updated_data['active_tab'] = None
     
-    return tabs_data
+    return updated_data
 
 
 @app.callback(
@@ -3500,19 +3527,33 @@ def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, ful
     # PERFORMANCE OPTIMIZATION: Only render the active tab
     # This avoids expensive API calls and chart rendering for hidden tabs
     active_tab = None
-    for tab in tabs:
-        if tab['id'] == active_tab_id:
-            active_tab = tab
-            break
+    
+    # Find the active tab - make sure we use the exact active_tab_id from the store
+    if active_tab_id:
+        for tab in tabs:
+            if tab['id'] == active_tab_id:
+                active_tab = tab
+                break
 
+    # In single mode, if active tab not found, fallback to first tab for rendering
+    # But don't update the store here - let a separate callback handle that
+    # IMPORTANT: Only fallback if active_tab_id is None or empty, not if it's just not found
+    # This prevents resetting the tab when it's being switched
     if not active_tab:
-        # Fallback to first tab if active not found
-        active_tab = tabs[0] if tabs else None
+        if tabs and (not active_tab_id or active_tab_id == ''):
+            # Only fallback if active_tab_id is actually None/empty, not just not found
+            active_tab = tabs[0]
+        elif tabs:
+            # If active_tab_id exists but tab not found, try to find it again (might be timing issue)
+            # But don't fallback immediately - this could be a race condition
+            active_tab = None
+        else:
+            active_tab = None
 
     if not active_tab:
         return dbc.Alert("No active chart.", color="info", className="mt-3"), container_class
 
-    # Only render the single active tab
+    # Only render the single active tab (in single mode)
     height = 'calc(100vh - 180px)' if is_fullscreen else 'calc(100vh - 320px)'
     final_style = {'display': 'block', 'height': height, 'minHeight': '600px'}
 
