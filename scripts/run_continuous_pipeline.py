@@ -97,7 +97,47 @@ class ContinuousPipeline:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
         
+        # Display pipeline phase configuration
+        self._display_phase_configuration()
+        
         logger.info(f"Pipeline initialized with max_memory={max_memory_mb}MB, check_interval={check_interval}s")
+    
+    def _display_phase_configuration(self):
+        """Display which pipeline phases are enabled/disabled"""
+        logger.info("=" * 80)
+        logger.info("Pipeline Phase Configuration")
+        logger.info("=" * 80)
+        
+        phases = [
+            ("Phase 12: Scenario Generation", settings.enable_scenarios),
+            ("Phase 13: Fact Verification", settings.enable_fact_checking),
+            ("Phase 14: Confidence Calibration", settings.enable_calibration),
+            ("Phase 15: Meta-Strategy Ensemble", settings.enable_meta_strategy),
+        ]
+        
+        enabled_phases = []
+        disabled_phases = []
+        
+        for phase_name, is_enabled in phases:
+            if is_enabled:
+                enabled_phases.append(phase_name)
+            else:
+                disabled_phases.append(phase_name)
+        
+        if enabled_phases:
+            logger.info("✅ ENABLED Phases:")
+            for phase in enabled_phases:
+                logger.info(f"   • {phase}")
+        
+        if disabled_phases:
+            logger.info("❌ DISABLED Phases (skipped to save tokens/resources):")
+            for phase in disabled_phases:
+                logger.info(f"   • {phase}")
+        
+        if not enabled_phases and not disabled_phases:
+            logger.info("⚠️  No phase configuration found")
+        
+        logger.info("=" * 80)
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully"""
@@ -409,33 +449,48 @@ class ContinuousPipeline:
             logger.info(f"Simulation: {sim_results}")
 
             # Phase 12: Scenario Generation (stress test predictions)
-            # TODO: Refactor when needed
-            activity_logger.log_phase(12, "Scenario Generation")
-            scenario_gen = ScenarioGenerationAgent(self.db)
-            scenario_stats = scenario_gen.get_statistics()
-            logger.info(f"Scenarios: {scenario_stats}")
+            # Check if scenarios are enabled in settings
+            if settings.enable_scenarios:
+                activity_logger.log_phase(12, "Scenario Generation")
+                scenario_gen = ScenarioGenerationAgent(self.db)
+                scenario_stats = scenario_gen.get_statistics()
+                logger.info(f"Scenarios: {scenario_stats}")
+            else:
+                logger.debug("Phase 12: Scenario Generation skipped (disabled in settings)")
 
             # Phase 13: Fact Verification
             # ✅ REFACTORED: Uses scoped sessions internally
-            activity_logger.log_phase(13, "Fact Verification")
-            fact_verifier = FactVerificationAgent()  # ✅ No db parameter!
-            fact_results = fact_verifier.process_batch(limit=self.batch_sizes['fact_verification'])
-            logger.info(f"Fact Verification: {fact_results}")
+            # Check if fact checking is enabled in settings (can be expensive in tokens)
+            if settings.enable_fact_checking:
+                activity_logger.log_phase(13, "Fact Verification")
+                fact_verifier = FactVerificationAgent()  # ✅ No db parameter!
+                fact_results = fact_verifier.process_batch(limit=self.batch_sizes['fact_verification'])
+                logger.info(f"Fact Verification: {fact_results}")
+            else:
+                logger.debug("Phase 13: Fact Verification skipped (disabled in settings to save tokens)")
 
             # Phase 14: Confidence Calibration (for predictions)
             # ✅ REFACTORED: Uses scoped sessions internally
-            activity_logger.log_phase(14, "Confidence Calibration")
-            calibrator = ConfidenceCalibrationAgent()  # ✅ No db parameter!
-            calibration_stats = calibrator.get_statistics()
-            logger.info(f"Calibration: {calibration_stats}")
+            # Check if calibration is enabled in settings
+            if settings.enable_calibration:
+                activity_logger.log_phase(14, "Confidence Calibration")
+                calibrator = ConfidenceCalibrationAgent()  # ✅ No db parameter!
+                calibration_stats = calibrator.get_statistics()
+                logger.info(f"Calibration: {calibration_stats}")
+            else:
+                logger.debug("Phase 14: Confidence Calibration skipped (disabled in settings)")
 
             # Phase 15: Meta-Strategy (Ensemble Predictions)
             # ✅ REFACTORED: Uses scoped sessions internally
-            activity_logger.log_phase(15, "Meta-Strategy Ensemble")
-            meta_strategy = MetaStrategyAgent()  # ✅ No db parameter!
-            # Get entities that have multiple predictions for ensemble
-            ensemble_results = meta_strategy.get_statistics()
-            logger.info(f"Meta-Strategy: {ensemble_results}")
+            # Check if meta-strategy is enabled in settings
+            if settings.enable_meta_strategy:
+                activity_logger.log_phase(15, "Meta-Strategy Ensemble")
+                meta_strategy = MetaStrategyAgent()  # ✅ No db parameter!
+                # Get entities that have multiple predictions for ensemble
+                ensemble_results = meta_strategy.get_statistics()
+                logger.info(f"Meta-Strategy: {ensemble_results}")
+            else:
+                logger.debug("Phase 15: Meta-Strategy Ensemble skipped (disabled in settings)")
 
             # Phase 16: Model Performance Monitoring
             # TODO: Refactor when needed
