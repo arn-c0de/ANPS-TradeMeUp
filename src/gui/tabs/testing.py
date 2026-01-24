@@ -173,6 +173,16 @@ AGENT_TESTS = {
         "test_method": "test_ab_testing",
         "expected_output": "A/B test executed",
         "tier": "TIER 5: Optimization"
+    },
+    "simulation_engine": {
+        "id": "15",
+        "name": "Trading Simulation Engine",
+        "description": "Validate predicted market impact, risk scoring, and trade decisions",
+        "module": "src.simulations.trading_simulator",
+        "class": "TradingSimulationEngine",
+        "test_method": "test_simulation_engine",
+        "expected_output": "simulation checks passed",
+        "tier": "TIER 6: Simulation"
     }
 }
 
@@ -327,6 +337,7 @@ def test_agent(agent_key):
         "agent_9",    # SignalDecayAgent
         "agent_11",   # ConfidenceCalibrationAgent
         "agent_12",   # MetaStrategyAgent
+        "simulation_engine",  # TradingSimulationEngine
     }
     
     try:
@@ -442,6 +453,91 @@ def run_agent_specific_test(agent, agent_key):
             if hasattr(agent, 'process_batch'):
                 return {"success": True, "message": "✅ Signal decay agent ready (refactored)"}
             return {"success": False, "message": "Missing process_batch method"}
+
+        elif agent_key == "simulation_engine":
+            # Test risk calculation and trading simulation utilities (no DB/network calls)
+            from src.simulations.risk_calculations import RiskCalculator, RiskInputs
+
+            calculator = RiskCalculator()
+            inputs = RiskInputs(
+                model_uncertainty=0.2,
+                divergence_pct=2.5,
+                volatility_regime="medium",
+                liquidity_stress=0.3,
+                regime_confidence=0.7,
+                transaction_cost_ratio=0.2,
+                market_impact_bps=6.0,
+                correlation_breakdown=0.1,
+            )
+            risk_result = calculator.calculate(inputs)
+            risk_score = risk_result.get("risk_score")
+            if risk_score is None or not (0.0 <= risk_score <= 1.0):
+                return {
+                    "success": False,
+                    "message": "Risk score out of bounds",
+                    "risk_result": risk_result,
+                }
+
+            # Validate predicted return normalization behavior
+            class _PredictionStub:
+                expected_return = {"mean": 0.02}
+
+            expected_return_pct = agent._get_expected_return_pct(_PredictionStub())
+            if abs(expected_return_pct - 2.0) > 0.001:
+                return {
+                    "success": False,
+                    "message": "Expected return normalization failed",
+                    "expected_return_pct": expected_return_pct,
+                }
+
+            # Validate cost estimation and decision logic
+            total_bps, breakdown = agent._estimate_costs_bps(price=150.0, volatility_regime="medium")
+            if total_bps <= 0 or not breakdown:
+                return {
+                    "success": False,
+                    "message": "Cost estimation failed",
+                    "cost_breakdown": breakdown,
+                }
+
+            decision = agent._calculate_decision(
+                predicted_direction="up",
+                expected_return_pct=2.0,
+                confidence=0.8,
+                risk_score=0.4,
+                cost_ratio=0.2,
+            )
+            if decision != "buy":
+                return {
+                    "success": False,
+                    "message": f"Unexpected decision outcome: {decision}",
+                    "decision": decision,
+                }
+
+            # Validate market snapshot handling with stubbed provider
+            class _StaticMarketDataProvider:
+                def get_live_price(self, ticker):
+                    return {
+                        "symbol": ticker,
+                        "price": 123.45,
+                        "change_percent": 0.12,
+                        "timestamp": datetime.utcnow(),
+                    }
+
+            agent.market_data_provider = _StaticMarketDataProvider()
+            snapshot = agent._get_market_snapshot("TEST")
+            if not snapshot or snapshot.get("price") is None:
+                return {
+                    "success": False,
+                    "message": "Market snapshot missing price",
+                    "snapshot": snapshot,
+                }
+
+            return {
+                "success": True,
+                "message": "Risk, market data, and decision checks passed",
+                "risk_score": risk_score,
+                "decision": decision,
+            }
             
         else:
             return {"success": True, "message": "Basic initialization successful"}
