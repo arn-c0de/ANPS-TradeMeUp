@@ -211,6 +211,63 @@ def create_layout():
                         ]),
 
                         html.Hr(),
+                        
+                        # Pipeline Phase Toggles
+                        html.H6("Pipeline Phases", className="mb-3 mt-4"),
+                        html.P("Enable or disable specific pipeline phases to optimize token usage and performance", 
+                               className="text-muted small mb-3"),
+                        
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label("Phase 13: Fact Verification", className="fw-bold"),
+                                html.P("Verify factual claims in articles (costs many tokens)", 
+                                       className="text-muted small mb-2"),
+                                dbc.Switch(
+                                    id="settings-enable-fact-checking",
+                                    label="Enable Fact Checking",
+                                    value=True,
+                                    className="mb-3"
+                                )
+                            ], md=6),
+                            dbc.Col([
+                                dbc.Label("Phase 14: Confidence Calibration", className="fw-bold"),
+                                html.P("Calibrate prediction confidence scores", 
+                                       className="text-muted small mb-2"),
+                                dbc.Switch(
+                                    id="settings-enable-calibration",
+                                    label="Enable Calibration",
+                                    value=True,
+                                    className="mb-3"
+                                )
+                            ], md=6)
+                        ]),
+                        
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label("Phase 15: Meta-Strategy Ensemble", className="fw-bold"),
+                                html.P("Create ensemble predictions from multiple models", 
+                                       className="text-muted small mb-2"),
+                                dbc.Switch(
+                                    id="settings-enable-meta-strategy",
+                                    label="Enable Meta-Strategy",
+                                    value=True,
+                                    className="mb-3"
+                                )
+                            ], md=6),
+                            dbc.Col([
+                                dbc.Label("Phase 12: Scenario Generation", className="fw-bold"),
+                                html.P("Generate stress test scenarios for predictions", 
+                                       className="text-muted small mb-2"),
+                                dbc.Switch(
+                                    id="settings-enable-scenarios",
+                                    label="Enable Scenarios",
+                                    value=True,
+                                    className="mb-3"
+                                )
+                            ], md=6)
+                        ]),
+
+                        html.Hr(),
 
                         dbc.Button(
                             "💾 Save Pipeline Settings",

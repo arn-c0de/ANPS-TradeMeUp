@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     model_path: str = Field(default="./models", alias="MODEL_PATH")
     default_temperature: float = Field(default=0.1, alias="DEFAULT_TEMPERATURE")
     max_tokens: int = Field(default=4096, alias="MAX_TOKENS")
+    
+    # Pipeline Phase Settings (enable/disable phases to optimize token usage)
+    enable_fact_checking: bool = Field(default=True, alias="ENABLE_FACT_CHECKING")
+    enable_calibration: bool = Field(default=True, alias="ENABLE_CALIBRATION")
+    enable_meta_strategy: bool = Field(default=True, alias="ENABLE_META_STRATEGY")
+    enable_scenarios: bool = Field(default=True, alias="ENABLE_SCENARIOS")
 
 
 # Global settings instance

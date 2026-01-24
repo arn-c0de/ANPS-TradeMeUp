@@ -5252,6 +5252,136 @@ def save_llm_settings(n_clicks, provider, model):
         )
 
 
+# Load pipeline phase settings when settings tab opens
+@app.callback(
+    [Output("settings-enable-fact-checking", "value"),
+     Output("settings-enable-calibration", "value"),
+     Output("settings-enable-meta-strategy", "value"),
+     Output("settings-enable-scenarios", "value")],
+    Input("tabs", "active_tab"),
+    prevent_initial_call=False
+)
+def load_pipeline_phase_settings(active_tab):
+    """Load current pipeline phase settings from config"""
+    if active_tab != "settings":
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    
+    try:
+        from src.config.settings import settings
+        return (
+            settings.enable_fact_checking,
+            settings.enable_calibration,
+            settings.enable_meta_strategy,
+            settings.enable_scenarios
+        )
+    except:
+        # Defaults: all enabled
+        return True, True, True, True
+
+
+# Save pipeline settings
+@app.callback(
+    Output("settings-save-status", "children"),
+    Input("btn-save-settings", "n_clicks"),
+    [State("settings-interval", "value"),
+     State("settings-batch-size", "value"),
+     State("settings-enable-fact-checking", "value"),
+     State("settings-enable-calibration", "value"),
+     State("settings-enable-meta-strategy", "value"),
+     State("settings-enable-scenarios", "value")],
+    prevent_initial_call=True
+)
+def save_pipeline_settings(n_clicks, interval, batch_size, enable_fact_checking, 
+                          enable_calibration, enable_meta_strategy, enable_scenarios):
+    """Save pipeline settings to .env.local"""
+    if not n_clicks:
+        return ""
+    
+    try:
+        from pathlib import Path
+        
+        # Path to .env.local
+        env_path = Path(__file__).parent.parent.parent / ".env.local"
+        
+        # Read existing .env.local
+        if env_path.exists():
+            with open(env_path, 'r') as f:
+                lines = f.readlines()
+        else:
+            lines = []
+        
+        # Update pipeline settings
+        new_lines = []
+        updated_settings = {
+            'ENABLE_FACT_CHECKING': False,
+            'ENABLE_CALIBRATION': False,
+            'ENABLE_META_STRATEGY': False,
+            'ENABLE_SCENARIOS': False
+        }
+        
+        for line in lines:
+            if line.startswith('ENABLE_FACT_CHECKING='):
+                new_lines.append(f'ENABLE_FACT_CHECKING={str(enable_fact_checking).lower()}\n')
+                updated_settings['ENABLE_FACT_CHECKING'] = True
+            elif line.startswith('ENABLE_CALIBRATION='):
+                new_lines.append(f'ENABLE_CALIBRATION={str(enable_calibration).lower()}\n')
+                updated_settings['ENABLE_CALIBRATION'] = True
+            elif line.startswith('ENABLE_META_STRATEGY='):
+                new_lines.append(f'ENABLE_META_STRATEGY={str(enable_meta_strategy).lower()}\n')
+                updated_settings['ENABLE_META_STRATEGY'] = True
+            elif line.startswith('ENABLE_SCENARIOS='):
+                new_lines.append(f'ENABLE_SCENARIOS={str(enable_scenarios).lower()}\n')
+                updated_settings['ENABLE_SCENARIOS'] = True
+            else:
+                new_lines.append(line)
+        
+        # Add if not found
+        if not updated_settings['ENABLE_FACT_CHECKING']:
+            new_lines.append(f'ENABLE_FACT_CHECKING={str(enable_fact_checking).lower()}\n')
+        if not updated_settings['ENABLE_CALIBRATION']:
+            new_lines.append(f'ENABLE_CALIBRATION={str(enable_calibration).lower()}\n')
+        if not updated_settings['ENABLE_META_STRATEGY']:
+            new_lines.append(f'ENABLE_META_STRATEGY={str(enable_meta_strategy).lower()}\n')
+        if not updated_settings['ENABLE_SCENARIOS']:
+            new_lines.append(f'ENABLE_SCENARIOS={str(enable_scenarios).lower()}\n')
+        
+        # Write back
+        with open(env_path, 'w') as f:
+            f.writelines(new_lines)
+        
+        phases_status = []
+        if not enable_fact_checking:
+            phases_status.append("Fact Checking disabled")
+        if not enable_calibration:
+            phases_status.append("Calibration disabled")
+        if not enable_meta_strategy:
+            phases_status.append("Meta-Strategy disabled")
+        if not enable_scenarios:
+            phases_status.append("Scenarios disabled")
+        
+        status_text = "✅ Pipeline settings saved!"
+        if phases_status:
+            status_text += f"\n⚠️ Disabled phases: {', '.join(phases_status)}"
+        status_text += "\n⚠️ Restart the pipeline for changes to take effect"
+        
+        return dbc.Alert(
+            [
+                html.Strong("✅ Settings saved!"),
+                html.Br(),
+                html.Small(status_text)
+            ],
+            color="success",
+            dismissable=True
+        )
+    
+    except Exception as e:
+        return dbc.Alert(
+            f"❌ Error saving settings: {str(e)}",
+            color="danger",
+            dismissable=True
+        )
+
+
 # Open settings tab
 @app.callback(
     Output("tabs", "active_tab", allow_duplicate=True),
