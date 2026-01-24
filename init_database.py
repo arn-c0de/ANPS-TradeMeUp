@@ -24,7 +24,7 @@ def init_database():
         # Import after adding to path
         from src.models.database import engine, Base
         # Import models to register them
-        from src.models import raw_news, processed_news, data_quality, entities, analysis, predictions
+        from src.models import raw_news, processed_news, data_quality, entities, analysis, predictions, trading_simulation
         
         # Create all tables
         Base.metadata.create_all(bind=engine)

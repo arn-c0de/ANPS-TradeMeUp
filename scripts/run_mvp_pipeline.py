@@ -27,6 +27,7 @@ from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
 from src.agents.regime_detection_agent import RegimeDetectionAgent
 from src.agents.impact_scoring_agent import ImpactScoringAgent
 from src.agents.prediction_agent import PredictionAgent
+from src.agents.trading_simulation_agent import TradingSimulationAgent
 from src.config.settings import settings
 from src.utils.activity_logger import activity_logger
 import logging
@@ -182,6 +183,19 @@ def main():
         logger.info(f"📊 Prediction Stats: {pred_stats}")
         activity_logger.log_agent_success("Prediction Agent", pred_results.get('generated', 0))
 
+        # ===== PHASE 9: TRADING SIMULATION =====
+        activity_logger.log_phase(9, "Trading Simulation (Agent 8.5)")
+        print_section("PHASE 9: Trading Simulation (Agent 8.5)")
+
+        activity_logger.log_agent_start("Trading Simulation Agent", "9")
+        simulator = TradingSimulationAgent()
+        sim_results = simulator.process_batch(limit=20, lookback_days=7)
+        logger.info(f"Trading Simulation: {sim_results}")
+
+        sim_stats = simulator.get_statistics()
+        logger.info(f"📊 Simulation Stats: {sim_stats}")
+        activity_logger.log_agent_success("Trading Simulation Agent", sim_results.get('processed', 0))
+
         # ===== FINAL SUMMARY =====
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
@@ -205,6 +219,12 @@ def main():
         logger.info(f"  - Bullish: {pred_stats.get('bullish_predictions', 0)}")
         logger.info(f"  - Bearish: {pred_stats.get('bearish_predictions', 0)}")
         logger.info(f"  - Avg Confidence: {pred_stats.get('average_confidence', 0):.2f}")
+        logger.info("")
+        logger.info("🧪 SIMULATION:")
+        logger.info(f"  - Total Simulations: {sim_stats.get('total_simulations', 0)}")
+        logger.info(f"  - Buys: {sim_stats.get('buys', 0)}")
+        logger.info(f"  - Sells: {sim_stats.get('sells', 0)}")
+        logger.info(f"  - Holds: {sim_stats.get('holds', 0)}")
         logger.info("")
         logger.info("🌡️  CURRENT MARKET REGIME:")
         logger.info(f"  {current_regime.regime}")

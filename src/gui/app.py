@@ -10,8 +10,9 @@ warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
 
 import dash
 from dash import dcc, html, Input, Output, State, ALL, MATCH
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import plotly.graph_objects as go
 import pandas as pd
@@ -26,7 +27,7 @@ from src.gui.utils.task_queue import get_task_queue, add_gui_task
 logger = logging.getLogger(__name__)
 
 # Import tab modules
-from src.gui.tabs import dashboard, predictions, news, statistics, charts, system, control, testing
+from src.gui.tabs import dashboard, predictions, news, statistics, charts, simulations, system, control, testing
 from src.gui.tabs import settings as settings_tab
 
 # Initialize Dash app with Bootstrap dark theme
@@ -627,8 +628,9 @@ app.layout = html.Div([
     dbc.Container([
         dbc.Tabs([
             dbc.Tab(dashboard.create_layout(), label="🏠 Dashboard", tab_id="dashboard", className="text-light"),
-            dbc.Tab(predictions.create_layout(), label="🎯 Predictions", tab_id="predictions", className="text-light"),
             dbc.Tab(news.create_layout(), label="📰 News Feed", tab_id="news", className="text-light"),
+            dbc.Tab(predictions.create_layout(), label="🎯 Predictions", tab_id="predictions", className="text-light"),
+            dbc.Tab(simulations.create_layout(), label="🧪 Simulations", tab_id="simulations", className="text-light"),
             dbc.Tab(statistics.create_layout(), label="📊 Statistics", tab_id="statistics", className="text-light"),
             dbc.Tab(charts.create_layout(), label="📈 Live Charts", tab_id="charts", className="text-light"),
             dbc.Tab(control.create_layout(), label="🎮 Agent Control", tab_id="control", className="text-light"),
@@ -1003,23 +1005,203 @@ def update_predictions_table(entities, start_date, end_date, horizon, surprise_f
     )
 
 
+# ============================================================================
+# CALLBACKS - SIMULATIONS TAB
+# ============================================================================
+
+@app.callback(
+    Output("sim-entity-filter", "options"),
+    [Input("interval-component", "n_intervals"),
+     Input("sim-date-filter", "start_date"),
+     Input("sim-date-filter", "end_date")]
+)
+def update_simulation_entity_options(n, start_date, end_date):
+    """Update simulation entity filter dropdown options"""
+    date_range = (start_date, end_date) if start_date or end_date else None
+    return simulations.get_entity_options(engine, date_range=date_range)
+
+
+@app.callback(
+    Output("simulation-table", "children"),
+    [Input("sim-entity-filter", "value"),
+     Input("sim-date-filter", "start_date"),
+     Input("sim-date-filter", "end_date"),
+     Input("sim-horizon-filter", "value"),
+     Input("sim-decision-filter", "value"),
+     Input("create-sim-status", "children"),
+     Input("sim-delete-status", "data")]  # Refresh table after creating/deleting
+)
+def update_simulation_table(entities, start_date, end_date, horizon, decision, _, __):
+    """Update simulations table with filters."""
+    date_range = (start_date, end_date) if start_date or end_date else None
+    return simulations.get_simulation_table(
+        engine,
+        entity_filter=entities,
+        date_range=date_range,
+        decision_filter=decision or "all",
+        horizon_filter=horizon or "all"
+    )
+
+
+@app.callback(
+    Output("create-sim-entity-filter", "options"),
+    Input("interval-component", "n_intervals")
+)
+def update_create_simulation_entity_options(n):
+    """Update create simulation entity filter dropdown options"""
+    return simulations.get_entity_options(engine)
+
+
+@app.callback(
+    Output("create-sim-status", "children"),
+    Input("btn-create-simulations", "n_clicks"),
+    [State("create-sim-entity-filter", "value"),
+     State("create-sim-date-range", "start_date"),
+     State("create-sim-date-range", "end_date"),
+     State("create-sim-horizon-filter", "value"),
+     State("create-sim-limit", "value")],
+    prevent_initial_call=True
+)
+def create_simulations_from_predictions(n_clicks, entities, start_date, end_date, horizon, limit):
+    """Create new simulations from predictions based on filters."""
+    if not n_clicks:
+        return ""
+
+    try:
+        from src.simulations.trading_simulator import TradingSimulationEngine
+        from datetime import datetime
+
+        engine_sim = TradingSimulationEngine()
+
+        # Prepare date range
+        date_range = None
+        if start_date and end_date:
+            start = datetime.fromisoformat(start_date) if isinstance(start_date, str) else start_date
+            end = datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
+            date_range = (start, end)
+
+        # Create simulations
+        stats = engine_sim.create_simulations_from_predictions(
+            entity_filter=entities if entities else None,
+            horizon_filter=horizon if horizon != "all" else None,
+            date_range=date_range,
+            limit=limit or 50
+        )
+
+        return dbc.Alert(
+            f"✓ Created {stats['created']} simulations, updated {stats['updated']}, skipped {stats['skipped']}, errors {stats['errors']}",
+            color="success" if stats['errors'] == 0 else "warning",
+            dismissable=True,
+            duration=5000
+        )
+    except Exception as e:
+        logger.error(f"Error creating simulations: {e}")
+        return dbc.Alert(
+            f"✗ Error creating simulations: {str(e)}",
+            color="danger",
+            dismissable=True,
+            duration=5000
+        )
+
+
+@app.callback(
+    [Output({"type": "delete-sim", "index": ALL}, "disabled"),
+     Output("sim-delete-status", "data")],
+    Input({"type": "delete-sim", "index": ALL}, "n_clicks"),
+    State({"type": "delete-sim", "index": ALL}, "id"),
+    prevent_initial_call=True
+)
+def delete_simulation(n_clicks, button_ids):
+    """Delete a simulation."""
+    if not n_clicks or not any(n_clicks):
+        raise PreventUpdate
+
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    import json
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    try:
+        button_id = json.loads(triggered_id)
+    except Exception:
+        return dash.no_update, dash.no_update
+
+    if not button_ids:
+        return dash.no_update, dash.no_update
+
+    target_index = None
+    for i, item in enumerate(button_ids):
+        if item == button_id:
+            target_index = i
+            break
+
+    if target_index is None:
+        return dash.no_update, dash.no_update
+
+    try:
+        from src.simulations.trading_simulator import TradingSimulationEngine
+
+        simulation_id = button_id["index"]
+        engine_sim = TradingSimulationEngine()
+        success = engine_sim.delete_simulation(simulation_id)
+
+        if success:
+            logger.info(f"Deleted simulation {simulation_id}")
+            disabled_states = [False] * len(button_ids)
+            disabled_states[target_index] = True
+            return disabled_states, {"simulation_id": simulation_id, "deleted": True, "ts": datetime.utcnow().isoformat()}
+        return [False] * len(button_ids), dash.no_update
+    except Exception as e:
+        logger.error(f"Error deleting simulation: {e}")
+        return [False] * len(button_ids), dash.no_update
+
+
+@app.callback(
+    Output({"type": "refresh-sim", "index": MATCH}, "disabled"),
+    Input({"type": "refresh-sim", "index": MATCH}, "n_clicks"),
+    State({"type": "refresh-sim", "index": MATCH}, "id"),
+    prevent_initial_call=True
+)
+def refresh_simulation(n_clicks, button_id):
+    """Refresh/recalculate a simulation."""
+    if not n_clicks:
+        return False
+
+    try:
+        from src.simulations.trading_simulator import TradingSimulationEngine
+
+        simulation_id = button_id["index"]
+        engine_sim = TradingSimulationEngine()
+        success = engine_sim.refresh_simulation(simulation_id)
+
+        if success:
+            logger.info(f"Refreshed simulation {simulation_id}")
+        return False  # Keep button enabled
+    except Exception as e:
+        logger.error(f"Error refreshing simulation: {e}")
+        return False
+
+
 @app.callback(
     [Output("prediction-modal", "is_open"),
      Output("prediction-detail-cache", "data"),
      Output("current-prediction-id", "data")],
     [Input({"type": "pred-detail-btn", "index": ALL}, "n_clicks"),
+     Input({"type": "sim-detail-btn", "index": ALL}, "n_clicks"),
      Input("close-prediction-modal", "n_clicks"),
      Input("refresh-prediction-detail", "n_clicks")],
     [State("prediction-modal", "is_open"),
      State({"type": "pred-detail-btn", "index": ALL}, "id"),
+     State({"type": "sim-detail-btn", "index": ALL}, "id"),
      State("prediction-detail-cache", "data"),
      State("current-prediction-id", "data")],
     prevent_initial_call=True
 )
-def toggle_prediction_modal(detail_clicks, close_click, refresh_click, is_open, button_ids, cached_data, current_pred_id):
+def toggle_prediction_modal(detail_clicks, sim_detail_clicks, close_click, refresh_click, is_open, button_ids, sim_button_ids, cached_data, current_pred_id):
     """Open/close prediction detail modal and cache prediction_id"""
-    logger.info(f"=== MODAL TOGGLE CALLBACK === details: {detail_clicks}, close: {close_click}, refresh: {refresh_click}")
-    
+    logger.info(f"=== MODAL TOGGLE CALLBACK === details: {detail_clicks}, sim_details: {sim_detail_clicks}, close: {close_click}, refresh: {refresh_click}")
+
     from dash import callback_context
 
     if not callback_context.triggered:
@@ -1038,12 +1220,12 @@ def toggle_prediction_modal(detail_clicks, close_click, refresh_click, is_open, 
     # Close button clicked
     if "close-prediction-modal" in trigger_id:
         return False, dash.no_update, dash.no_update
-    
+
     # Refresh button clicked - keep modal open, trigger reload with performance
     if "refresh-prediction-detail" in trigger_id and current_pred_id:
         return True, {"prediction_id": current_pred_id, "load_performance": True}, current_pred_id
 
-    # Detail button clicked - parse the prop_id to get the index
+    # Detail button clicked (from predictions tab) - parse the prop_id to get the index
     if "pred-detail-btn" in trigger_id and ".n_clicks" in trigger_id:
         # Extract prediction_id from triggered prop_id
         import json
@@ -1053,6 +1235,20 @@ def toggle_prediction_modal(detail_clicks, close_click, refresh_click, is_open, 
         prediction_id = id_dict.get("index")
 
         if prediction_id:
+            # Load with live performance data for accurate calculations
+            return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id
+
+    # Detail button clicked (from simulations tab) - parse the prop_id to get the index
+    if "sim-detail-btn" in trigger_id and ".n_clicks" in trigger_id:
+        # Extract prediction_id from triggered prop_id
+        import json
+        # prop_id format: '{"index":"uuid","type":"sim-detail-btn"}.n_clicks'
+        id_str = trigger_id.split('.')[0]
+        id_dict = json.loads(id_str)
+        prediction_id = id_dict.get("index")
+
+        if prediction_id:
+            logger.info(f"Opening prediction modal from simulations tab: {prediction_id}")
             # Load with live performance data for accurate calculations
             return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id
 
@@ -1359,72 +1555,223 @@ def update_news_feed(n, sources, events, sentiment, search):
 # CALLBACKS - STATISTICS TAB
 # ============================================================================
 
+def _resolve_stats_date_range(start_date, end_date, active_filter):
+    if active_filter and active_filter != "all":
+        if active_filter.endswith("h"):
+            hours = None
+            if active_filter.startswith("custom-"):
+                try:
+                    hours = int(active_filter.split("-", 1)[1].rstrip("h"))
+                except ValueError:
+                    hours = None
+            else:
+                try:
+                    hours = int(active_filter.rstrip("h"))
+                except ValueError:
+                    hours = None
+
+            if hours:
+                end = datetime.utcnow()
+                start = end - timedelta(hours=hours)
+                return (start, end)
+
+    if start_date or end_date:
+        return (start_date, end_date)
+    return None
+
 @app.callback(
     Output("statistics-metrics", "children"),
-    Input("interval-component", "n_intervals")
+    [Input("interval-component", "n_intervals"),
+     Input("stats-date-range", "start_date"),
+     Input("stats-date-range", "end_date"),
+     Input("stats-granularity", "value"),
+     Input("active-filter-store", "data")]
 )
-def update_statistics_metrics(n):
-    """Update statistics metrics"""
-    return statistics.get_statistics_metrics(engine)
+def update_statistics_metrics(n, start_date, end_date, granularity, active_filter):
+    """Update statistics metrics with date filters"""
+    date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
+    return statistics.get_statistics_metrics(engine, date_range=date_range, granularity=granularity)
+
+
+@app.callback(
+    [Output("stats-date-range", "start_date"),
+     Output("stats-date-range", "end_date"),
+     Output("active-filter-store", "data")],
+    [Input("quick-1h", "n_clicks"),
+     Input("quick-12h", "n_clicks"),
+     Input("quick-24h", "n_clicks"),
+     Input("quick-7d", "n_clicks"),
+     Input("quick-30d", "n_clicks"),
+     Input("quick-90d", "n_clicks"),
+     Input("quick-1y", "n_clicks"),
+     Input("quick-all", "n_clicks"),
+     Input("custom-hours-input", "value"),
+     Input("stats-reset-filter", "n_clicks")],
+    prevent_initial_call=True
+)
+def update_stats_date_range(btn_1h, btn_12h, btn_24h, btn_7d, btn_30d, btn_90d, btn_1y, btn_all, custom_hours, btn_reset):
+    """Update date range based on quick select buttons or custom hours input"""
+    from dash import callback_context
+    from datetime import datetime, timedelta
+
+    if not callback_context.triggered:
+        raise PreventUpdate
+
+    trigger_id = callback_context.triggered[0]["prop_id"].split(".")[0]
+
+    now = datetime.now().date()
+    now_datetime = datetime.now()
+
+    if trigger_id == "quick-1h":
+        start = (now_datetime - timedelta(hours=1)).date()
+        return start, now, "1h"
+    elif trigger_id == "quick-12h":
+        start = (now_datetime - timedelta(hours=12)).date()
+        return start, now, "12h"
+    elif trigger_id == "quick-24h":
+        return (now - timedelta(days=1)), now, "24h"
+    elif trigger_id == "quick-7d":
+        return (now - timedelta(days=7)), now, "7d"
+    elif trigger_id == "quick-30d":
+        return (now - timedelta(days=30)), now, "30d"
+    elif trigger_id == "quick-90d":
+        return (now - timedelta(days=90)), now, "90d"
+    elif trigger_id == "quick-1y":
+        return (now - timedelta(days=365)), now, "1y"
+    elif trigger_id == "custom-hours-input" and custom_hours:
+        try:
+            hours = int(custom_hours)
+            if hours > 0 and hours <= 8760:  # Max 1 year in hours
+                start = (now_datetime - timedelta(hours=hours)).date()
+                return start, now, f"custom-{hours}h"
+        except:
+            pass
+    elif trigger_id == "quick-all" or trigger_id == "stats-reset-filter":
+        # For "all time", return None to show everything
+        return None, None, "all"
+
+    raise PreventUpdate
+
+
+@app.callback(
+    [Output("quick-1h", "outline"),
+     Output("quick-12h", "outline"),
+     Output("quick-24h", "outline"),
+     Output("quick-7d", "outline"),
+     Output("quick-30d", "outline"),
+     Output("quick-90d", "outline"),
+     Output("quick-1y", "outline"),
+     Output("quick-all", "outline")],
+    Input("active-filter-store", "data")
+)
+def update_button_styles(active_filter):
+    """Update button styles to highlight the active filter"""
+    # All buttons start as outline
+    styles = [True, True, True, True, True, True, True, True]
+
+    # Set the active button to not outline (filled)
+    if active_filter == "1h":
+        styles[0] = False
+    elif active_filter == "12h":
+        styles[1] = False
+    elif active_filter == "24h":
+        styles[2] = False
+    elif active_filter == "7d":
+        styles[3] = False
+    elif active_filter == "30d":
+        styles[4] = False
+    elif active_filter == "90d":
+        styles[5] = False
+    elif active_filter == "1y":
+        styles[6] = False
+    elif active_filter == "all":
+        styles[7] = False
+    # For custom filters, all buttons remain outlined
+
+    return styles
 
 
 @app.callback(
     [Output("event-distribution-chart", "figure"),
      Output("quality-distribution-chart", "figure")],
-    Input("interval-component", "n_intervals")
+    [Input("interval-component", "n_intervals"),
+     Input("stats-date-range", "start_date"),
+     Input("stats-date-range", "end_date"),
+     Input("active-filter-store", "data")]
 )
-def update_statistics_charts(n):
-    """Update statistics charts"""
-    event_fig = statistics.get_event_distribution_chart(engine)
-    quality_fig = statistics.get_quality_distribution_chart(engine)
+def update_statistics_charts(n, start_date, end_date, active_filter):
+    """Update statistics charts with date filtering"""
+    date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
+    event_fig = statistics.get_event_distribution_chart(engine, date_range=date_range)
+    quality_fig = statistics.get_quality_distribution_chart(engine, date_range=date_range)
     return event_fig, quality_fig
 
 
 @app.callback(
     Output("sentiment-distribution-chart", "figure"),
-    Input("interval-component", "n_intervals")
+    [Input("interval-component", "n_intervals"),
+     Input("stats-date-range", "start_date"),
+     Input("stats-date-range", "end_date"),
+     Input("active-filter-store", "data")]
 )
-def update_sentiment_chart(n):
-    """Update sentiment distribution chart"""
-    return statistics.get_sentiment_distribution_chart(engine)
+def update_sentiment_chart(n, start_date, end_date, active_filter):
+    """Update sentiment distribution chart with date filtering"""
+    date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
+    return statistics.get_sentiment_distribution_chart(engine, date_range=date_range)
 
 
 @app.callback(
     Output("impact-distribution-chart", "figure"),
-    Input("interval-component", "n_intervals")
+    [Input("interval-component", "n_intervals"),
+     Input("stats-date-range", "start_date"),
+     Input("stats-date-range", "end_date"),
+     Input("active-filter-store", "data")]
 )
-def update_impact_chart(n):
-    """Update impact distribution chart"""
-    return statistics.get_impact_distribution_chart(engine)
+def update_impact_chart(n, start_date, end_date, active_filter):
+    """Update impact distribution chart with date filtering"""
+    date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
+    return statistics.get_impact_distribution_chart(engine, date_range=date_range)
 
 
 @app.callback(
     Output("top-entities-list", "children"),
-    Input("interval-component", "n_intervals")
+    [Input("interval-component", "n_intervals"),
+     Input("stats-date-range", "start_date"),
+     Input("stats-date-range", "end_date"),
+     Input("active-filter-store", "data")]
 )
-def update_top_entities(n):
-    """Update top entities list"""
-    return statistics.get_top_entities_list(engine)
+def update_top_entities(n, start_date, end_date, active_filter):
+    """Update top entities list with date filtering"""
+    date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
+    return statistics.get_top_entities_list(engine, date_range=date_range)
 
 
 @app.callback(
     Output("news-volume-chart", "figure"),
-    Input("interval-component", "n_intervals")
+    [Input("interval-component", "n_intervals"),
+     Input("stats-date-range", "start_date"),
+     Input("stats-date-range", "end_date"),
+     Input("active-filter-store", "data")]
 )
-def update_news_volume(n):
-    """Update news volume chart"""
-    return statistics.get_news_volume_chart(engine)
+def update_news_volume(n, start_date, end_date, active_filter):
+    """Update news volume chart with date filtering"""
+    date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
+    return statistics.get_news_volume_chart(engine, date_range=date_range)
 
 
 # NEW: Entity Sentiment Analysis Callbacks
 @app.callback(
     Output("entity-sentiment-chart", "figure"),
     [Input("interval-component", "n_intervals"),
+     Input("stats-date-range", "start_date"),
+     Input("stats-date-range", "end_date"),
+     Input("active-filter-store", "data"),
      Input("sentiment-timeframe-selector", "value")]
 )
-def update_entity_sentiment_chart(n, timeframe):
+def update_entity_sentiment_chart(n, start_date, end_date, active_filter, timeframe):
     """Update entity sentiment chart with timeframe filter"""
-    return statistics.get_entity_sentiment_chart(engine, timeframe)
+    date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
+    return statistics.get_entity_sentiment_chart(engine, date_range=date_range, timeframe=timeframe)
 
 
 @app.callback(
@@ -1433,11 +1780,14 @@ def update_entity_sentiment_chart(n, timeframe):
      Output("positive-entities-toggle", "style"),
      Output("positive-entities-expanded", "data")],
     [Input("interval-component", "n_intervals"),
+     Input("stats-date-range", "start_date"),
+     Input("stats-date-range", "end_date"),
+     Input("active-filter-store", "data"),
      Input("positive-entity-search-input", "value"),
      Input("positive-entities-toggle", "n_clicks")],
     [State("positive-entities-expanded", "data")]
 )
-def update_top_positive_entities(n, search_term, n_clicks, is_expanded):
+def update_top_positive_entities(n, start_date, end_date, active_filter, search_term, n_clicks, is_expanded):
     """Update top positive entities with optional search filter and expand/collapse"""
     from dash import callback_context
     
@@ -1446,7 +1796,8 @@ def update_top_positive_entities(n, search_term, n_clicks, is_expanded):
         is_expanded = not is_expanded
     
     # Get entities with appropriate limit
-    entities = statistics.get_top_positive_entities(engine, search_term or "", show_all=is_expanded)
+    date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
+    entities = statistics.get_top_positive_entities(engine, search_term or "", show_all=is_expanded, date_range=date_range)
     
     # Update button text and visibility
     button_text = "Show Less" if is_expanded else "Show More"
@@ -1461,11 +1812,14 @@ def update_top_positive_entities(n, search_term, n_clicks, is_expanded):
      Output("negative-entities-toggle", "style"),
      Output("negative-entities-expanded", "data")],
     [Input("interval-component", "n_intervals"),
+     Input("stats-date-range", "start_date"),
+     Input("stats-date-range", "end_date"),
+     Input("active-filter-store", "data"),
      Input("negative-entity-search-input", "value"),
      Input("negative-entities-toggle", "n_clicks")],
     [State("negative-entities-expanded", "data")]
 )
-def update_top_negative_entities(n, search_term, n_clicks, is_expanded):
+def update_top_negative_entities(n, start_date, end_date, active_filter, search_term, n_clicks, is_expanded):
     """Update top negative entities with optional search filter and expand/collapse"""
     from dash import callback_context
     
@@ -1474,7 +1828,8 @@ def update_top_negative_entities(n, search_term, n_clicks, is_expanded):
         is_expanded = not is_expanded
     
     # Get entities with appropriate limit
-    entities = statistics.get_top_negative_entities(engine, search_term or "", show_all=is_expanded)
+    date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
+    entities = statistics.get_top_negative_entities(engine, search_term or "", show_all=is_expanded, date_range=date_range)
     
     # Update button text and visibility
     button_text = "Show Less" if is_expanded else "Show More"
@@ -1487,13 +1842,16 @@ def update_top_negative_entities(n, search_term, n_clicks, is_expanded):
     [Output("entity-details-table", "children"),
      Output("entity-table-sort-store", "data")],
     [Input("interval-component", "n_intervals"),
+     Input("stats-date-range", "start_date"),
+     Input("stats-date-range", "end_date"),
+     Input("active-filter-store", "data"),
      Input("entity-search-input", "value"),
      Input({"type": "sort-column-btn", "column": dash.dependencies.ALL}, "n_clicks")],
     [State("entity-table-sort-store", "data"),
      State({"type": "sort-column-btn", "column": dash.dependencies.ALL}, "id")],
     prevent_initial_call=False
 )
-def update_entity_details_table(n, search_term, sort_clicks, sort_state, button_ids):
+def update_entity_details_table(n, start_date, end_date, active_filter, search_term, sort_clicks, sort_state, button_ids):
     """Update entity details table with search and 3-stage sorting (asc → desc → default)"""
     from dash import callback_context
     
@@ -1536,11 +1894,13 @@ def update_entity_details_table(n, search_term, sort_clicks, sort_state, button_
                     break
     
     # Get table with current sort state
+    date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
     table = statistics.get_entity_details_table(
         engine, 
         search_term or "", 
         current_column, 
-        current_direction
+        current_direction,
+        date_range=date_range
     )
     
     # Update sort state

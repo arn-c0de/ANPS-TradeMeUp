@@ -11,6 +11,7 @@ import json
 import logging
 
 from src.models.predictions import Prediction, PredictionOutcome
+from src.models.trading_simulation import TradingSimulation
 from src.models.entities import Entity
 from src.models.raw_news import RawNews
 from src.models.processed_news import ProcessedNews
@@ -119,7 +120,7 @@ def create_layout():
             dbc.ModalFooter(
                 dbc.Button("Close", id="close-prediction-modal", className="ms-auto", n_clicks=0)
             )
-        ], id="prediction-modal", size="xl", is_open=False, backdrop=True),
+        ], id="prediction-modal", size="xl", is_open=False, backdrop=True, centered=True),
 
         # Toast notifications OUTSIDE container
         dbc.Toast(
@@ -217,6 +218,23 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                                 filtered_preds.append(pred)
                 predictions = filtered_preds
 
+            # Try to load simulations (table may not exist yet)
+            simulation_lookup = {}
+            try:
+                if predictions:
+                    prediction_ids = [pred.prediction_id for pred in predictions]
+                    simulations = db.query(TradingSimulation).filter(
+                        TradingSimulation.prediction_id.in_(prediction_ids)
+                    ).order_by(desc(TradingSimulation.created_at)).all()
+
+                    for simulation in simulations:
+                        pred_key = str(simulation.prediction_id)
+                        if pred_key not in simulation_lookup:
+                            simulation_lookup[pred_key] = simulation
+            except Exception as sim_error:
+                # Table may not exist yet - continue without simulations
+                logger.debug(f"Could not load simulations (table may not exist): {sim_error}")
+
             if not predictions:
                 return dbc.Alert("No predictions match the current filters.", color="info")
 
@@ -232,6 +250,33 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
 
                 # Get confidence color
                 conf_color = "text-success" if pred.confidence and pred.confidence > 0.7 else "text-warning"
+
+                # Simulation results (cached lookup)
+                simulation = simulation_lookup.get(str(pred.prediction_id))
+                if simulation:
+                    decision = simulation.decision or "hold"
+                    decision_color = {
+                        "buy": "success",
+                        "sell": "danger",
+                        "hold": "secondary"
+                    }.get(decision, "secondary")
+                    decision_display = html.Td(
+                        dbc.Badge(decision.upper(), color=decision_color, className="px-2")
+                    )
+
+                    risk_score = simulation.risk_score
+                    if risk_score is None:
+                        risk_display = html.Td("—", className="text-muted text-center")
+                    else:
+                        risk_color = "danger" if risk_score > 0.7 else "warning" if risk_score > 0.4 else "success"
+                        risk_display = html.Td(
+                            f"{risk_score:.2f}",
+                            className=f"text-{risk_color} text-center",
+                            title="Risk score (0-1)"
+                        )
+                else:
+                    decision_display = html.Td("—", className="text-muted text-center")
+                    risk_display = html.Td("—", className="text-muted text-center")
 
                 # Access outcome from eager-loaded relationship (no separate query!)
                 outcome = pred.outcome[0] if pred.outcome else None
@@ -299,6 +344,8 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     html.Td(entity.entity_name if entity else "Unknown", className="text-primary"),
                     html.Td([direction_emoji, " ", direction.upper()]),
                     html.Td(f"{pred.confidence:.2%}" if pred.confidence else "N/A", className=conf_color),
+                    decision_display,
+                    risk_display,
                     perf_display,  # Live Return
                     result_display,  # Strategy Result
                     return_24h_display,  # 24h Return
@@ -342,6 +389,8 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     html.Th("Entity"),
                     html.Th("Direction"),
                     html.Th("Confidence"),
+                html.Th("Decision", title="Simulation decision"),
+                html.Th("Risk", title="Composite risk score (0-1)"),
                     html.Th("📊 Performance", title="Click 🔄 to load live data"),
                     html.Th("✓/✗ Result", title="Strategy outcome"),
                     html.Th("📈 24h", title="24h performance"),
@@ -576,13 +625,21 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
             saved_outcome = db.query(PredictionOutcome).filter(
                 PredictionOutcome.prediction_id == prediction_id
             ).first()
-            
+
             logger.info(f"🔍 Checking saved performance for {prediction_id}")
             logger.info(f"   Found outcome: {saved_outcome is not None}")
             if saved_outcome:
                 logger.info(f"   Actual return: {saved_outcome.actual_return}")
                 logger.info(f"   Direction correct: {saved_outcome.direction_correct}")
                 logger.info(f"   Timestamp: {saved_outcome.evaluation_timestamp}")
+
+            # Load simulation data if available
+            simulation = db.query(TradingSimulation).filter(
+                TradingSimulation.prediction_id == prediction_id
+            ).order_by(desc(TradingSimulation.created_at)).first()
+
+            logger.info(f"🧪 Checking simulation for {prediction_id}")
+            logger.info(f"   Found simulation: {simulation is not None}")
             
             if saved_outcome and saved_outcome.actual_return is not None:
                 # Use saved performance data
@@ -644,55 +701,38 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
                 ).first()
 
                 news_content = dbc.Card([
-                    dbc.CardHeader(html.H6("📰 Related News")),
+                    dbc.CardHeader(html.Div("📰 News", style={"fontWeight": "bold"}), className="py-1"),
                     dbc.CardBody([
-                        html.H6(raw_news.title if raw_news else "Unknown", className="text-primary"),
-                        html.P([
+                        html.Div(raw_news.title if raw_news else "Unknown", className="text-primary mb-1", style={"fontWeight": "500"}),
+                        html.Small([
                             html.Strong("Source: "),
-                            raw_news.source if raw_news else "Unknown",
-                            html.Br(),
+                            html.Span(raw_news.source if raw_news else "Unknown"),
+                            " | ",
                             html.Strong("Published: "),
-                            raw_news.published_at.strftime("%Y-%m-%d %H:%M") if raw_news and raw_news.published_at else "Unknown",
-                            html.Br(),
-                            html.Strong("URL: "),
-                            html.A(raw_news.url, href=raw_news.url, target="_blank") if raw_news and raw_news.url else "N/A"
-                        ], className="mb-2"),
-                        html.Hr(),
-                        html.H6("Content Summary"),
-                        html.P(raw_news.full_text[:500] + "..." if raw_news and raw_news.full_text and len(raw_news.full_text) > 500
+                            html.Span(raw_news.published_at.strftime("%Y-%m-%d %H:%M") if raw_news and raw_news.published_at else "Unknown")
+                        ], className="d-block mb-2"),
+                        html.Small(raw_news.full_text[:300] + "..." if raw_news and raw_news.full_text and len(raw_news.full_text) > 300
                                else raw_news.full_text if raw_news and raw_news.full_text else "No content available",
-                               className="text-muted", style={"maxHeight": "200px", "overflowY": "auto"}),
-                        html.Hr() if processed else None,
-                        html.H6("Sentiment Analysis") if processed else None,
-                        dbc.Row([
-                            dbc.Col([
-                                html.Strong("Overall: "),
-                                html.Span(f"{processed.sentiment.get('overall', 0):.2f}",
-                                         className="text-success" if processed and processed.sentiment.get('overall', 0) > 0 else "text-danger")
-                            ], width=4) if processed and processed.sentiment else None,
-                            dbc.Col([
-                                html.Strong("Market: "),
-                                html.Span(f"{processed.sentiment.get('market', 0):.2f}",
-                                         className="text-success" if processed and processed.sentiment.get('market', 0) > 0 else "text-danger")
-                            ], width=4) if processed and processed.sentiment else None,
-                            dbc.Col([
-                                html.Strong("Company: "),
-                                html.Span(f"{processed.sentiment.get('company', 0):.2f}",
-                                         className="text-success" if processed and processed.sentiment.get('company', 0) > 0 else "text-danger")
-                            ], width=4) if processed and processed.sentiment else None
-                        ]) if processed else None,
-                        html.Hr() if processed and processed.event_type else None,
-                        html.P([
-                            html.Strong("Event Type: "),
-                            dbc.Badge(processed.event_type, color="primary")
-                        ]) if processed and processed.event_type else None,
-                        html.Hr() if impact else None,
-                        html.P([
-                            html.Strong("Impact Score: "),
-                            html.Span(f"{impact.impact_score:.3f}", className="text-warning" if impact else "")
-                        ]) if impact else None
-                    ])
-                ], className="mb-3")
+                               className="text-muted d-block", style={"maxHeight": "120px", "overflowY": "auto"}),
+                        html.Hr(className="my-2") if processed else None,
+                        html.Small([
+                            html.Strong("Sentiment: "),
+                            html.Span(f"Overall {processed.sentiment.get('overall', 0):.2f}",
+                                     className="text-success" if processed and processed.sentiment.get('overall', 0) > 0 else "text-danger"),
+                            " | ",
+                            html.Span(f"Market {processed.sentiment.get('market', 0):.2f}",
+                                     className="text-success" if processed and processed.sentiment.get('market', 0) > 0 else "text-danger"),
+                            " | ",
+                            html.Strong("Event: "),
+                            dbc.Badge(processed.event_type, color="primary", className="py-0 px-1") if processed.event_type else ""
+                        ], className="d-block") if processed and processed.sentiment else None,
+                        html.Hr(className="my-2") if impact else None,
+                        html.Small([
+                            html.Strong("Impact: "),
+                            html.Span(f"{impact.impact_score:.3f}", className="text-warning")
+                        ], className="d-block") if impact else None
+                    ], className="py-2")
+                ], className="mb-2")
 
             # Expected returns
             expected = pred.expected_return or {}
@@ -700,7 +740,7 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
             # Key drivers
             drivers = pred.key_drivers or []
             drivers_content = dbc.Card([
-                dbc.CardHeader(html.H6("🎯 Key Drivers")),
+                dbc.CardHeader(html.Div("🎯 Key Drivers", style={"fontWeight": "bold"}), className="py-1"),
                 dbc.CardBody([
                     dbc.Table([
                         html.Thead(html.Tr([
@@ -713,14 +753,14 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
                                 html.Td(d.get('driver', 'Unknown')),
                                 html.Td(
                                     dbc.Progress(value=d.get('importance', 0) * 100,
-                                               className="mb-0", style={"height": "20px"})
+                                               className="mb-0", style={"height": "14px"})
                                 ),
                                 html.Td(f"{d.get('importance', 0):.1%}")
                             ]) for d in drivers[:5]  # Top 5
                         ])
-                    ], bordered=True, striped=True) if drivers else html.P("No driver data available", className="text-muted")
-                ])
-            ], className="mb-3")
+                    ], bordered=True, striped=True, size="sm") if drivers else html.Small("No driver data available", className="text-muted")
+                ], className="py-2")
+            ], className="mb-2")
 
             # Build modal content - use entity_id (ticker) in button index, show entity_name as text
             ticker_symbol = entity.entity_id if entity else pred.entity_id
@@ -747,177 +787,245 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
                 performance_section = dbc.Row([
                     dbc.Col([
                         dbc.Card([
-                            dbc.CardHeader(html.H6("📊 Live Performance vs Chart", className="mb-0")),
+                            dbc.CardHeader(html.Div("📊 Live Performance", style={"fontWeight": "bold"}), className="py-1"),
                             dbc.CardBody([
                                 dbc.Row([
                                     dbc.Col([
                                         dbc.Card([
                                             dbc.CardBody([
-                                                html.H3(f"{total_return:+.2f}%", className=f"text-{return_color} text-center mb-1"),
-                                                html.P("Return Since Prediction", className="text-center text-muted mb-0", style={"fontSize": "0.85em"})
-                                            ])
+                                                html.H5(f"{total_return:+.2f}%", className=f"text-{return_color} text-center mb-0"),
+                                                html.Small("Return", className="text-center text-muted d-block")
+                                            ], className="py-1 px-2")
                                         ], color=return_color, outline=True)
                                     ], width=3),
                                     dbc.Col([
                                         dbc.Card([
                                             dbc.CardBody([
-                                                html.H3(performance['strategy_result'].split()[0], className="text-center mb-1"),
-                                                html.P(performance['strategy_result'], className="text-center mb-0", style={"fontSize": "0.85em"})
-                                            ])
+                                                html.H5(performance['strategy_result'].split()[0], className="text-center mb-0"),
+                                                html.Small(performance['strategy_result'].split()[1] if len(performance['strategy_result'].split()) > 1 else "", className="text-center d-block")
+                                            ], className="py-1 px-2")
                                         ], color="light")
                                     ], width=3),
                                     dbc.Col([
                                         dbc.Card([
                                             dbc.CardBody([
-                                                html.H3(f"{performance['return_24h_pct']:+.2f}%", 
-                                                       className=f"text-{'success' if performance['return_24h_pct'] > 0 else 'danger' if performance['return_24h_pct'] < 0 else 'secondary'} text-center mb-1"),
-                                                html.P("Last 24h Return", className="text-center text-muted mb-0", style={"fontSize": "0.85em"})
-                                            ])
+                                                html.H5(f"{performance['return_24h_pct']:+.2f}%",
+                                                       className=f"text-{'success' if performance['return_24h_pct'] > 0 else 'danger' if performance['return_24h_pct'] < 0 else 'secondary'} text-center mb-0"),
+                                                html.Small("24h", className="text-center text-muted d-block")
+                                            ], className="py-1 px-2")
                                         ], color="light")
                                     ], width=3),
                                     dbc.Col([
                                         dbc.Card([
                                             dbc.CardBody([
-                                                html.H3(f"{performance['days_since_prediction']}d", className="text-center mb-1"),
-                                                html.P("Days Active", className="text-center text-muted mb-0", style={"fontSize": "0.85em"})
-                                            ])
+                                                html.H5(f"{performance['days_since_prediction']}d", className="text-center mb-0"),
+                                                html.Small("Days", className="text-center text-muted d-block")
+                                            ], className="py-1 px-2")
                                         ], color="light")
                                     ], width=3)
-                                ]),
-                                html.Hr(),
+                                ], className="mb-2"),
                                 dbc.Row([
                                     dbc.Col([
-                                        html.P([
-                                            html.Strong("Entry Price: "),
-                                            f"${performance['prediction_price']:.2f}",
-                                            html.Br(),
-                                            html.Strong("Current Price: "),
-                                            f"${performance['current_price']:.2f}",
-                                            html.Br(),
-                                            html.Strong("Price Change: "),
-                                            html.Span(f"${performance['current_price'] - performance['prediction_price']:+.2f}",
-                                                     className=f"text-{return_color}")
-                                        ])
-                                    ], width=4),
+                                        html.Small([
+                                            html.Strong("Entry: "),
+                                            html.Span(f"${performance['prediction_price']:.2f}"),
+                                            " → ",
+                                            html.Strong("Now: "),
+                                            html.Span(f"${performance['current_price']:.2f} ", className=f"text-{return_color}"),
+                                            html.Span(f"({performance['current_price'] - performance['prediction_price']:+.2f})", className=f"text-{return_color}")
+                                        ], className="d-block")
+                                    ], width=6),
                                     dbc.Col([
-                                        html.P([
-                                            html.Strong("24h Ago Price: "),
-                                            f"${performance.get('price_24h_ago', 0):.2f}",
-                                            html.Br(),
-                                            html.Strong("High Since Entry: "),
-                                            f"${performance['high_since_prediction']:.2f}",
-                                            html.Br(),
-                                            html.Strong("Low Since Entry: "),
-                                            f"${performance['low_since_prediction']:.2f}"
-                                        ])
-                                    ], width=4),
-                                    dbc.Col([
-                                        html.P([
-                                            html.Strong("Volatility: "),
-                                            f"{performance['volatility']:.2f}%",
-                                            html.Br(),
-                                            html.Strong("Predicted: "),
-                                            f"{performance['predicted_direction'].upper()}",
-                                            html.Br(),
-                                            html.Strong("Actual: "),
-                                            f"{performance['actual_direction'].upper()}",
-                                            html.Br(),
-                                            html.Strong("Accuracy: "),
-                                            html.Span("✅ Correct" if performance['is_correct'] else "❌ Wrong",
-                                                     className=f"text-{'success' if performance['is_correct'] else 'danger'}")
-                                        ])
-                                    ], width=4)
+                                        html.Small([
+                                            html.Strong("Range: "),
+                                            html.Span(f"${performance['low_since_prediction']:.2f} - ${performance['high_since_prediction']:.2f}"),
+                                            " | ",
+                                            html.Strong("Vol: "),
+                                            html.Span(f"{performance['volatility']:.1f}%")
+                                        ], className="d-block")
+                                    ], width=6)
                                 ])
-                            ])
-                        ], className="mb-3")
+                            ], className="py-2")
+                        ], className="mb-2")
                     ], width=12)
-                ], className="mb-3")
+                ], className="mb-2")
             elif load_performance:
                 # Performance was requested but not available
                 performance_section = dbc.Alert(
-                    "⚠️ Performance data not available for this entity (may not be a tradable stock)",
-                    color="info", className="mb-3"
+                    html.Small("⚠️ Performance data not available for this entity (may not be a tradable stock)"),
+                    color="info", className="mb-2 py-2"
                 )
             else:
                 # Performance not yet loaded
                 performance_section = dbc.Alert([
-                    "📊 Live performance data not loaded. ",
-                    html.Strong("Click the 🔄 Refresh button above to load it.")
-                ], color="light", className="mb-3")
+                    html.Small([
+                        "📊 Live performance data not loaded. ",
+                        html.Strong("Click the 🔄 Refresh button above to load it.")
+                    ])
+                ], color="light", className="mb-2 py-2")
+
+            # Simulation section
+            simulation_section = None
+            if simulation:
+                decision = simulation.decision or "hold"
+                decision_color = {
+                    "buy": "success",
+                    "sell": "danger",
+                    "hold": "secondary"
+                }.get(decision, "secondary")
+
+                risk_score = simulation.risk_score or 0
+                risk_color = "danger" if risk_score > 0.7 else "warning" if risk_score > 0.4 else "success"
+
+                expected_return = simulation.expected_return_pct or 0
+                expected_color = "success" if expected_return > 0 else "danger" if expected_return < 0 else "secondary"
+
+                actual_return = simulation.actual_return_pct or 0
+                actual_color = "success" if actual_return > 0 else "danger" if actual_return < 0 else "secondary"
+
+                divergence = simulation.divergence_pct or 0
+                divergence_color = "warning" if abs(divergence) > 2 else "secondary"
+
+                cost_bps = simulation.transaction_cost_bps or 0
+                cost_breakdown = simulation.cost_breakdown or {}
+
+                simulation_section = dbc.Row([
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardHeader(html.Div("🧪 Trading Simulation", style={"fontWeight": "bold"}), className="py-1"),
+                            dbc.CardBody([
+                                # Top Row: Decision, Risk Score, Returns
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.H5(dbc.Badge(decision.upper(), color=decision_color, className="px-2"),
+                                                       className="text-center mb-0"),
+                                                html.Small("Decision", className="text-center text-muted d-block")
+                                            ], className="py-1 px-2")
+                                        ], color=decision_color, outline=True)
+                                    ], width=3),
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.H5(f"{risk_score:.2f}", className=f"text-{risk_color} text-center mb-0"),
+                                                html.Small("Risk", className="text-center text-muted d-block")
+                                            ], className="py-1 px-2")
+                                        ], color="light")
+                                    ], width=3),
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.H5(f"{expected_return:+.2f}%", className=f"text-{expected_color} text-center mb-0"),
+                                                html.Small("Expected", className="text-center text-muted d-block")
+                                            ], className="py-1 px-2")
+                                        ], color="light")
+                                    ], width=3),
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.H5(f"{actual_return:+.2f}%", className=f"text-{actual_color} text-center mb-0"),
+                                                html.Small("Actual", className="text-center text-muted d-block")
+                                            ], className="py-1 px-2")
+                                        ], color="light")
+                                    ], width=3)
+                                ], className="mb-2"),
+                                # Second Row: Details
+                                dbc.Row([
+                                    dbc.Col([
+                                        html.Small([
+                                            html.Strong("Divergence: "),
+                                            html.Span(f"{divergence:+.2f}%", className=f"text-{divergence_color}"),
+                                            " | ",
+                                            html.Strong("Cost: "),
+                                            html.Span(f"{cost_bps:.1f} bps"),
+                                            " | ",
+                                            html.Strong("Conf: "),
+                                            html.Span(f"{simulation.confidence:.1%}" if simulation.confidence else "N/A")
+                                        ], className="d-block")
+                                    ], width=12)
+                                ])
+                            ], className="py-2")
+                        ], className="mb-2")
+                    ], width=12)
+                ], className="mb-2")
 
             body = dbc.Container([
                 # Live Performance Section (if available)
                 performance_section if performance_section else None,
-                
+
+                # Simulation Section (if available)
+                simulation_section if simulation_section else None,
+
                 # Overview
                 dbc.Row([
                     dbc.Col([
                         dbc.Card([
                             dbc.CardBody([
-                                html.H4(f"{direction_emoji} {direction.upper()}", className="text-center"),
-                                html.P("Direction", className="text-center text-muted")
-                            ])
+                                html.H5(f"{direction_emoji} {direction.upper()}", className="text-center mb-0"),
+                                html.Small("Direction", className="text-center text-muted d-block")
+                            ], className="py-1 px-2")
                         ])
                     ], width=3),
                     dbc.Col([
                         dbc.Card([
                             dbc.CardBody([
-                                html.H4(f"{pred.confidence:.1%}", className="text-center"),
-                                html.P("Confidence", className="text-center text-muted")
-                            ])
+                                html.H5(f"{pred.confidence:.1%}", className="text-center mb-0"),
+                                html.Small("Confidence", className="text-center text-muted d-block")
+                            ], className="py-1 px-2")
                         ])
                     ], width=3),
                     dbc.Col([
                         dbc.Card([
                             dbc.CardBody([
-                                html.H4(f"{expected.get('mean', 0):.2%}", className="text-center"),
-                                html.P("Expected Return", className="text-center text-muted")
-                            ])
+                                html.H5(f"{expected.get('mean', 0):.2%}", className="text-center mb-0"),
+                                html.Small("Expected Return", className="text-center text-muted d-block")
+                            ], className="py-1 px-2")
                         ])
                     ], width=3),
                     dbc.Col([
                         dbc.Card([
                             dbc.CardBody([
-                                html.H4(pred.horizon, className="text-center"),
-                                html.P("Horizon", className="text-center text-muted")
-                            ])
+                                html.H5(pred.horizon, className="text-center mb-0"),
+                                html.Small("Horizon", className="text-center text-muted d-block")
+                            ], className="py-1 px-2")
                         ])
                     ], width=3)
-                ], className="mb-3"),
+                ], className="mb-2"),
 
                 # Direction Probabilities
                 dbc.Row([
                     dbc.Col([
                         dbc.Card([
-                            dbc.CardHeader(html.H6("📊 Direction Probabilities")),
+                            dbc.CardHeader(html.Div("📊 Direction Probabilities", style={"fontWeight": "bold"}), className="py-1"),
                             dbc.CardBody([
                                 dbc.Row([
                                     dbc.Col([
-                                        html.P("🔼 UP", className="mb-1"),
+                                        html.Small("🔼 UP", className="mb-1 d-block"),
                                         dbc.Progress(value=probs.get('up', 0) * 100,
                                                    color="success", className="mb-2",
-                                                   style={"height": "25px"},
+                                                   style={"height": "18px"},
                                                    label=f"{probs.get('up', 0):.1%}")
                                     ], width=12),
                                     dbc.Col([
-                                        html.P("➡️ FLAT", className="mb-1"),
+                                        html.Small("➡️ FLAT", className="mb-1 d-block"),
                                         dbc.Progress(value=probs.get('flat', 0) * 100,
                                                    color="warning", className="mb-2",
-                                                   style={"height": "25px"},
+                                                   style={"height": "18px"},
                                                    label=f"{probs.get('flat', 0):.1%}")
                                     ], width=12),
                                     dbc.Col([
-                                        html.P("🔽 DOWN", className="mb-1"),
+                                        html.Small("🔽 DOWN", className="mb-1 d-block"),
                                         dbc.Progress(value=probs.get('down', 0) * 100,
                                                    color="danger", className="mb-2",
-                                                   style={"height": "25px"},
+                                                   style={"height": "18px"},
                                                    label=f"{probs.get('down', 0):.1%}")
                                     ], width=12)
                                 ])
-                            ])
+                            ], className="py-2")
                         ])
                     ], width=12)
-                ], className="mb-3"),
+                ], className="mb-2"),
 
                 # News and Drivers
                 dbc.Row([
@@ -929,24 +1037,22 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
                 dbc.Row([
                     dbc.Col([
                         dbc.Card([
-                            dbc.CardHeader(html.H6("🤖 Model Information")),
+                            dbc.CardHeader(html.Div("🤖 Model Info", style={"fontWeight": "bold"}), className="py-1"),
                             dbc.CardBody([
-                                html.P([
-                                    html.Strong("Model Version: "),
-                                    pred.model_version or "Unknown"
-                                ]),
-                                html.P([
+                                html.Small([
+                                    html.Strong("Version: "),
+                                    html.Span(pred.model_version or "Unknown"),
+                                    " | ",
                                     html.Strong("Created: "),
-                                    pred.created_at.strftime("%Y-%m-%d %H:%M:%S") if pred.created_at else "Unknown"
-                                ]),
-                                html.P([
-                                    html.Strong("Prediction ID: "),
+                                    html.Span(pred.created_at.strftime("%Y-%m-%d %H:%M") if pred.created_at else "Unknown"),
+                                    html.Br(),
+                                    html.Strong("ID: "),
                                     html.Code(str(pred.prediction_id))
-                                ])
-                            ])
+                                ], className="d-block")
+                            ], className="py-2")
                         ])
                     ], width=12)
-                ], className="mt-3")
+                ], className="mt-2")
             ], fluid=True)
 
             return title, body

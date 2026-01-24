@@ -15,6 +15,7 @@ from src.models.data_quality import DataQualityScore
 from src.models.processed_news import ProcessedNews
 from src.models.predictions import Prediction
 from src.models.analysis import MarketRegime, SurpriseScore, FactVerification
+from src.models.trading_simulation import TradingSimulation
 from src.gui.components import create_metric_card
 
 
@@ -110,6 +111,10 @@ def get_metrics(engine):
             total_predictions = db.query(func.count(Prediction.prediction_id)).scalar() or 0
             total_surprises = db.query(func.count(SurpriseScore.surprise_id)).scalar() or 0
             total_fact_checks = db.query(func.count(FactVerification.verification_id)).scalar() or 0
+            try:
+                total_simulations = db.query(func.count(TradingSimulation.simulation_id)).scalar() or 0
+            except Exception:
+                total_simulations = 0
             
             # Hourly increments
             news_1h = db.query(func.count(RawNews.news_id)).filter(RawNews.fetched_at >= hour_ago).scalar() or 0
@@ -117,6 +122,12 @@ def get_metrics(engine):
             predictions_1h = db.query(func.count(Prediction.prediction_id)).filter(Prediction.created_at >= hour_ago).scalar() or 0
             surprises_1h = db.query(func.count(SurpriseScore.surprise_id)).filter(SurpriseScore.created_at >= hour_ago).scalar() or 0
             fact_checks_1h = db.query(func.count(FactVerification.verification_id)).filter(FactVerification.verified_at >= hour_ago).scalar() or 0
+            try:
+                simulations_1h = db.query(func.count(TradingSimulation.simulation_id)).filter(
+                    TradingSimulation.created_at >= hour_ago
+                ).scalar() or 0
+            except Exception:
+                simulations_1h = 0
             
             # Daily increments
             news_24h = db.query(func.count(RawNews.news_id)).filter(RawNews.fetched_at >= day_ago).scalar() or 0
@@ -124,6 +135,12 @@ def get_metrics(engine):
             predictions_24h = db.query(func.count(Prediction.prediction_id)).filter(Prediction.created_at >= day_ago).scalar() or 0
             surprises_24h = db.query(func.count(SurpriseScore.surprise_id)).filter(SurpriseScore.created_at >= day_ago).scalar() or 0
             fact_checks_24h = db.query(func.count(FactVerification.verification_id)).filter(FactVerification.verified_at >= day_ago).scalar() or 0
+            try:
+                simulations_24h = db.query(func.count(TradingSimulation.simulation_id)).filter(
+                    TradingSimulation.created_at >= day_ago
+                ).scalar() or 0
+            except Exception:
+                simulations_24h = 0
             
             avg_quality = db.query(func.avg(DataQualityScore.quality_score)).scalar()
             avg_quality = round(avg_quality, 2) if avg_quality else 0
@@ -146,106 +163,31 @@ def get_metrics(engine):
                 ], width=12)
             ])
         
+        def metric_card(icon, label, value, value_class, inc_1h, inc_24h):
+            return dbc.Card(
+                dbc.CardBody([
+                    html.Div([
+                        html.Span(icon, className="me-1", style={"fontSize": "20px"}),
+                        html.Small(label, className="text-muted", style={"fontSize": "0.85rem"})
+                    ], className="d-flex align-items-center"),
+                    html.Div(f"{value:,}", className=f"{value_class} fw-bold", style={"fontSize": "1.5rem"}),
+                    html.Div([
+                        html.Small(f"+{inc_1h} 1h", className="text-success me-2"),
+                        html.Small(f"+{inc_24h} 24h", className="text-info")
+                    ], className="d-flex flex-wrap", style={"fontSize": "0.75rem"})
+                ], className="py-2 px-2"),
+                className="h-100"
+            )
+
         return html.Div([
             dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.Div([
-                                html.Span("📰 ", style={"fontSize": "20px"}),
-                                html.Div([
-                                    html.H6("Total Articles", className="text-muted mb-1"),
-                                    html.H3(f"{total_news:,}", className="text-primary mb-0"),
-                                    html.Small([
-                                        html.Span(f"+{news_1h} ", className="text-success me-2"),
-                                        html.Span("last hour", className="text-muted me-3"),
-                                        html.Span(f"+{news_24h} ", className="text-info me-2"),
-                                        html.Span("last 24h", className="text-muted")
-                                    ], className="d-block mt-1")
-                                ], className="d-inline-block")
-                            ], className="d-flex align-items-center")
-                        ])
-                    ], className="mb-3")
-                ], width=4),
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.Div([
-                                html.Span("🧠 ", style={"fontSize": "20px"}),
-                                html.Div([
-                                    html.H6("LLM Processed", className="text-muted mb-1"),
-                                    html.H3(f"{total_processed:,}", className="text-success mb-0"),
-                                    html.Small([
-                                        html.Span(f"+{processed_1h} ", className="text-success me-2"),
-                                        html.Span("last hour", className="text-muted me-3"),
-                                        html.Span(f"+{processed_24h} ", className="text-info me-2"),
-                                        html.Span("last 24h", className="text-muted")
-                                    ], className="d-block mt-1")
-                                ], className="d-inline-block")
-                            ], className="d-flex align-items-center")
-                        ])
-                    ], className="mb-3")
-                ], width=4),
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.Div([
-                                html.Span("🔮 ", style={"fontSize": "20px"}),
-                                html.Div([
-                                    html.H6("Predictions", className="text-muted mb-1"),
-                                    html.H3(f"{total_predictions:,}", className="text-info mb-0"),
-                                    html.Small([
-                                        html.Span(f"+{predictions_1h} ", className="text-success me-2"),
-                                        html.Span("last hour", className="text-muted me-3"),
-                                        html.Span(f"+{predictions_24h} ", className="text-info me-2"),
-                                        html.Span("last 24h", className="text-muted")
-                                    ], className="d-block mt-1")
-                                ], className="d-inline-block")
-                            ], className="d-flex align-items-center")
-                        ])
-                    ], className="mb-3")
-                ], width=4)
-            ]),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.Div([
-                                html.Span("🎯 ", style={"fontSize": "20px"}),
-                                html.Div([
-                                    html.H6("Surprise Scores", className="text-muted mb-1"),
-                                    html.H3(f"{total_surprises:,}", className="text-warning mb-0"),
-                                    html.Small([
-                                        html.Span(f"+{surprises_1h} ", className="text-success me-2"),
-                                        html.Span("last hour", className="text-muted me-3"),
-                                        html.Span(f"+{surprises_24h} ", className="text-info me-2"),
-                                        html.Span("last 24h", className="text-muted")
-                                    ], className="d-block mt-1")
-                                ], className="d-inline-block")
-                            ], className="d-flex align-items-center")
-                        ])
-                    ], className="mb-3")
-                ], width=6),
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.Div([
-                                html.Span("✅ ", style={"fontSize": "20px"}),
-                                html.Div([
-                                    html.H6("Fact Checks", className="text-muted mb-1"),
-                                    html.H3(f"{total_fact_checks:,}", className="text-success mb-0"),
-                                    html.Small([
-                                        html.Span(f"+{fact_checks_1h} ", className="text-success me-2"),
-                                        html.Span("last hour", className="text-muted me-3"),
-                                        html.Span(f"+{fact_checks_24h} ", className="text-info me-2"),
-                                        html.Span("last 24h", className="text-muted")
-                                    ], className="d-block mt-1")
-                                ], className="d-inline-block")
-                            ], className="d-flex align-items-center")
-                        ])
-                    ], className="mb-3")
-                ], width=6)
-            ])
+                dbc.Col(metric_card("📰", "Articles", total_news, "text-primary", news_1h, news_24h), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("🧠", "LLM", total_processed, "text-success", processed_1h, processed_24h), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("🔮", "Predictions", total_predictions, "text-info", predictions_1h, predictions_24h), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("🎯", "Surprises", total_surprises, "text-warning", surprises_1h, surprises_24h), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("✅", "Fact Checks", total_fact_checks, "text-success", fact_checks_1h, fact_checks_24h), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("🧪", "Simulations", total_simulations, "text-primary", simulations_1h, simulations_24h), xs=6, sm=4, md=2),
+            ], className="g-2 mb-2")
         ])
     except Exception as e:
         return dbc.Row([
