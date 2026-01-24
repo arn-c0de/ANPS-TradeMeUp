@@ -719,20 +719,6 @@ app.clientside_callback(
     Input("chart-fullscreen-state", "data")
 )
 
-# Create New Simulations collapse – instant toggle (no server round-trip)
-app.clientside_callback(
-    """
-    function(n_clicks, is_open) {
-        if (n_clicks == null || n_clicks === 0) return window.dash_clientside.no_update;
-        return !is_open;
-    }
-    """,
-    Output("create-sim-collapse", "is_open"),
-    Input("toggle-create-sim", "n_clicks"),
-    State("create-sim-collapse", "is_open")
-)
-
-
 # ============================================================================
 # CALLBACKS - COMMON
 # ============================================================================
@@ -3097,6 +3083,82 @@ def update_overlays_from_chart_drag(relayout_data_list, overlays_data, tabs_data
 
 
 @app.callback(
+    Output("chart-view-state", "data", allow_duplicate=True),
+    Input({"type": "chart-graph", "index": ALL}, "relayoutData"),
+    [State("chart-view-state", "data"),
+     State("chart-tabs-store", "data"),
+     State({"type": "chart-graph", "index": ALL}, "id")],
+    prevent_initial_call=True
+)
+def save_chart_view_state(relayout_data_list, view_state_data, tabs_data, graph_ids):
+    """Save chart zoom/pan state to localStorage for persistence"""
+    from dash import callback_context
+    import json
+    import copy
+    
+    if not callback_context.triggered:
+        return dash.no_update
+    
+    # Find which graph triggered
+    trigger = callback_context.triggered[0]["prop_id"]
+    if ".relayoutData" not in trigger:
+        return dash.no_update
+    
+    try:
+        trigger_id_str = trigger.split(".")[0]
+        trigger_id = json.loads(trigger_id_str)
+        tab_id = trigger_id.get("index")
+    except:
+        return dash.no_update
+    
+    # Get the relayout data for this graph
+    trigger_index = None
+    for idx, graph_id in enumerate(graph_ids):
+        if graph_id.get("index") == tab_id:
+            trigger_index = idx
+            break
+    
+    if trigger_index is None or trigger_index >= len(relayout_data_list):
+        return dash.no_update
+    
+    relayout_data = relayout_data_list[trigger_index]
+    if not relayout_data:
+        return dash.no_update
+    
+    # Extract zoom/pan information (ignore shape-related changes)
+    view_state = {}
+    zoom_pan_keys = ['xaxis.range', 'yaxis.range', 'xaxis2.range', 'yaxis2.range', 
+                     'xaxis.autorange', 'yaxis.autorange', 'xaxis2.autorange', 'yaxis2.autorange']
+    
+    for key in zoom_pan_keys:
+        if key in relayout_data:
+            view_state[key] = relayout_data[key]
+    
+    # Only save if we have actual zoom/pan data (not just shape movements)
+    if not view_state:
+        return dash.no_update
+    
+    # Update view state store
+    state = copy.deepcopy(view_state_data) if view_state_data else {'tabs': {}}
+    if 'tabs' not in state:
+        state['tabs'] = {}
+    
+    # Convert Plotly format to our format
+    saved_state = {}
+    if 'xaxis.range' in view_state:
+        saved_state['xaxis_range'] = view_state['xaxis.range']
+    if 'yaxis.range' in view_state:
+        saved_state['yaxis_range'] = view_state['yaxis.range']
+    if 'yaxis2.range' in view_state:
+        saved_state['yaxis2_range'] = view_state['yaxis2.range']
+    
+    state['tabs'][tab_id] = saved_state
+    
+    logger.debug(f"[Chart View] Saved view state for chart {tab_id}")
+    return state
+
+
+@app.callback(
     Output("chart-tabs-store", "data", allow_duplicate=True),
     Input({"type": "overlay-jump-btn", "group": ALL, "tab": ALL, "index": ALL}, "n_clicks"),
     [State({"type": "overlay-jump-btn", "group": ALL, "tab": ALL, "index": ALL}, "id"),
@@ -3371,10 +3433,13 @@ def search_new_tab_symbols(search_value):
      Input("chart-options-checklist", "value"),
      Input("chart-fullscreen-state", "data"),
      Input("layout-preset-dropdown", "value"),
-     Input("refresh-all-panels", "n_clicks")],
+     Input("refresh-all-panels", "n_clicks"),
+     Input("chart-update-interval", "n_intervals"),
+     Input("chart-interaction-modes", "data"),
+     Input("chart-view-state", "data")],
     prevent_initial_call='initial_duplicate'
 )
-def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, fullscreen_data, layout_preset, refresh_clicks):
+def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, fullscreen_data, layout_preset, refresh_clicks, n_intervals, interaction_modes, view_state_data):
     """
     Render chart display area - OPTIMIZED to only render active tab.
     This significantly improves tab switching performance.
@@ -3397,6 +3462,16 @@ def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, ful
         tab_show_volume = tab.get('show_volume', show_volume)
         tab_show_ma = tab.get('show_ma', show_ma)
         tab_overlays = (overlays_data or {}).get('tabs', {}).get(tab['id'], {}) if show_overlay else {}
+        
+        # Get interaction mode for this tab (default: zoom, auto_scroll for 1min/5min charts)
+        tab_modes = (interaction_modes or {}).get('tabs', {}).get(tab['id'], {})
+        dragmode = tab_modes.get('dragmode', 'zoom')
+        auto_scroll = tab_modes.get('auto_scroll', tab.get('timeframe') in ['1d_1m', '5d_5m'])
+        
+        # Get saved view state (zoom/pan position) for this tab
+        view_state = None
+        if view_state_data and view_state_data.get('tabs'):
+            view_state = view_state_data.get('tabs', {}).get(tab['id'])
 
         chart_component, stats_data = charts.get_stock_chart_components(
             tab['symbol'],
@@ -3405,7 +3480,10 @@ def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, ful
             show_volume=tab_show_volume,
             show_ma=tab_show_ma,
             overlays=tab_overlays,
-            graph_id={"type": "chart-graph", "index": tab['id']}
+            graph_id={"type": "chart-graph", "index": tab['id']},
+            dragmode=dragmode,
+            auto_scroll=auto_scroll,
+            view_state=view_state
         )
 
         chart_div = html.Div(
@@ -3773,7 +3851,7 @@ def toggle_market_overview(n_clicks, is_open):
      Input({"type": "favorite-btn", "index": dash.dependencies.ALL}, "n_clicks"),
      Input("refresh-all-panels", "n_clicks")],
     [State("chart-panels-config", "data"),
-     State("current-config-panel", "children"),
+     State("current-config-panel", "data"),
      State("config-symbol-input", "value"),
      State("config-timeframe-selector", "value"),
      State("config-chart-type-selector", "value"),
@@ -3829,20 +3907,152 @@ def update_chart_config(layout_single, layout_h, layout_v, layout_quad,
      Input("chart-update-interval", "n_intervals"),
      Input("refresh-all-panels", "n_clicks"),
      Input("chart-overlays-store", "data"),
-     Input("chart-fullscreen-state", "data")],
+     Input("chart-fullscreen-state", "data"),
+     Input("chart-interaction-modes", "data"),
+     Input("chart-view-state", "data")],
     prevent_initial_call='initial_duplicate'
 )
-def render_chart_panels(config, n_intervals, refresh_clicks, overlays_data, fullscreen_state):
+def render_chart_panels(config, n_intervals, refresh_clicks, overlays_data, fullscreen_state, interaction_modes, view_state_data):
     """Render the multi-panel chart layout with fullscreen support"""
+    # Handle None values
+    if not config:
+        config = {'layout': 'single', 'panels': {}}
+    if not fullscreen_state:
+        fullscreen_state = {'fullscreen': False}
+    if not interaction_modes:
+        interaction_modes = {'tabs': {}}
+    if not view_state_data:
+        view_state_data = {'tabs': {}}
+    
     layout = config.get('layout', 'single')
     panels = config.get('panels', {})
     is_fullscreen = fullscreen_state.get('fullscreen', False)
     
+    # Merge interaction modes into panel configs (create copy to avoid modifying original)
+    import copy
+    panels = copy.deepcopy(panels)
+    modes_dict = (interaction_modes or {}).get('tabs', {})
+    for panel_id, panel_config in panels.items():
+        if panel_id in modes_dict:
+            panel_config['dragmode'] = modes_dict[panel_id].get('dragmode', 'zoom')
+            panel_config['auto_scroll'] = modes_dict[panel_id].get('auto_scroll', False)
+        else:
+            # Default: zoom mode, auto_scroll for intraday charts
+            panel_config['dragmode'] = 'zoom'
+            panel_config['auto_scroll'] = panel_config.get('timeframe', '1mo') in ['1d_1m', '5d_5m']
+    
     # Set container class based on fullscreen state
     container_class = 'chart-container-fullscreen' if is_fullscreen else 'chart-container-normal'
     
-    chart_layout = charts.render_multi_panel_layout(layout, panels, is_fullscreen, overlays_data)
-    return chart_layout, container_class
+    try:
+        chart_layout = charts.render_multi_panel_layout(layout, panels, is_fullscreen, overlays_data, view_state_data)
+        return chart_layout, container_class
+    except Exception as e:
+        logger.error(f"Error rendering chart panels: {e}", exc_info=True)
+        return html.Div(f"Error rendering charts: {str(e)}", className="text-danger"), container_class
+
+
+@app.callback(
+    [Output("chart-update-interval", "disabled"),
+     Output("chart-update-interval", "interval")],
+    Input("chart-panels-config", "data"),
+    prevent_initial_call=False
+)
+def update_chart_refresh_interval(config):
+    """
+    Automatically enable/disable chart refresh interval based on active timeframes.
+    - 1-minute charts (1d_1m): Refresh every 60 seconds
+    - 5-minute charts (5d_5m): Refresh every 5 minutes (300 seconds)
+    - Longer timeframes: Disabled (manual refresh only)
+    """
+    if not config or not config.get('panels'):
+        return True, 60000  # Disabled by default
+    
+    panels = config.get('panels', {})
+    timeframes = []
+    
+    # Collect all active timeframes from panels
+    for panel_id, panel_config in panels.items():
+        timeframe = panel_config.get('timeframe', '1mo')
+        timeframes.append(timeframe)
+    
+    if not timeframes:
+        return True, 60000  # Disabled if no panels
+    
+    # Determine refresh interval based on shortest timeframe
+    # Priority: 1-minute > 5-minute > disabled
+    if any(tf == '1d_1m' for tf in timeframes):
+        # 1-minute charts: refresh every 60 seconds
+        return False, 60000
+    elif any(tf == '5d_5m' for tf in timeframes):
+        # 5-minute charts: refresh every 5 minutes
+        return False, 300000
+    else:
+        # Longer timeframes: disable auto-refresh
+        return True, 60000
+
+
+@app.callback(
+    Output("chart-interaction-modes", "data", allow_duplicate=True),
+    Input({"type": "chart-mode-toggle", "index": dash.dependencies.ALL}, "n_clicks"),
+    [State({"type": "chart-mode-toggle", "index": dash.dependencies.ALL}, "id"),
+     State("chart-interaction-modes", "data"),
+     State("chart-tabs-store", "data"),
+     State("chart-panels-config", "data")],
+    prevent_initial_call=True
+)
+def toggle_chart_interaction_mode(n_clicks_list, button_ids, modes_data, tabs_data, panels_config):
+    """Toggle between zoom and pan mode for charts"""
+    from dash import callback_context
+    import copy
+    
+    if not callback_context.triggered or not any(n_clicks_list):
+        return dash.no_update
+    
+    # Get the clicked button's panel/tab ID
+    trigger_id = callback_context.triggered[0]["prop_id"].split(".")[0]
+    import json
+    button_id = json.loads(trigger_id)
+    panel_id = button_id.get("index")
+    
+    if not panel_id:
+        return dash.no_update
+    
+    # Initialize modes data if needed
+    modes = copy.deepcopy(modes_data) if modes_data else {'tabs': {}}
+    if 'tabs' not in modes:
+        modes['tabs'] = {}
+    
+    # Get current mode for this panel (default: zoom)
+    current_mode = modes['tabs'].get(panel_id, {}).get('dragmode', 'zoom')
+    
+    # Toggle between zoom and pan
+    new_mode = 'pan' if current_mode == 'zoom' else 'zoom'
+    
+    # Update mode
+    if panel_id not in modes['tabs']:
+        modes['tabs'][panel_id] = {}
+    
+    modes['tabs'][panel_id]['dragmode'] = new_mode
+    
+    # Keep auto_scroll setting if it exists, otherwise set based on timeframe
+    if 'auto_scroll' not in modes['tabs'][panel_id]:
+        # Check timeframe from tabs or panels
+        timeframe = None
+        if tabs_data and tabs_data.get('tabs'):
+            for tab in tabs_data.get('tabs', []):
+                if tab.get('id') == panel_id:
+                    timeframe = tab.get('timeframe', '1mo')
+                    break
+        
+        if not timeframe and panels_config and panels_config.get('panels'):
+            panel_config = panels_config.get('panels', {}).get(panel_id, {})
+            timeframe = panel_config.get('timeframe', '1mo')
+        
+        modes['tabs'][panel_id]['auto_scroll'] = timeframe in ['1d_1m', '5d_5m'] if timeframe else False
+    
+    logger.info(f"[Chart Mode] Panel {panel_id}: Switched to {new_mode} mode")
+    return modes
 
 
 @app.callback(
@@ -3881,7 +4091,7 @@ def search_config_symbols(search_value):
 
 @app.callback(
     [Output("config-panel-modal", "is_open"),
-     Output("current-config-panel", "children"),
+     Output("current-config-panel", "data"),
      Output("config-symbol-input", "value"),
      Output("config-timeframe-selector", "value"),
      Output("config-chart-type-selector", "value"),

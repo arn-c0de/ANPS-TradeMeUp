@@ -17,95 +17,90 @@ def create_layout():
     return html.Div([
         dcc.Store(id="sim-delete-status"),
         dbc.Container([
-            # Create New Simulations Section (collapsible)
+            # Create New Simulations Section (native <details> – instant expand/collapse, no JS)
             dbc.Row([
                 dbc.Col([
                     dbc.Card([
-                        dbc.CardHeader(
-                            dbc.Button(
-                                "➕ Create New Simulations",
-                                id="toggle-create-sim",
-                                color="link",
-                                className="w-100 p-0 text-start text-decoration-none text-white",
-                                style={"fontSize": "0.95rem", "cursor": "pointer"}
-                            ),
-                            className="py-2",
-                            style={"cursor": "pointer"}
-                        ),
-                        dbc.Collapse(
-                            dbc.CardBody([
-                                dbc.Row([
-                                    dbc.Col([
-                                        html.Small("Entities", className="text-muted d-block mb-1"),
-                                        dcc.Dropdown(
-                                            id="create-sim-entity-filter",
-                                            multi=True,
-                                            placeholder="All entities...",
-                                            persistence=True,
-                                            persistence_type="local",
-                                            className="small",
-                                            style={"fontSize": "0.85rem"}
-                                        )
-                                    ], width=12, md=6, className="mb-2 mb-md-0"),
-                                    dbc.Col([
-                                        html.Small("Date Range", className="text-muted d-block mb-1"),
-                                        dcc.DatePickerRange(
-                                            id="create-sim-date-range",
-                                            start_date=(datetime.now() - timedelta(days=7)).date(),
-                                            end_date=datetime.now().date(),
-                                            persistence=True,
-                                            persistence_type="local",
-                                            className="small",
-                                        )
-                                    ], width=12, md=6)
-                                ], className="g-3 mb-2"),
-                                dbc.Row([
-                                    dbc.Col([
-                                        html.Small("Horizon", className="text-muted d-block mb-1"),
-                                        dcc.Dropdown(
-                                            id="create-sim-horizon-filter",
-                                            options=[
-                                                {"label": "All", "value": "all"},
-                                                {"label": "1 Day", "value": "1d"},
-                                                {"label": "5 Days", "value": "5d"},
-                                                {"label": "20 Days", "value": "20d"},
-                                            ],
-                                            value="all",
-                                            clearable=False,
-                                            persistence=True,
-                                            persistence_type="local",
-                                            className="small",
-                                            style={"fontSize": "0.85rem"}
-                                        )
-                                    ], width=6, md=2),
-                                    dbc.Col([
-                                        html.Small("Limit", className="text-muted d-block mb-1"),
-                                        dcc.Input(
-                                            id="create-sim-limit",
-                                            type="number",
-                                            value=50,
-                                            min=1,
-                                            max=500,
-                                            persistence=True,
-                                            persistence_type="local",
-                                            className="form-control form-control-sm"
-                                        )
-                                    ], width=4, md=2),
-                                    dbc.Col([
-                                        html.Small("\u00a0", className="d-block mb-1"),
-                                        dbc.Button(
-                                            "Create",
-                                            id="btn-create-simulations",
-                                            color="primary",
-                                            className="w-100",
-                                            size="sm"
-                                        )
-                                    ], width=12, md=2, className="mt-2 mt-md-0 align-self-end")
-                                ], className="g-3"),
-                                html.Div(id="create-sim-status", className="mt-2")
-                            ], className="py-3"),
-                            id="create-sim-collapse",
-                            is_open=False
+                        html.Details(
+                            [
+                                html.Summary(
+                                    "➕ Create New Simulations",
+                                    className="create-sim-summary"
+                                ),
+                                dbc.CardBody([
+                                    dbc.Row([
+                                        dbc.Col([
+                                            html.Small("Entities", className="text-muted d-block mb-1"),
+                                            dcc.Dropdown(
+                                                id="create-sim-entity-filter",
+                                                multi=True,
+                                                placeholder="All entities...",
+                                                persistence=True,
+                                                persistence_type="local",
+                                                className="small",
+                                                style={"fontSize": "0.85rem"}
+                                            )
+                                        ], width=12, md=6, className="mb-2 mb-md-0"),
+                                        dbc.Col([
+                                            html.Small("Date Range", className="text-muted d-block mb-1"),
+                                            dcc.DatePickerRange(
+                                                id="create-sim-date-range",
+                                                start_date=(datetime.now() - timedelta(days=7)).date(),
+                                                end_date=datetime.now().date(),
+                                                persistence=True,
+                                                persistence_type="local",
+                                                className="small",
+                                            )
+                                        ], width=12, md=6)
+                                    ], className="g-3 mb-2"),
+                                    dbc.Row([
+                                        dbc.Col([
+                                            html.Small("Horizon", className="text-muted d-block mb-1"),
+                                            dcc.Dropdown(
+                                                id="create-sim-horizon-filter",
+                                                options=[
+                                                    {"label": "All", "value": "all"},
+                                                    {"label": "1 Day", "value": "1d"},
+                                                    {"label": "5 Days", "value": "5d"},
+                                                    {"label": "20 Days", "value": "20d"},
+                                                ],
+                                                value="all",
+                                                clearable=False,
+                                                persistence=True,
+                                                persistence_type="local",
+                                                className="small",
+                                                style={"fontSize": "0.85rem"}
+                                            )
+                                        ], width=6, md=2),
+                                        dbc.Col([
+                                            html.Small("Limit", className="text-muted d-block mb-1"),
+                                            dcc.Input(
+                                                id="create-sim-limit",
+                                                type="number",
+                                                value=50,
+                                                min=1,
+                                                max=500,
+                                                persistence=True,
+                                                persistence_type="local",
+                                                className="form-control form-control-sm"
+                                            )
+                                        ], width=4, md=2),
+                                        dbc.Col([
+                                            html.Small("\u00a0", className="d-block mb-1"),
+                                            dbc.Button(
+                                                "Create",
+                                                id="btn-create-simulations",
+                                                color="primary",
+                                                className="w-100",
+                                                size="sm"
+                                            )
+                                        ], width=12, md=2, className="mt-2 mt-md-0 align-self-end")
+                                    ], className="g-3"),
+                                    html.Div(id="create-sim-status", className="mt-2")
+                                ], className="py-3")
+                            ],
+                            className="create-sim-details",
+                            open=False
                         )
                     ], className="mb-2")
                 ], width=12)

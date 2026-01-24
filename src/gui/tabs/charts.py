@@ -38,6 +38,22 @@ def create_layout():
             'tabs': {}
         }),
         
+        # Store for chart interaction modes (zoom/pan) per chart
+        dcc.Store(id='chart-interaction-modes', storage_type='memory', data={
+            'tabs': {}  # {tab_id: {'dragmode': 'zoom'|'pan', 'auto_scroll': True|False}}
+        }),
+        
+        # Store for chart zoom/pan state (persisted in browser localStorage)
+        dcc.Store(id='chart-view-state', storage_type='local', data={
+            'tabs': {}  # {tab_id: {'xaxis_range': [min, max], 'yaxis_range': [min, max], ...}}
+        }),
+        
+        # Store for panel-based chart configuration (for multi-panel layouts)
+        dcc.Store(id='chart-panels-config', storage_type='session', data={
+            'layout': 'single',
+            'panels': {}
+        }),
+        
         # Store for quad mode selection
         dcc.Store(id='quad-mode-store', storage_type='session', data={
             'enabled': False,
@@ -87,6 +103,8 @@ def create_layout():
                                 dbc.Label("📐 View:", className="fw-bold me-2 d-inline"),
                                 dbc.ButtonGroup([
                                     dbc.Button("Single", id="layout-single", color="primary", size="sm", outline=False),
+                                    dbc.Button("Split ↔", id="layout-split-h", color="primary", size="sm", outline=True),
+                                    dbc.Button("Split ↕", id="layout-split-v", color="primary", size="sm", outline=True),
                                     dbc.Button("Quad", id="layout-quad", color="primary", size="sm", outline=True)
                                 ], size="sm", className="me-3 d-inline"),
                                 dbc.Label("� Layout:", className="fw-bold me-2 ms-3 d-inline"),
@@ -129,6 +147,9 @@ def create_layout():
         
         # Chart Display Area with fullscreen support
         html.Div(id='chart-display-area', className='chart-container-normal'),
+        
+        # Multi-panel chart area (for panel-based layouts)
+        html.Div(id='multi-panel-chart-area', className='chart-container-normal', style={'display': 'none'}),
         
         # Add New Tab Modal
         dbc.Modal([
@@ -232,7 +253,66 @@ def create_layout():
                 dbc.Button("Apply", id="panel-settings-apply-btn", color="primary")
             ])
         ], id="panel-settings-modal", size="md", is_open=False, className="panel-settings-modal"),
-
+        
+        # Config Panel Modal (for panel-based chart configuration)
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("⚙️ Chart Configuration")),
+            dbc.ModalBody([
+                dcc.Store(id="current-config-panel", data=None),
+                
+                dbc.Label("Stock Symbol:", className="fw-bold"),
+                dcc.Dropdown(
+                    id="config-symbol-input",
+                    placeholder="Type to search symbol or company name...",
+                    options=[],
+                    searchable=True,
+                    clearable=True,
+                    className="mb-3"
+                ),
+                
+                dbc.Label("Timeframe:", className="fw-bold"),
+                dcc.Dropdown(
+                    id="config-timeframe-selector",
+                    options=[
+                        {'label': '1 Day (1min)', 'value': '1d_1m'},
+                        {'label': '5 Days (5min)', 'value': '5d_5m'},
+                        {'label': '1 Month', 'value': '1mo'},
+                        {'label': '3 Months', 'value': '3mo'},
+                        {'label': '6 Months', 'value': '6mo'},
+                        {'label': '1 Year', 'value': '1y'},
+                        {'label': '2 Years', 'value': '2y'},
+                        {'label': '5 Years', 'value': '5y'}
+                    ],
+                    value='1mo',
+                    clearable=False,
+                    className="mb-3"
+                ),
+                
+                dbc.Label("Chart Type:", className="fw-bold"),
+                dcc.Dropdown(
+                    id="config-chart-type-selector",
+                    options=[
+                        {'label': '📊 Candlestick', 'value': 'candlestick'},
+                        {'label': '📈 Line Chart', 'value': 'line'}
+                    ],
+                    value='candlestick',
+                    clearable=False,
+                    className="mb-3"
+                ),
+                
+                dbc.Checklist(
+                    id="config-favorite-checkbox",
+                    options=[{"label": " Mark as Favorite", "value": "favorite"}],
+                    value=[],
+                    switch=True
+                )
+            ]),
+            dbc.ModalFooter([
+                dbc.Button("Cancel", id="config-cancel-btn", color="secondary", className="me-2"),
+                dbc.Button("Apply", id="config-apply-btn", color="primary")
+            ])
+        ], id="config-panel-modal", size="md", is_open=False),
+        
         # Trading Overlay Modal (Brackets / Breaks)
         dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle("📌 Trading Overlays")),
@@ -420,7 +500,10 @@ def get_stock_chart_components(
     show_volume: bool = True,
     show_ma: bool = False,
     overlays: dict = None,
-    graph_id=None
+    graph_id=None,
+    dragmode: str = 'zoom',
+    auto_scroll: bool = False,
+    view_state: dict = None
 ):
     """Get chart graph component and stats data."""
     try:
@@ -465,6 +548,45 @@ def get_stock_chart_components(
         overlay_shapes = _build_overlay_shapes(overlays)
         if overlay_shapes:
             fig.update_layout(shapes=overlay_shapes)
+        
+        # Set dragmode (zoom or pan)
+        fig.update_layout(dragmode=dragmode)
+        
+        # Apply saved view state (zoom/pan position) if available
+        # Only apply if auto_scroll is False (user wants to keep their view)
+        if view_state and not auto_scroll:
+            # Apply x-axis range if saved
+            if 'xaxis_range' in view_state and view_state['xaxis_range']:
+                fig.update_xaxes(range=view_state['xaxis_range'], row=1 if show_volume else None)
+            
+            # Apply y-axis range if saved (for price chart)
+            if 'yaxis_range' in view_state and view_state['yaxis_range']:
+                fig.update_yaxes(range=view_state['yaxis_range'], row=1 if show_volume else None)
+            
+            # Apply y-axis2 range if saved (for volume chart)
+            if show_volume and 'yaxis2_range' in view_state and view_state['yaxis2_range']:
+                fig.update_yaxes(range=view_state['yaxis2_range'], row=2)
+        
+        # Auto-scroll: Set x-axis range to show latest candles, with newest candle visible on the right
+        elif auto_scroll and len(df) > 0:
+            # Show last 50-100 candles (adjust based on data density)
+            visible_candles = min(80, len(df))
+            start_idx = max(0, len(df) - visible_candles)
+            
+            # For category type axes, we need to use the index positions
+            # Since we're using category type, we'll set the range using index values
+            if hasattr(df.index, '__len__'):
+                # Convert to list if needed
+                indices = list(df.index) if not isinstance(df.index, list) else df.index
+                if start_idx < len(indices):
+                    # Set range to show last N candles
+                    # For category axes, range is set using the category values
+                    start_val = indices[start_idx] if start_idx < len(indices) else indices[0]
+                    end_val = indices[-1] if len(indices) > 0 else None
+                    
+                    if end_val is not None:
+                        # Update xaxis range - for category type, use the actual index values
+                        fig.update_xaxes(range=[start_val, end_val], row=1 if show_volume else None)
 
         graph_props = dict(
             figure=fig,
@@ -475,7 +597,7 @@ def get_stock_chart_components(
                 'displaylogo': False,
                 'editable': True,
                 'edits': {'shapePosition': True},
-                'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
+                'modeBarButtonsToRemove': ['lasso2d', 'select2d'],  # Keep pan2d enabled
                 'toImageButtonOptions': {'format': 'png', 'filename': f'{symbol}_chart'}
             },
             className='flex-grow-1'
@@ -614,7 +736,7 @@ def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, pan
             outline=True,
             className="overlay-manage-btn"
         )
-
+    
     overlay_children.extend([
         html.Div(
             [manage_button] if manage_button else [],
@@ -645,8 +767,12 @@ def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, pan
     })
 
 
-def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, overlays: dict = None):
+def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, overlays: dict = None, view_state: dict = None):
     """Create a single chart panel with controls and a trading action overlay."""
+    # Handle None config
+    if not config:
+        config = {}
+    
     # Extract configuration with sensible defaults
     symbol = config.get('symbol', 'AAPL')
     timeframe = config.get('timeframe', '1mo')
@@ -681,6 +807,12 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, 
 
     # Get chart content and stats for overlay
     overlay_payload = overlays if show_stats else {}
+    
+    # Get interaction mode for this panel (default: zoom)
+    # This will be set by callbacks in app.py
+    interaction_mode = config.get('dragmode', 'zoom')
+    auto_scroll_enabled = config.get('auto_scroll', False)
+    
     chart_component, stats_data = get_stock_chart_components(
         symbol,
         timeframe,
@@ -688,7 +820,10 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, 
         show_volume,
         show_ma,
         overlays=overlay_payload,
-        graph_id={"type": "chart-graph", "index": panel_id}
+        graph_id={"type": "chart-graph", "index": panel_id},
+        dragmode=interaction_mode,
+        auto_scroll=auto_scroll_enabled,
+        view_state=view_state
     )
     chart_content = chart_component
     trading_overlay = create_trading_overlay(stats_data, show_stats, panel_id=panel_id) if show_stats else None
@@ -722,12 +857,19 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, 
     ], className="h-100", style={'height': '100%', 'overflow': 'hidden'})
 
 
-def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool = False, overlays_data: dict = None):
+def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool = False, overlays_data: dict = None, view_state_data: dict = None):
     """Render the multi-panel layout based on selected mode"""
     
     def get_panel_overlays(panel_id: str):
         return (overlays_data or {}).get('tabs', {}).get(panel_id, {})
-
+    
+    def get_panel_view_state(panel_id: str):
+        return (view_state_data or {}).get('tabs', {}).get(panel_id) if view_state_data else None
+    
+    # Handle empty panels_config
+    if not panels_config:
+        panels_config = {}
+    
     # Determine panel height based on fullscreen and layout
     if fullscreen:
         if layout == 'quad':
@@ -782,14 +924,18 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
     layout_content = None
     if layout == 'single':
         # Single large panel
-        layout_content = dbc.Row([
-            dbc.Col([
-                html.Div(
-                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1')),
-                    style=panel_style
-                )
-            ], width=12)
-        ])
+        panel_config = panels_config.get('panel-1', {})
+        if not panel_config or not panel_config.get('symbol'):
+            layout_content = dbc.Alert("No chart configured. Click ⚙️ to configure a chart.", color="info", className="mt-3")
+        else:
+            layout_content = dbc.Row([
+                dbc.Col([
+                    html.Div(
+                        create_chart_panel('panel-1', panel_config, overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1')),
+                        style=panel_style
+                    )
+                ], width=12)
+            ])
     
     elif layout == 'split-horizontal':
         # Two panels side by side
@@ -798,13 +944,13 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
         layout_content = dbc.Row([
             dbc.Col([
                 html.Div(
-                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1')),
+                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1')),
                     style=panel_style
                 )
             ], md=6, className=margin_class),
             dbc.Col([
                 html.Div(
-                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2')),
+                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2')),
                     style=panel_style
                 )
             ], md=6, className=margin_class)
@@ -817,7 +963,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1')),
+                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1')),
                         style=panel_style
                     )
                 ], width=12, className=margin_class)
@@ -825,7 +971,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2')),
+                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2')),
                         style=panel_style
                     )
                 ], width=12)
@@ -840,13 +986,13 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1')),
+                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1')),
                         style=panel_style
                     )
                 ], md=6, className=margin_class),
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2')),
+                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2')),
                         style=panel_style
                     )
                 ], md=6, className=margin_class)
@@ -854,13 +1000,13 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-3', panels_config.get('panel-3', {}), overlays=get_panel_overlays('panel-3')),
+                    create_chart_panel('panel-3', panels_config.get('panel-3', {}), overlays=get_panel_overlays('panel-3'), view_state=get_panel_view_state('panel-3')),
                         style=panel_style
                     )
                 ], md=6),
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-4', panels_config.get('panel-4', {}), overlays=get_panel_overlays('panel-4')),
+                    create_chart_panel('panel-4', panels_config.get('panel-4', {}), overlays=get_panel_overlays('panel-4'), view_state=get_panel_view_state('panel-4')),
                         style=panel_style
                     )
                 ], md=6)
