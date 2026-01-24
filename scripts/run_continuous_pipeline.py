@@ -35,6 +35,7 @@ from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
 from src.agents.regime_detection_agent import RegimeDetectionAgent
 from src.agents.impact_scoring_agent import ImpactScoringAgent
 from src.agents.prediction_agent import PredictionAgent
+from src.agents.trading_simulation_agent import TradingSimulationAgent
 # NEW AGENTS from Phase 2
 from src.agents.fact_verification_agent import FactVerificationAgent
 from src.agents.signal_decay_agent import SignalDecayAgent
@@ -84,6 +85,7 @@ class ContinuousPipeline:
             'surprise': 30,  # Increased from 20 to 30
             'impact': 30,    # Increased from 20 to 30
             'prediction': 50,
+            'simulation': 50,
             # NEW AGENTS
             'fact_verification': 30,
             'correlation': 10,  # Lower because it's computation-heavy
@@ -134,6 +136,7 @@ class ContinuousPipeline:
                     'surprise': 50,
                     'impact': 50,
                     'prediction': 100,
+                    'simulation': 100,
                     'fact_verification': 50,
                     'correlation': 20,
                     'calibration': 30,
@@ -399,45 +402,51 @@ class ContinuousPipeline:
 
             # ===== NEW PHASES (Phase 2 Agents) =====
 
-            # Phase 11: Scenario Generation (stress test predictions)
+            # Phase 11: Trading Simulation (predictions vs market)
+            activity_logger.log_phase(11, "Trading Simulation")
+            simulator = TradingSimulationAgent()
+            sim_results = simulator.process_batch(limit=self.batch_sizes['simulation'], lookback_days=7)
+            logger.info(f"Simulation: {sim_results}")
+
+            # Phase 12: Scenario Generation (stress test predictions)
             # TODO: Refactor when needed
-            activity_logger.log_phase(11, "Scenario Generation")
+            activity_logger.log_phase(12, "Scenario Generation")
             scenario_gen = ScenarioGenerationAgent(self.db)
             scenario_stats = scenario_gen.get_statistics()
             logger.info(f"Scenarios: {scenario_stats}")
 
-            # Phase 12: Fact Verification
+            # Phase 13: Fact Verification
             # ✅ REFACTORED: Uses scoped sessions internally
-            activity_logger.log_phase(12, "Fact Verification")
+            activity_logger.log_phase(13, "Fact Verification")
             fact_verifier = FactVerificationAgent()  # ✅ No db parameter!
             fact_results = fact_verifier.process_batch(limit=self.batch_sizes['fact_verification'])
             logger.info(f"Fact Verification: {fact_results}")
 
-            # Phase 13: Confidence Calibration (for predictions)
+            # Phase 14: Confidence Calibration (for predictions)
             # ✅ REFACTORED: Uses scoped sessions internally
-            activity_logger.log_phase(13, "Confidence Calibration")
+            activity_logger.log_phase(14, "Confidence Calibration")
             calibrator = ConfidenceCalibrationAgent()  # ✅ No db parameter!
             calibration_stats = calibrator.get_statistics()
             logger.info(f"Calibration: {calibration_stats}")
 
-            # Phase 14: Meta-Strategy (Ensemble Predictions)
+            # Phase 15: Meta-Strategy (Ensemble Predictions)
             # ✅ REFACTORED: Uses scoped sessions internally
-            activity_logger.log_phase(14, "Meta-Strategy Ensemble")
+            activity_logger.log_phase(15, "Meta-Strategy Ensemble")
             meta_strategy = MetaStrategyAgent()  # ✅ No db parameter!
             # Get entities that have multiple predictions for ensemble
             ensemble_results = meta_strategy.get_statistics()
             logger.info(f"Meta-Strategy: {ensemble_results}")
 
-            # Phase 15: Model Performance Monitoring
+            # Phase 16: Model Performance Monitoring
             # TODO: Refactor when needed
-            activity_logger.log_phase(15, "Performance Monitoring")
+            activity_logger.log_phase(16, "Performance Monitoring")
             monitor = ModelPerformanceMonitor(self.db)
             perf_stats = monitor.get_statistics()
             logger.info(f"Performance: {perf_stats}")
 
-            # Phase 16: A/B Testing (compare model versions)
+            # Phase 17: A/B Testing (compare model versions)
             # TODO: Refactor when needed
-            activity_logger.log_phase(16, "A/B Testing")
+            activity_logger.log_phase(17, "A/B Testing")
             ab_testing = ABTestingAgent(self.db)
             ab_stats = ab_testing.get_statistics()
             logger.info(f"A/B Testing: {ab_stats}")

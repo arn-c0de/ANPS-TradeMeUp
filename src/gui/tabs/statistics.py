@@ -1,3 +1,4 @@
+
 """
 Statistics Tab - Analytics and Metrics
 """
@@ -8,6 +9,7 @@ import pandas as pd
 import plotly.express as px
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from datetime import datetime, timedelta, date
 
 from src.models.raw_news import RawNews
 from src.models.data_quality import DataQualityScore
@@ -18,20 +20,115 @@ from src.models.analysis import ImpactScore, SurpriseScore, SignalDecayModel, Fa
 from src.gui.error_handling import handle_db_errors, create_empty_state
 
 
+def _coerce_datetime(value, is_end=False):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.max.time() if is_end else datetime.min.time())
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        if "T" in value or ":" in value:
+            return parsed
+        return datetime.combine(parsed.date(), datetime.max.time() if is_end else datetime.min.time())
+    return None
+
+
+def _parse_date_range(date_range):
+    if not date_range or len(date_range) != 2:
+        return None, None
+    return _coerce_datetime(date_range[0], is_end=False), _coerce_datetime(date_range[1], is_end=True)
+
 def create_layout():
     """Create statistics tab layout"""
     return dbc.Container([
-        # Overall Metrics
+        # Time Period Filter (compact control section)
         dbc.Row([
             dbc.Col([
                 dbc.Card([
-                    dbc.CardHeader(html.H5("📊 Overall Metrics")),
                     dbc.CardBody([
-                        html.Div(id="statistics-metrics")
-                    ])
-                ])
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("Granularity:", className="text-muted mb-1 d-block", style={"fontSize": "0.7em"}),
+                                dcc.Dropdown(
+                                    id="stats-granularity",
+                                    options=[
+                                        {"label": "Minutes", "value": "minutes"},
+                                        {"label": "Days", "value": "days"},
+                                        {"label": "Weeks", "value": "weeks"},
+                                        {"label": "Months", "value": "months"},
+                                        {"label": "Years", "value": "years"},
+                                        {"label": "All Time", "value": "all"}
+                                    ],
+                                    value="all",
+                                    clearable=False,
+                                    style={"fontSize": "0.75em"}
+                                )
+                            ], width=2),
+                            dbc.Col([
+                                html.Small("Date Range:", className="text-muted mb-1 d-block", style={"fontSize": "0.7em"}),
+                                dcc.DatePickerRange(
+                                    id="stats-date-range",
+                                    start_date=None,
+                                    end_date=None,
+                                    display_format="YYYY-MM-DD",
+                                    style={"fontSize": "0.75em"}
+                                )
+                            ], width=2),
+                            dbc.Col([
+                                html.Small("Quick Select:", className="text-muted mb-1 d-block", style={"fontSize": "0.7em"}),
+                                dbc.ButtonGroup([
+                                    dbc.Button("1h", id="quick-1h", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
+                                    dbc.Button("12h", id="quick-12h", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
+                                    dbc.Button("24h", id="quick-24h", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
+                                    dbc.Button("7d", id="quick-7d", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
+                                    dbc.Button("30d", id="quick-30d", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
+                                    dbc.Button("90d", id="quick-90d", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
+                                    dbc.Button("1y", id="quick-1y", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
+                                    dbc.Button("All", id="quick-all", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"})
+                                ], size="sm")
+                            ], width=5),
+                            dbc.Col([
+                                html.Small("Custom (h):", className="text-muted mb-1 d-block", style={"fontSize": "0.7em"}),
+                                dbc.Input(
+                                    id="custom-hours-input",
+                                    type="number",
+                                    placeholder="e.g. 6",
+                                    min=1,
+                                    max=8760,
+                                    debounce=True,
+                                    size="sm",
+                                    style={"fontSize": "0.75em"}
+                                )
+                            ], width=2),
+                            dbc.Col([
+                                html.Small("\u00a0", className="mb-1 d-block", style={"fontSize": "0.7em"}),
+                                dbc.Button(
+                                    "Reset",
+                                    id="stats-reset-filter",
+                                    size="sm",
+                                    color="secondary",
+                                    outline=True,
+                                    className="w-100",
+                                    style={"fontSize": "0.75em"}
+                                )
+                            ], width=1)
+                        ], className="g-2")
+                    ], className="py-2 px-3")
+                ], className="border-primary", style={"borderWidth": "1px"})
             ], width=12)
-        ], className="mb-3"),
+        ], className="mb-2"),
+
+        # Overall Metrics (compact top bar)
+        dbc.Row([
+            dbc.Col([
+                html.Div(id="statistics-metrics")
+            ], width=12)
+        ], className="mb-2"),
         
         # Event & Quality Distribution
         dbc.Row([
@@ -127,7 +224,7 @@ def create_layout():
                 dbc.Card([
                     dbc.CardHeader([
                         html.Div([
-                            html.H5("📈 Positive Entities (Last 30 Days)", className="mb-0 d-inline"),
+                            html.H5("📈 Positive Entities (Selected Range)", className="mb-0 d-inline"),
                             dbc.Input(
                                 id="positive-entity-search-input",
                                 type="text",
@@ -155,7 +252,7 @@ def create_layout():
                 dbc.Card([
                     dbc.CardHeader([
                         html.Div([
-                            html.H5("📉 Negative Entities (Last 30 Days)", className="mb-0 d-inline"),
+                            html.H5("📉 Negative Entities (Selected Range)", className="mb-0 d-inline"),
                             dbc.Input(
                                 id="negative-entity-search-input",
                                 type="text",
@@ -257,6 +354,9 @@ def create_layout():
         
         # Store for selected entity
         dcc.Store(id="selected-entity-store", data=None),
+
+        # Store for active time filter
+        dcc.Store(id="active-filter-store", data="all"),
         
         # Store for table sorting state
         dcc.Store(id="entity-table-sort-store", data={"column": None, "direction": None}),
@@ -268,74 +368,179 @@ def create_layout():
 
 
 @handle_db_errors(default_message="Unable to load statistics", show_details=False)
-def get_statistics_metrics(engine):
-    """Get overall statistics"""
+def get_statistics_metrics(engine, date_range=None, granularity="all"):
+    """Get overall statistics with optional date filtering
+
+    Args:
+        engine: Database engine
+        date_range: Tuple of (start_date, end_date) or None for all time
+        granularity: Time granularity ('minutes', 'days', 'weeks', 'months', 'years', 'all')
+    """
     try:
         with Session(engine) as db:
             # Simple COUNT queries - these are fast and don't need complex optimization
-            total_news = db.query(func.count(RawNews.news_id)).scalar() or 0
-            total_processed = db.query(func.count(ProcessedNews.news_id)).scalar() or 0
-            total_entities = db.query(func.count(Entity.entity_id)).scalar() or 0
-            total_predictions = db.query(func.count(Prediction.prediction_id)).scalar() or 0
-            total_impacts = db.query(func.count(ImpactScore.score_id)).scalar() or 0
-            total_surprises = db.query(func.count(SurpriseScore.surprise_id)).scalar() or 0
-            total_regimes = db.query(func.count(MarketRegime.regime_id)).scalar() or 0
-            total_fact_checks = db.query(func.count(FactVerification.verification_id)).scalar() or 0
+            now = datetime.utcnow()
+            hour_ago = now - timedelta(hours=1)
+            day_ago = now - timedelta(hours=24)
 
-            avg_quality = db.query(func.avg(DataQualityScore.quality_score)).scalar()
+            # Parse date range filter
+            start_date, end_date = _parse_date_range(date_range)
+
+            # Apply date range filtering to all queries
+            # Total counts with date range
+            news_query = db.query(func.count(RawNews.news_id))
+            if start_date:
+                news_query = news_query.filter(RawNews.fetched_at >= start_date)
+            if end_date:
+                news_query = news_query.filter(RawNews.fetched_at <= end_date)
+            total_news = news_query.scalar() or 0
+
+            processed_query = db.query(func.count(ProcessedNews.news_id))
+            if start_date:
+                processed_query = processed_query.filter(ProcessedNews.processing_timestamp >= start_date)
+            if end_date:
+                processed_query = processed_query.filter(ProcessedNews.processing_timestamp <= end_date)
+            total_processed = processed_query.scalar() or 0
+
+            entities_query = db.query(func.count(Entity.entity_id))
+            if start_date:
+                entities_query = entities_query.filter(Entity.created_at >= start_date)
+            if end_date:
+                entities_query = entities_query.filter(Entity.created_at <= end_date)
+            total_entities = entities_query.scalar() or 0
+
+            predictions_query = db.query(func.count(Prediction.prediction_id))
+            if start_date:
+                predictions_query = predictions_query.filter(Prediction.created_at >= start_date)
+            if end_date:
+                predictions_query = predictions_query.filter(Prediction.created_at <= end_date)
+            total_predictions = predictions_query.scalar() or 0
+
+            impacts_query = db.query(func.count(ImpactScore.score_id))
+            if start_date:
+                impacts_query = impacts_query.filter(ImpactScore.created_at >= start_date)
+            if end_date:
+                impacts_query = impacts_query.filter(ImpactScore.created_at <= end_date)
+            total_impacts = impacts_query.scalar() or 0
+
+            surprises_query = db.query(func.count(SurpriseScore.surprise_id))
+            if start_date:
+                surprises_query = surprises_query.filter(SurpriseScore.created_at >= start_date)
+            if end_date:
+                surprises_query = surprises_query.filter(SurpriseScore.created_at <= end_date)
+            total_surprises = surprises_query.scalar() or 0
+
+            regimes_query = db.query(func.count(MarketRegime.regime_id))
+            if start_date:
+                regimes_query = regimes_query.filter(MarketRegime.created_at >= start_date)
+            if end_date:
+                regimes_query = regimes_query.filter(MarketRegime.created_at <= end_date)
+            total_regimes = regimes_query.scalar() or 0
+
+            fact_checks_query = db.query(func.count(FactVerification.verification_id))
+            if start_date:
+                fact_checks_query = fact_checks_query.filter(FactVerification.verified_at >= start_date)
+            if end_date:
+                fact_checks_query = fact_checks_query.filter(FactVerification.verified_at <= end_date)
+            total_fact_checks = fact_checks_query.scalar() or 0
+
+            quality_query = db.query(func.avg(DataQualityScore.quality_score))
+            if start_date:
+                quality_query = quality_query.filter(DataQualityScore.created_at >= start_date)
+            if end_date:
+                quality_query = quality_query.filter(DataQualityScore.created_at <= end_date)
+            avg_quality = quality_query.scalar()
             avg_quality = round(avg_quality, 2) if avg_quality else 0
+
+            # 1h / 24h increments (always show recent activity regardless of filter)
+            news_1h = db.query(func.count(RawNews.news_id)).filter(RawNews.fetched_at >= hour_ago).scalar() or 0
+            news_24h = db.query(func.count(RawNews.news_id)).filter(RawNews.fetched_at >= day_ago).scalar() or 0
+
+            processed_1h = db.query(func.count(ProcessedNews.news_id)).filter(
+                ProcessedNews.processing_timestamp >= hour_ago
+            ).scalar() or 0
+            processed_24h = db.query(func.count(ProcessedNews.news_id)).filter(
+                ProcessedNews.processing_timestamp >= day_ago
+            ).scalar() or 0
+
+            entities_1h = db.query(func.count(Entity.entity_id)).filter(Entity.created_at >= hour_ago).scalar() or 0
+            entities_24h = db.query(func.count(Entity.entity_id)).filter(Entity.created_at >= day_ago).scalar() or 0
+
+            predictions_1h = db.query(func.count(Prediction.prediction_id)).filter(
+                Prediction.created_at >= hour_ago
+            ).scalar() or 0
+            predictions_24h = db.query(func.count(Prediction.prediction_id)).filter(
+                Prediction.created_at >= day_ago
+            ).scalar() or 0
+
+            impacts_1h = db.query(func.count(ImpactScore.score_id)).filter(
+                ImpactScore.created_at >= hour_ago
+            ).scalar() or 0
+            impacts_24h = db.query(func.count(ImpactScore.score_id)).filter(
+                ImpactScore.created_at >= day_ago
+            ).scalar() or 0
+
+            surprises_1h = db.query(func.count(SurpriseScore.surprise_id)).filter(
+                SurpriseScore.created_at >= hour_ago
+            ).scalar() or 0
+            surprises_24h = db.query(func.count(SurpriseScore.surprise_id)).filter(
+                SurpriseScore.created_at >= day_ago
+            ).scalar() or 0
+
+            fact_checks_1h = db.query(func.count(FactVerification.verification_id)).filter(
+                FactVerification.verified_at >= hour_ago
+            ).scalar() or 0
+            fact_checks_24h = db.query(func.count(FactVerification.verification_id)).filter(
+                FactVerification.verified_at >= day_ago
+            ).scalar() or 0
+
+            avg_quality_1h = db.query(func.avg(DataQualityScore.quality_score)).filter(
+                DataQualityScore.created_at >= hour_ago
+            ).scalar()
+            avg_quality_24h = db.query(func.avg(DataQualityScore.quality_score)).filter(
+                DataQualityScore.created_at >= day_ago
+            ).scalar()
+            avg_quality_1h = round(avg_quality_1h, 2) if avg_quality_1h is not None else None
+            avg_quality_24h = round(avg_quality_24h, 2) if avg_quality_24h is not None else None
         
+        def metric_card(icon, label, value, value_class, meta_left, meta_right):
+            return dbc.Card(
+                dbc.CardBody([
+                    html.Div([
+                        html.Span(icon, className="me-1", style={"fontSize": "18px"}),
+                        html.Small(label, className="text-muted", style={"fontSize": "0.75rem"})
+                    ], className="d-flex align-items-center"),
+                    html.Div(f"{value}", className=f"{value_class} fw-bold", style={"fontSize": "1.3rem"}),
+                    html.Div([
+                        html.Small(meta_left, className="text-success me-2") if meta_left else None,
+                        html.Small(meta_right, className="text-info") if meta_right else None
+                    ], className="d-flex flex-wrap", style={"fontSize": "0.7rem"})
+                ], className="py-2 px-2"),
+                className="h-100"
+            )
+
+        quality_meta_1h = f"{avg_quality_1h:.2f} 1h" if avg_quality_1h is not None else "— 1h"
+        quality_meta_24h = f"{avg_quality_24h:.2f} 24h" if avg_quality_24h is not None else "— 24h"
+
         return html.Div([
             dbc.Row([
-                dbc.Col([
-                    html.Div([
-                        html.H4(f"{total_news:,}", className="text-primary mb-1"),
-                        html.Small("Total Articles", className="text-muted")
-                    ], className="text-center")
-                ], width=2),
-                dbc.Col([
-                    html.Div([
-                        html.H4(f"{total_processed:,}", className="text-success mb-1"),
-                        html.Small("Processed", className="text-muted")
-                    ], className="text-center")
-                ], width=2),
-                dbc.Col([
-                    html.Div([
-                        html.H4(f"{total_entities:,}", className="text-info mb-1"),
-                        html.Small("Entities", className="text-muted")
-                    ], className="text-center")
-                ], width=1),
-                dbc.Col([
-                    html.Div([
-                        html.H4(f"{total_predictions:,}", className="text-warning mb-1"),
-                        html.Small("Predictions", className="text-muted")
-                    ], className="text-center")
-                ], width=2),
-                dbc.Col([
-                    html.Div([
-                        html.H4(f"{total_impacts:,}", className="text-danger mb-1"),
-                        html.Small("Impact Scores", className="text-muted")
-                    ], className="text-center")
-                ], width=2),
-                dbc.Col([
-                    html.Div([
-                        html.H4(f"{total_surprises:,}", className="text-warning mb-1"),
-                        html.Small("Surprises", className="text-muted")
-                    ], className="text-center")
-                ], width=1),
-                dbc.Col([
-                    html.Div([
-                        html.H4(f"{total_fact_checks:,}", className="text-success mb-1"),
-                        html.Small("Fact Checks", className="text-muted")
-                    ], className="text-center")
-                ], width=1),
-                dbc.Col([
-                    html.Div([
-                        html.H4(f"{avg_quality:.2f}", className="text-primary mb-1"),
-                        html.Small("Avg Quality", className="text-muted")
-                    ], className="text-center")
-                ], width=1)
-            ])
+                dbc.Col(metric_card("📰", "Articles", f"{total_news:,}", "text-primary",
+                                    f"+{news_1h} 1h", f"+{news_24h} 24h"), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("🧠", "Processed", f"{total_processed:,}", "text-success",
+                                    f"+{processed_1h} 1h", f"+{processed_24h} 24h"), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("🏢", "Entities", f"{total_entities:,}", "text-info",
+                                    f"+{entities_1h} 1h", f"+{entities_24h} 24h"), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("🔮", "Predictions", f"{total_predictions:,}", "text-warning",
+                                    f"+{predictions_1h} 1h", f"+{predictions_24h} 24h"), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("💥", "Impacts", f"{total_impacts:,}", "text-danger",
+                                    f"+{impacts_1h} 1h", f"+{impacts_24h} 24h"), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("🎯", "Surprises", f"{total_surprises:,}", "text-warning",
+                                    f"+{surprises_1h} 1h", f"+{surprises_24h} 24h"), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("✅", "Fact Checks", f"{total_fact_checks:,}", "text-success",
+                                    f"+{fact_checks_1h} 1h", f"+{fact_checks_24h} 24h"), xs=6, sm=4, md=2),
+                dbc.Col(metric_card("⭐", "Avg Quality", f"{avg_quality:.2f}", "text-primary",
+                                    quality_meta_1h, quality_meta_24h), xs=6, sm=4, md=2),
+            ], className="g-2 mb-2")
         ])
     except Exception as e:
         import logging
@@ -350,14 +555,22 @@ def get_statistics_metrics(engine):
         ])
 
 
-def get_event_distribution_chart(engine):
+def get_event_distribution_chart(engine, date_range=None):
     """Get event type distribution chart"""
     try:
+        start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
-            event_data = db.query(
+            query = db.query(
                 ProcessedNews.event_type,
-            func.count(ProcessedNews.news_id).label('count')
-        ).group_by(ProcessedNews.event_type).all()
+                func.count(ProcessedNews.news_id).label('count')
+            ).group_by(ProcessedNews.event_type)
+
+            if start_date:
+                query = query.filter(ProcessedNews.processing_timestamp >= start_date)
+            if end_date:
+                query = query.filter(ProcessedNews.processing_timestamp <= end_date)
+
+            event_data = query.all()
         
         if not event_data:
             return {}
@@ -396,11 +609,17 @@ def get_event_distribution_chart(engine):
         return fig
 
 
-def get_quality_distribution_chart(engine):
+def get_quality_distribution_chart(engine, date_range=None):
     """Get quality distribution chart"""
     try:
+        start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
-            quality_data = db.query(DataQualityScore.quality_score).all()
+            query = db.query(DataQualityScore.quality_score)
+            if start_date:
+                query = query.filter(DataQualityScore.created_at >= start_date)
+            if end_date:
+                query = query.filter(DataQualityScore.created_at <= end_date)
+            quality_data = query.all()
         
         if not quality_data:
             return {}
@@ -438,13 +657,19 @@ def get_quality_distribution_chart(engine):
         return fig
 
 
-def get_sentiment_distribution_chart(engine):
+def get_sentiment_distribution_chart(engine, date_range=None):
     """Get sentiment distribution chart"""
     try:
+        start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
-            sentiments_data = db.query(ProcessedNews.sentiment).filter(
+            query = db.query(ProcessedNews.sentiment).filter(
                 ProcessedNews.sentiment.isnot(None)
-            ).all()
+            )
+            if start_date:
+                query = query.filter(ProcessedNews.processing_timestamp >= start_date)
+            if end_date:
+                query = query.filter(ProcessedNews.processing_timestamp <= end_date)
+            sentiments_data = query.all()
         
         if not sentiments_data:
             import plotly.graph_objects as go
@@ -526,11 +751,17 @@ def get_sentiment_distribution_chart(engine):
         return fig
 
 
-def get_impact_distribution_chart(engine):
+def get_impact_distribution_chart(engine, date_range=None):
     """Get impact score distribution chart"""
     try:
+        start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
-            impact_scores = db.query(ImpactScore.impact_score).all()
+            query = db.query(ImpactScore.impact_score)
+            if start_date:
+                query = query.filter(ImpactScore.created_at >= start_date)
+            if end_date:
+                query = query.filter(ImpactScore.created_at <= end_date)
+            impact_scores = query.all()
         
         if not impact_scores:
             import plotly.graph_objects as go
@@ -590,18 +821,29 @@ def get_impact_distribution_chart(engine):
         return fig
 
 
-def get_top_entities_list(engine):
+def get_top_entities_list(engine, date_range=None):
     """Get top entities by mentions"""
     try:
+        start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
-            top_entities = db.query(
+            query = db.query(
                 Entity.entity_name,
                 Entity.entity_id,
                 func.count(NewsEntityMapping.mapping_id).label('mentions')
             ).join(
                 NewsEntityMapping,
                 Entity.entity_id == NewsEntityMapping.entity_id
-            ).group_by(
+            ).join(
+                RawNews,
+                NewsEntityMapping.news_id == RawNews.news_id
+            )
+
+            if start_date:
+                query = query.filter(RawNews.fetched_at >= start_date)
+            if end_date:
+                query = query.filter(RawNews.fetched_at <= end_date)
+
+            top_entities = query.group_by(
                 Entity.entity_name,
                 Entity.entity_id
             ).order_by(
@@ -634,22 +876,22 @@ def get_top_entities_list(engine):
         return html.P(f"Error loading entities: {str(e)[:50]}", className="text-danger")
 
 
-def get_entity_sentiment_chart(engine, timeframe="30d"):
+def get_entity_sentiment_chart(engine, date_range=None, timeframe="30d"):
     """Get entity sentiment analysis chart over time"""
     try:
         from datetime import datetime, timedelta
-        from sqlalchemy import and_
         import json
         
         with Session(engine) as db:
-            # Calculate cutoff date
-            cutoff_date = None
-            if timeframe == "7d":
-                cutoff_date = datetime.now() - timedelta(days=7)
-            elif timeframe == "30d":
-                cutoff_date = datetime.now() - timedelta(days=30)
-            elif timeframe == "90d":
-                cutoff_date = datetime.now() - timedelta(days=90)
+            start_date, end_date = _parse_date_range(date_range)
+            if not start_date and not end_date:
+                # Fallback to timeframe when no explicit range is set
+                if timeframe == "7d":
+                    start_date = datetime.utcnow() - timedelta(days=7)
+                elif timeframe == "30d":
+                    start_date = datetime.utcnow() - timedelta(days=30)
+                elif timeframe == "90d":
+                    start_date = datetime.utcnow() - timedelta(days=90)
             
             # Query entity-news mappings with sentiment
             query = db.query(
@@ -667,8 +909,10 @@ def get_entity_sentiment_chart(engine, timeframe="30d"):
                 ProcessedNews.sentiment.isnot(None)
             )
             
-            if cutoff_date:
-                query = query.filter(RawNews.fetched_at >= cutoff_date)
+            if start_date:
+                query = query.filter(RawNews.fetched_at >= start_date)
+            if end_date:
+                query = query.filter(RawNews.fetched_at <= end_date)
             
             entity_sentiments = query.all()
         
@@ -766,17 +1010,27 @@ def get_entity_sentiment_chart(engine, timeframe="30d"):
         return fig
 
 
-def get_top_positive_entities(engine, search_term="", show_all=False):
-    """Get entities with positive news in last 30 days, optionally filtered by search"""
+def get_top_positive_entities(engine, search_term="", show_all=False, date_range=None):
+    """Get entities with positive news in selected range, optionally filtered by search"""
     try:
         from datetime import datetime, timedelta
         from sqlalchemy import and_
         import json
         
         with Session(engine) as db:
-            cutoff = datetime.now() - timedelta(days=30)
+            start_date, end_date = _parse_date_range(date_range)
+            using_default_range = not (start_date or end_date)
+            if using_default_range:
+                start_date = datetime.utcnow() - timedelta(days=30)
+            range_label = "selected range" if not using_default_range else "last 30 days"
             
             # Get entity-news with sentiments
+            filters = [ProcessedNews.sentiment.isnot(None)]
+            if start_date:
+                filters.append(RawNews.fetched_at >= start_date)
+            if end_date:
+                filters.append(RawNews.fetched_at <= end_date)
+
             results = db.query(
                 Entity.entity_name,
                 Entity.entity_id,
@@ -788,15 +1042,10 @@ def get_top_positive_entities(engine, search_term="", show_all=False):
                 RawNews, NewsEntityMapping.news_id == RawNews.news_id
             ).join(
                 ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-            ).filter(
-                and_(
-                    RawNews.fetched_at >= cutoff,
-                    ProcessedNews.sentiment.isnot(None)
-                )
-            ).all()
+            ).filter(and_(*filters)).all()
         
         if not results:
-            return html.P("No sentiment data in last 30 days", className="text-muted")
+            return html.P(f"No sentiment data in {range_label}", className="text-muted")
         
         # Calculate entity sentiment stats
         entity_stats = {}
@@ -846,7 +1095,7 @@ def get_top_positive_entities(engine, search_term="", show_all=False):
             return html.P(f"No entities found matching '{search_term}'", className="text-muted")
         
         if not sorted_entities:
-            return html.P("No positive sentiment entities in last 30 days", className="text-muted")
+            return html.P(f"No positive sentiment entities in {range_label}", className="text-muted")
         
         # Create display
         rows = []
@@ -888,16 +1137,26 @@ def get_top_positive_entities(engine, search_term="", show_all=False):
         return html.P(f"Error: {str(e)[:50]}", className="text-danger")
 
 
-def get_top_negative_entities(engine, search_term="", show_all=False):
-    """Get entities with negative news in last 30 days, optionally filtered by search"""
+def get_top_negative_entities(engine, search_term="", show_all=False, date_range=None):
+    """Get entities with negative news in selected range, optionally filtered by search"""
     try:
         from datetime import datetime, timedelta
         from sqlalchemy import and_
         import json
         
         with Session(engine) as db:
-            cutoff = datetime.now() - timedelta(days=30)
+            start_date, end_date = _parse_date_range(date_range)
+            using_default_range = not (start_date or end_date)
+            if using_default_range:
+                start_date = datetime.utcnow() - timedelta(days=30)
+            range_label = "selected range" if not using_default_range else "last 30 days"
             
+            filters = [ProcessedNews.sentiment.isnot(None)]
+            if start_date:
+                filters.append(RawNews.fetched_at >= start_date)
+            if end_date:
+                filters.append(RawNews.fetched_at <= end_date)
+
             results = db.query(
                 Entity.entity_name,
                 Entity.entity_id,
@@ -909,15 +1168,10 @@ def get_top_negative_entities(engine, search_term="", show_all=False):
                 RawNews, NewsEntityMapping.news_id == RawNews.news_id
             ).join(
                 ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-            ).filter(
-                and_(
-                    RawNews.fetched_at >= cutoff,
-                    ProcessedNews.sentiment.isnot(None)
-                )
-            ).all()
+            ).filter(and_(*filters)).all()
         
         if not results:
-            return html.P("No sentiment data in last 30 days", className="text-muted")
+            return html.P(f"No sentiment data in {range_label}", className="text-muted")
         
         # Calculate entity sentiment stats
         entity_stats = {}
@@ -973,7 +1227,7 @@ def get_top_negative_entities(engine, search_term="", show_all=False):
             return html.P(f"No entities found matching '{search_term}'", className="text-muted")
         
         if not sorted_entities:
-            return html.P("No negative sentiment entities in last 30 days", className="text-muted")
+            return html.P(f"No negative sentiment entities in {range_label}", className="text-muted")
         
         # Create display
         rows = []
@@ -1021,7 +1275,7 @@ def get_top_negative_entities(engine, search_term="", show_all=False):
         return html.P(f"Error: {str(e)[:50]}", className="text-danger")
 
 
-def get_entity_details_table(engine, search_term="", sort_column=None, sort_direction=None):
+def get_entity_details_table(engine, search_term="", sort_column=None, sort_direction=None, date_range=None):
     """
     Get detailed entity table with all tracked metrics and sortable columns
     
@@ -1030,12 +1284,20 @@ def get_entity_details_table(engine, search_term="", sort_column=None, sort_dire
         search_term: Search filter
         sort_column: Column to sort by (entity_name, type, id, mentions, impact_count, avg_impact)
         sort_direction: 'asc' or 'desc', None for default
+        date_range: Tuple of (start_date, end_date) or None for all time
     """
     try:
         import json
-        from sqlalchemy import or_
+        from sqlalchemy import or_, and_
         
         with Session(engine) as db:
+            start_date, end_date = _parse_date_range(date_range)
+            impact_join_conditions = [Entity.entity_id == ImpactScore.entity_id]
+            if start_date:
+                impact_join_conditions.append(ImpactScore.created_at >= start_date)
+            if end_date:
+                impact_join_conditions.append(ImpactScore.created_at <= end_date)
+
             # Base query
             query = db.query(
                 Entity.entity_name,
@@ -1048,13 +1310,20 @@ def get_entity_details_table(engine, search_term="", sort_column=None, sort_dire
             ).outerjoin(
                 NewsEntityMapping, Entity.entity_id == NewsEntityMapping.entity_id
             ).outerjoin(
-                ImpactScore, Entity.entity_id == ImpactScore.entity_id
+                RawNews, NewsEntityMapping.news_id == RawNews.news_id
+            ).outerjoin(
+                ImpactScore, and_(*impact_join_conditions)
             ).group_by(
                 Entity.entity_name,
                 Entity.entity_id,
                 Entity.entity_type,
                 Entity.metadata_
             )
+
+            if start_date:
+                query = query.filter(RawNews.fetched_at >= start_date)
+            if end_date:
+                query = query.filter(RawNews.fetched_at <= end_date)
             
             # Apply search filter
             if search_term:
@@ -1214,19 +1483,26 @@ def get_entity_details_table(engine, search_term="", sort_column=None, sort_dire
         return html.P(f"Error loading table: {str(e)[:50]}", className="text-danger")
 
 
-def get_news_volume_chart(engine):
+def get_news_volume_chart(engine, date_range=None):
     """Get news volume over time chart"""
     try:
+        start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
             # Query news by date (SQLite-compatible)
             from sqlalchemy import func as sql_func
             
-            volume_data = db.query(
+            query = db.query(
                 sql_func.date(RawNews.fetched_at).label('date'),
                 sql_func.count(RawNews.news_id).label('count')
             ).filter(
                 RawNews.fetched_at.isnot(None)
-            ).group_by(
+            )
+            if start_date:
+                query = query.filter(RawNews.fetched_at >= start_date)
+            if end_date:
+                query = query.filter(RawNews.fetched_at <= end_date)
+
+            volume_data = query.group_by(
                 sql_func.date(RawNews.fetched_at)
             ).order_by('date').all()
         

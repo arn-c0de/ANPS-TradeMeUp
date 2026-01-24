@@ -10,6 +10,7 @@ from src.models.processed_news import ProcessedNews
 from src.models.data_quality import DataQualityScore
 from src.models.analysis import MarketRegime, SurpriseScore, ImpactScore
 from src.models.predictions import Prediction, PredictionOutcome
+from src.models.trading_simulation import TradingSimulation
 
 __all__ = [
     "Base",
@@ -25,4 +26,5 @@ __all__ = [
     "ImpactScore",
     "Prediction",
     "PredictionOutcome",
+    "TradingSimulation",
 ]
