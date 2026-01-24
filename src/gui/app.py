@@ -1105,11 +1105,75 @@ def set_refresh_loading_state(refresh_clicks, button_ids, horizon, entities, sta
 
             # Add task to queue
             def refresh_task():
-                """Execute the refresh in background"""
+                """Execute the refresh in background - using same logic as Details view"""
                 try:
-                    from src.services.prediction_performance_service import prediction_performance_service
-                    result = prediction_performance_service.calculate_and_save_performance(engine, prediction_id)
-                    return result if result else {"status": "completed"}
+                    from sqlalchemy.orm import Session
+                    from src.models.predictions import Prediction, PredictionOutcome
+                    from src.models.entities import Entity
+                    from src.gui.tabs.predictions import _format_saved_performance
+                    import uuid
+                    from datetime import datetime
+                    
+                    with Session(engine) as db:
+                        # Get prediction and entity
+                        pred = db.query(Prediction).filter(
+                            Prediction.prediction_id == prediction_id
+                        ).first()
+                        
+                        if not pred:
+                            logger.warning(f"Prediction {prediction_id} not found")
+                            return {"status": "error", "error": "Prediction not found"}
+                        
+                        entity = db.query(Entity).filter(
+                            Entity.entity_id == pred.entity_id
+                        ).first()
+                        
+                        if not entity:
+                            logger.warning(f"Entity {pred.entity_id} not found")
+                            return {"status": "error", "error": "Entity not found"}
+                        
+                        # Get or create outcome
+                        outcome = db.query(PredictionOutcome).filter(
+                            PredictionOutcome.prediction_id == prediction_id
+                        ).first()
+                        
+                        if not outcome:
+                            outcome = PredictionOutcome(
+                                outcome_id=uuid.uuid4(),
+                                prediction_id=prediction_id,
+                                actual_return=0,
+                                error=0,
+                                direction_correct=False,
+                                within_confidence_interval=True,
+                                sharpe_contribution=0,
+                                evaluation_timestamp=datetime.now(),
+                                created_at=datetime.now()
+                            )
+                            db.add(outcome)
+                            db.flush()  # Get the ID but don't commit yet
+                        
+                        # Calculate performance using SAME logic as Details view
+                        performance = _format_saved_performance(pred, entity, outcome, load_live_prices=True)
+                        
+                        if not performance:
+                            return {"status": "error", "error": "Could not calculate performance"}
+                        
+                        # Update outcome with calculated values
+                        outcome.actual_return = performance.get('total_return_pct', 0)
+                        outcome.error = abs(performance.get('total_return_pct', 0))
+                        outcome.direction_correct = performance.get('is_correct', False)
+                        outcome.evaluation_timestamp = datetime.now()
+                        
+                        db.commit()
+                        
+                        logger.info(f"✅ Saved performance for {prediction_id}: {outcome.actual_return:.2f}%")
+                        
+                        return {
+                            "status": "success",
+                            "total_return_pct": performance.get('total_return_pct', 0),
+                            "is_correct": performance.get('is_correct', False)
+                        }
+                        
                 except Exception as e:
                     logger.error(f"Error in refresh_task for {prediction_id}: {e}", exc_info=True)
                     return {"status": "error", "error": str(e)}
@@ -1126,23 +1190,14 @@ def set_refresh_loading_state(refresh_clicks, button_ids, horizon, entities, sta
                 priority=1
             )
 
-            # Generate table with loading state
-            date_range = (start_date, end_date) if start_date or end_date else None
-            table_with_loading = predictions.get_predictions_table(
-                engine,
-                entity_filter=entities,
-                date_range=date_range,
-                min_confidence=min_conf or 0,
-                horizon=horizon or '5d',
-                surprise_filter=surprise_filter or 'all',
-                refreshing_prediction_id=prediction_id
-            )
+            # Don't regenerate table - keep current data and just show toast
+            # The table will be updated when task completes
 
             # Toast notification about queue
-            toast_msg = f"Task queued (position: {queue_size + 1})" if queue_size > 0 else "Processing..."
+            toast_msg = f"Refreshing... (queue position: {queue_size + 1})" if queue_size > 0 else "🔄 Refreshing performance..."
             toast_icon = "info"
 
-            return {"prediction_id": prediction_id, "task_id": task_id}, table_with_loading, True, toast_msg, toast_icon
+            return {"prediction_id": prediction_id, "task_id": task_id}, dash.no_update, True, toast_msg, toast_icon
 
     return {}, dash.no_update, False, "", "info"
 
@@ -1191,6 +1246,15 @@ def refresh_prediction_performance(n_intervals, loading_state, horizon, entities
     
     # Task completed or failed - update UI
     try:
+        # Delay to ensure database commit is complete and visible
+        import time
+        time.sleep(0.5)  # Increased from 0.3 to ensure commit is visible
+        
+        # Log the result before regenerating table
+        if status == TaskStatus.COMPLETED:
+            result = queue_mgr.get_task_result(task_id)
+            logger.info(f"📊 Task completed, result: {result}")
+        
         date_range = (start_date, end_date) if start_date or end_date else None
         table = predictions.get_predictions_table(
             engine,

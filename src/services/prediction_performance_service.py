@@ -300,6 +300,11 @@ class PredictionPerformanceService:
             True if saved successfully
         """
         try:
+            actual_return_value = performance_data.get('total_return_pct', 0)
+            is_correct_value = performance_data.get('is_correct', False)
+            
+            logger.info(f"💾 Saving to DB: prediction_id={prediction_id}, actual_return={actual_return_value}, is_correct={is_correct_value}")
+            
             # Check if outcome already exists
             existing = db_session.query(PredictionOutcome).filter(
                 PredictionOutcome.prediction_id == prediction_id
@@ -308,36 +313,39 @@ class PredictionPerformanceService:
             if existing:
                 # Update existing - use proper SQLAlchemy update
                 from sqlalchemy import update
+                logger.info(f"📝 Updating existing outcome (current value: {existing.actual_return})")
                 db_session.execute(
                     update(PredictionOutcome)
                     .where(PredictionOutcome.prediction_id == prediction_id)
                     .values(
-                        actual_return=performance_data.get('total_return_pct', 0),
-                        error=abs(performance_data.get('total_return_pct', 0)),
-                        direction_correct=performance_data.get('is_correct', False),
+                        actual_return=actual_return_value,
+                        error=abs(actual_return_value),
+                        direction_correct=is_correct_value,
                         within_confidence_interval=True,
                         sharpe_contribution=0.0,
                         evaluation_timestamp=performance_data.get('timestamp', datetime.now())
                     )
                 )
-                logger.info(f"Updated existing outcome for prediction {prediction_id}")
+                logger.info(f"✅ Updated existing outcome for prediction {prediction_id} with value {actual_return_value}")
             else:
                 # Create new
+                logger.info(f"📝 Creating new outcome")
                 outcome = PredictionOutcome(
                     outcome_id=uuid.uuid4(),
                     prediction_id=prediction_id,
-                    actual_return=performance_data.get('total_return_pct', 0),
-                    error=abs(performance_data.get('total_return_pct', 0)),
-                    direction_correct=performance_data.get('is_correct', False),
+                    actual_return=actual_return_value,
+                    error=abs(actual_return_value),
+                    direction_correct=is_correct_value,
                     within_confidence_interval=True,  # TODO: implement proper check
                     sharpe_contribution=0,  # TODO: calculate
                     evaluation_timestamp=performance_data.get('timestamp', datetime.now()),
                     created_at=datetime.now()
                 )
                 db_session.add(outcome)
+                logger.info(f"✅ Created new outcome for prediction {prediction_id} with value {actual_return_value}")
             
             db_session.commit()
-            logger.info(f"Saved performance for prediction {prediction_id}")
+            logger.info(f"💾 Committed changes to database for prediction {prediction_id}")
             return True
             
         except Exception as e:
@@ -380,12 +388,18 @@ class PredictionPerformanceService:
                 # Calculate performance
                 performance = self.get_prediction_performance(prediction, entity)
                 
+                logger.info(f"📊 Performance calculated for {prediction_id}: {performance}")
+                
                 if not performance:
+                    logger.warning(f"No performance data calculated for {prediction_id}")
                     return {"status": "no_data", "error": "No market data available"}
                 
-                # Save performance
+                logger.info(f"💾 Saving performance: total_return_pct={performance.get('total_return_pct')}, is_correct={performance.get('is_correct')}")
+                
+                # Save performance (this will commit internally)
                 success = self.save_prediction_performance(prediction_id, performance, db)
-                db.commit()
+                
+                logger.info(f"✅ Save operation result for {prediction_id}: success={success}")
                 
                 if success:
                     return {
