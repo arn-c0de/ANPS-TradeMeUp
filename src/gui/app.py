@@ -1226,16 +1226,19 @@ def refresh_prediction_performance(n_intervals, loading_state, horizon, entities
         # Check if we have an active task
         if not loading_state or "task_id" not in loading_state:
             raise dash.exceptions.PreventUpdate
-        
+
         task_id = loading_state.get("task_id")
         prediction_id = loading_state.get("prediction_id")
-        
+
         if not task_id or not prediction_id:
             raise dash.exceptions.PreventUpdate
-        
+
         # Check task status
         queue_mgr = get_task_queue()
         status = queue_mgr.get_task_status(task_id)
+    except dash.exceptions.PreventUpdate:
+        # Let PreventUpdate propagate without logging - it's normal Dash control flow
+        raise
     except Exception as e:
         logger.error(f"Error in refresh_prediction_performance: {e}", exc_info=True)
         raise dash.exceptions.PreventUpdate

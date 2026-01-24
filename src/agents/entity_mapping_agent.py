@@ -54,6 +54,76 @@ class EntityMappingAgent:
         'Telecom': 'TELECOM'
     }
 
+    # Theme/Sector to ETF mappings for macro/sector news
+    THEME_TO_ETF = {
+        # Major Indices
+        's&p 500': [('SPY', 'S&P 500 ETF')],
+        's&p': [('SPY', 'S&P 500 ETF')],
+        'nasdaq': [('QQQ', 'Nasdaq-100 ETF')],
+        'dow jones': [('DIA', 'Dow Jones ETF')],
+        'russell': [('IWM', 'Russell 2000 ETF')],
+        
+        # Sectors
+        'technology': [('XLK', 'Technology Sector ETF'), ('QQQ', 'Tech-heavy Nasdaq')],
+        'tech sector': [('XLK', 'Technology Sector ETF')],
+        'software': [('IGV', 'Software ETF')],
+        'semiconductor': [('SMH', 'Semiconductor ETF'), ('SOXX', 'Semiconductor ETF')],
+        'chip': [('SMH', 'Semiconductor ETF')],
+        'ai': [('BOTZ', 'AI & Robotics ETF'), ('XLK', 'Technology ETF')],
+        'artificial intelligence': [('BOTZ', 'AI & Robotics ETF')],
+        
+        'financial': [('XLF', 'Financial Sector ETF')],
+        'bank': [('XLF', 'Financial Sector ETF'), ('KBE', 'Bank ETF')],
+        'insurance': [('KIE', 'Insurance ETF')],
+        
+        'healthcare': [('XLV', 'Healthcare Sector ETF')],
+        'biotech': [('XBI', 'Biotech ETF'), ('IBB', 'Biotech ETF')],
+        'pharmaceutical': [('XPH', 'Pharmaceutical ETF')],
+        
+        'energy': [('XLE', 'Energy Sector ETF')],
+        'oil': [('XLE', 'Energy ETF'), ('USO', 'Oil Fund')],
+        'natural gas': [('UNG', 'Natural Gas Fund')],
+        'clean energy': [('ICLN', 'Clean Energy ETF')],
+        'solar': [('TAN', 'Solar ETF')],
+        
+        'consumer': [('XLP', 'Consumer Staples ETF'), ('XLY', 'Consumer Discretionary ETF')],
+        'retail': [('XRT', 'Retail ETF')],
+        
+        'industrial': [('XLI', 'Industrial Sector ETF')],
+        'aerospace': [('ITA', 'Aerospace ETF')],
+        'defense': [('ITA', 'Aerospace & Defense ETF')],
+        
+        'real estate': [('VNQ', 'Real Estate ETF'), ('XLRE', 'Real Estate ETF')],
+        'reit': [('VNQ', 'REIT ETF')],
+        
+        'materials': [('XLB', 'Materials Sector ETF')],
+        'gold': [('GLD', 'Gold ETF')],
+        'silver': [('SLV', 'Silver ETF')],
+        'commodity': [('DBC', 'Commodity ETF')],
+        
+        'utility': [('XLU', 'Utilities Sector ETF')],
+        'utilities': [('XLU', 'Utilities Sector ETF')],
+        
+        # International/Currency
+        'china': [('FXI', 'China Large-Cap ETF'), ('MCHI', 'China ETF')],
+        'japan': [('EWJ', 'Japan ETF')],
+        'japanese yen': [('FXY', 'Japanese Yen ETF')],
+        'yen': [('FXY', 'Japanese Yen ETF')],
+        'europe': [('VGK', 'European ETF')],
+        'emerging market': [('EEM', 'Emerging Markets ETF')],
+        'dollar': [('UUP', 'US Dollar ETF')],
+        
+        # Bonds/Fixed Income
+        'bond': [('AGG', 'Bond Aggregate ETF'), ('TLT', 'Long-term Treasury ETF')],
+        'treasury': [('TLT', '20+ Year Treasury ETF')],
+        'corporate bond': [('LQD', 'Corporate Bond ETF')],
+        'high yield': [('HYG', 'High Yield Bond ETF')],
+        
+        # Volatility
+        'volatility': [('VXX', 'VIX Short-term Futures ETF')],
+        'vix': [('VXX', 'VIX Futures ETF')],
+    }
+
     def __init__(self):
         """
         Initialize entity mapping agent.
@@ -98,6 +168,47 @@ Provide JSON format:
 Types: company, sector, person, location
 Exposure: direct, indirect, supply_chain
 Respond ONLY with JSON."""
+
+    def _extract_theme_mappings(self, article: RawNews) -> List[Dict]:
+        """Extract theme/sector-based ETF mappings from article."""
+        theme_entities = []
+        
+        # Combine title and text for theme detection
+        content = f"{article.title} {article.full_text}".lower()
+        
+        # Check for each theme (use word boundaries for short terms)
+        import re
+        for theme, etfs in self.THEME_TO_ETF.items():
+            # Use word boundaries for short keywords to avoid false matches
+            if len(theme) <= 3:
+                pattern = rf'\b{re.escape(theme)}\b'
+                if not re.search(pattern, content):
+                    continue
+                match_count = len(re.findall(pattern, content))
+            else:
+                if theme not in content:
+                    continue
+                match_count = content.count(theme)
+            
+            for ticker, name in etfs:
+                theme_entities.append({
+                    'text': name,
+                    'type': 'sector_etf',
+                    'ticker': ticker,
+                    'confidence': 0.75,  # Lower confidence for theme-based
+                    'exposure_type': 'indirect',
+                    'mention_count': match_count
+                })
+        
+        # Deduplicate by ticker (keep first occurrence)
+        seen_tickers = set()
+        unique_entities = []
+        for entity in theme_entities:
+            if entity['ticker'] not in seen_tickers:
+                seen_tickers.add(entity['ticker'])
+                unique_entities.append(entity)
+        
+        return unique_entities
 
     def _normalize_ticker(self, company_name: str, suggested_ticker: Optional[str] = None) -> Optional[str]:
         """
@@ -144,7 +255,7 @@ Respond ONLY with JSON."""
         logger.debug(f"Could not validate ticker for: {company_name}")
         return None
 
-    def process_batch(self, limit: int = 20) -> Dict:
+    def process_batch(self, limit: int = 20, offset: int = 0) -> Dict:
         """
         Process batch of articles without entity mappings.
 
@@ -154,6 +265,7 @@ Respond ONLY with JSON."""
 
         Args:
             limit: Maximum number of articles to process
+            offset: Number of articles to skip (for pagination)
 
         Returns:
             Statistics dictionary
@@ -161,7 +273,7 @@ Respond ONLY with JSON."""
         # Use scoped session for isolation
         with get_scoped_session() as db:
             # Find processed articles without entity mappings
-            articles = self._find_articles_without_mappings(db, limit)
+            articles = self._find_articles_without_mappings(db, limit, offset)
 
             if not articles:
                 logger.info("No articles to process for entity mapping")
@@ -187,8 +299,10 @@ Respond ONLY with JSON."""
             all_mappings = []
 
             # Process all articles WITHOUT committing
-            for article in articles:
+            for idx, article in enumerate(articles, 1):
                 try:
+                    logger.info(f"Processing article {idx}/{len(articles)}: {article.news_id}")
+                    
                     # Extract entities and create mappings (without commit)
                     entities, mappings = self._process_article_no_commit(db, article)
 
@@ -204,17 +318,29 @@ Respond ONLY with JSON."""
                                 stats['companies_found'] += 1
                             elif entity.entity_type == 'sector':
                                 stats['sectors_found'] += 1
+                        
+                        logger.info(f"  ✅ Found {len(entities)} entities, {len(mappings)} mappings")
+                    else:
+                        logger.warning(f"  ⚠️ No entities/mappings extracted for article {article.news_id}")
 
                 except Exception as e:
                     # Log error but CONTINUE processing other articles
-                    logger.error(f"Error processing article {article.news_id}: {e}")
+                    logger.error(f"❌ Error processing article {article.news_id}: {e}")
                     stats['errors'] += 1
                     continue
 
-            # ✅ CRITICAL: Bulk save all entities and mappings
+            # ✅ CRITICAL: Deduplicate entities before bulk save
             if all_entities:
-                db.bulk_save_objects(all_entities)
-                logger.info(f"Bulk saved {len(all_entities)} entities")
+                # Remove duplicate entities (same entity_id)
+                seen_ids = set()
+                unique_entities = []
+                for entity in all_entities:
+                    if entity.entity_id not in seen_ids:
+                        seen_ids.add(entity.entity_id)
+                        unique_entities.append(entity)
+                
+                db.bulk_save_objects(unique_entities)
+                logger.info(f"Bulk saved {len(unique_entities)} unique entities (from {len(all_entities)} total)")
 
             if all_mappings:
                 db.bulk_save_objects(all_mappings)
@@ -226,13 +352,14 @@ Respond ONLY with JSON."""
             logger.info(f"Entity mapping complete. Stats: {stats}")
             return stats
 
-    def _find_articles_without_mappings(self, db: Session, limit: int) -> List[RawNews]:
+    def _find_articles_without_mappings(self, db: Session, limit: int, offset: int = 0) -> List[RawNews]:
         """
         Find processed articles without entity mappings.
 
         Args:
             db: Database session
             limit: Maximum number to return
+            offset: Number of articles to skip (for pagination)
 
         Returns:
             List of RawNews objects
@@ -249,7 +376,7 @@ Respond ONLY with JSON."""
             NewsEntityMapping.mapping_id.is_(None)
         ).order_by(
             RawNews.published_at.desc()  # Newest first
-        ).limit(limit).all()
+        ).limit(limit).offset(offset).all()
 
         return articles
 
@@ -275,7 +402,11 @@ Respond ONLY with JSON."""
             extraction = self._extract_entities(db, article)
             entities_data = extraction.get('entities', [])
 
-            logger.debug(f"Extracted {len(entities_data)} entities from article {article.news_id}")
+            # ✨ NEW: Add theme-based ETF mappings (for macro/sector news)
+            theme_entities = self._extract_theme_mappings(article)
+            entities_data.extend(theme_entities)
+
+            logger.debug(f"Extracted {len(entities_data)} entities from article {article.news_id} ({len(theme_entities)} theme-based)")
 
             new_entities = []
             mappings = []
@@ -346,6 +477,34 @@ Respond ONLY with JSON."""
                             created_at=datetime.utcnow()
                         )
                         mappings.append(mapping)
+
+                # ✨ NEW: Handle sector ETFs (theme-based mappings)
+                elif entity_type == 'sector_etf':
+                    ticker = suggested_ticker or ent.get('ticker')
+                    
+                    if ticker:
+                        # Create ETF entity
+                        entity = self._get_or_create_entity_no_commit(
+                            db,
+                            entity_id=ticker,
+                            entity_type='etf',
+                            entity_name=entity_text,
+                            metadata={'category': 'sector_theme'}
+                        )
+
+                        if entity:
+                            new_entities.append(entity)
+
+                            # Create mapping with indirect exposure
+                            mapping = NewsEntityMapping(
+                                news_id=str(article.news_id),
+                                entity_id=ticker,
+                                exposure_type='indirect',
+                                confidence=confidence,
+                                mention_count=mention_count,
+                                created_at=datetime.utcnow()
+                            )
+                            mappings.append(mapping)
 
                 # Handle people (optional - store as metadata for now)
                 elif entity_type == 'person':
