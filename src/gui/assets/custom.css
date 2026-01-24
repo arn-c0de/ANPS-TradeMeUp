@@ -796,3 +796,35 @@ pre {
     transition: opacity 0.1s ease;
     letter-spacing: 1px;
 }
+
+/* Create New Simulations – native <details> toggle */
+.create-sim-details {
+    border: none !important;
+    outline: none !important;
+}
+.create-sim-summary {
+    display: block;
+    cursor: pointer;
+    padding: 0.5rem 1rem;
+    font-size: 0.95rem;
+    color: #fff !important;
+    background-color: #222 !important;
+    border-bottom: 1px solid #444 !important;
+    list-style: none;
+    user-select: none;
+}
+.create-sim-summary::-webkit-details-marker,
+.create-sim-summary::marker {
+    display: none;
+}
+.create-sim-summary::before {
+    content: "▸ ";
+    opacity: 0.7;
+    margin-right: 0.25rem;
+}
+.create-sim-details[open] .create-sim-summary::before {
+    content: "▾ ";
+}
+.create-sim-summary:hover {
+    background-color: #2a2a2a !important;
+}
