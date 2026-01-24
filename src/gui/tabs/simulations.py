@@ -5,17 +5,19 @@ Simulations Tab - View trading simulation outcomes
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 from datetime import datetime, timedelta
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from src.models.trading_simulation import TradingSimulation
 from src.models.entities import Entity
+from src.models.predictions import Prediction
 
 
 def create_layout():
     """Create simulations tab layout"""
     return html.Div([
         dcc.Store(id="sim-delete-status"),
+        dcc.Store(id="sim-filter-sync-store", data={"entities": None, "horizon": None}),
         dbc.Container([
             # Create New Simulations Section (native <details> – instant expand/collapse, no JS)
             dbc.Row([
@@ -45,8 +47,8 @@ def create_layout():
                                             html.Small("Date Range", className="text-muted d-block mb-1"),
                                             dcc.DatePickerRange(
                                                 id="create-sim-date-range",
-                                                start_date=(datetime.now() - timedelta(days=7)).date(),
-                                                end_date=datetime.now().date(),
+                                                start_date=None,
+                                                end_date=None,
                                                 persistence=True,
                                                 persistence_type="local",
                                                 className="small",
@@ -182,7 +184,20 @@ def create_layout():
             dbc.Row([
                 dbc.Col([
                     dbc.Card([
-                        dbc.CardHeader(html.H6("🧪 Trading Simulations"), className="py-1"),
+                        dbc.CardHeader([
+                            dbc.Row([
+                                dbc.Col(html.H6("🧪 Trading Simulations"), className="d-flex align-items-center"),
+                                dbc.Col([
+                                    dbc.Button(
+                                        "🗑️ Clear All Simulations",
+                                        id="btn-clear-all-simulations",
+                                        color="danger",
+                                        size="sm",
+                                        className="float-end"
+                                    )
+                                ], width="auto")
+                            ], className="g-0")
+                        ], className="py-1"),
                         dbc.CardBody([
                             html.Small("Simulation results generated from predictions vs market data", className="text-muted d-block mb-2"),
                             html.Div(
@@ -192,7 +207,20 @@ def create_layout():
                         ])
                     ])
                 ], width=12)
-            ])
+            ]),
+            
+            # Clear All Simulations Confirmation Modal
+            dbc.Modal([
+                dbc.ModalHeader(dbc.ModalTitle("⚠️ Confirm Delete All Simulations")),
+                dbc.ModalBody([
+                    html.P("Are you sure you want to delete ALL simulations? This action cannot be undone."),
+                    html.P(html.Strong("This will permanently remove all simulation data from the database."), className="text-danger")
+                ]),
+                dbc.ModalFooter([
+                    dbc.Button("Cancel", id="btn-cancel-clear-simulations", color="secondary", className="me-2"),
+                    dbc.Button("Delete All", id="btn-confirm-clear-simulations", color="danger")
+                ])
+            ], id="modal-clear-all-simulations", is_open=False)
         ], fluid=True)
     ])
 
@@ -333,20 +361,84 @@ def _normalize_date(value):
     return value
 
 
-def get_entity_options(engine, date_range=None):
-    """Get available entities for dropdown filter."""
+def get_prediction_entity_options(engine, date_range=None):
+    """Get available entities from predictions for creating simulations, with prediction counts."""
     try:
         with Session(engine) as db:
-            query = db.query(Entity).filter(Entity.entity_type == "company")
+            # Base query: get entities with prediction counts
+            query = db.query(
+                Entity,
+                func.count(Prediction.prediction_id).label('pred_count')
+            ).join(
+                Prediction,
+                Prediction.entity_id == Entity.entity_id
+            )
 
+            # Apply date range filter if provided
             if date_range and len(date_range) == 2 and (date_range[0] or date_range[1]):
                 start, end = date_range
                 start = _normalize_date(start)
                 end = _normalize_date(end)
-                query = query.join(
-                    TradingSimulation,
-                    TradingSimulation.entity_id == Entity.entity_id
-                )
+                
+                # Filter predictions by date range
+                if start:
+                    query = query.filter(
+                        Prediction.created_at >= datetime.combine(start, datetime.min.time())
+                    )
+                if end:
+                    query = query.filter(
+                        Prediction.created_at <= datetime.combine(end, datetime.max.time())
+                    )
+
+            # Group by entity to get counts
+            query = query.group_by(Entity.entity_id, Entity.entity_name).having(
+                func.count(Prediction.prediction_id) > 0
+            ).order_by(Entity.entity_name)
+
+            results = query.all()
+
+            return [
+                {
+                    "label": f"{entity.entity_name} ({entity.entity_id}) - {pred_count} Prediction{'s' if pred_count != 1 else ''}",
+                    "value": entity.entity_id
+                }
+                for entity, pred_count in results
+            ]
+    except Exception as e:
+        # Fallback: return entities without counts if there's an error
+        try:
+            with Session(engine) as db:
+                entities = db.query(Entity).join(
+                    Prediction, Prediction.entity_id == Entity.entity_id
+                ).distinct().order_by(Entity.entity_name).all()
+                return [
+                    {"label": f"{e.entity_name} ({e.entity_id})", "value": e.entity_id}
+                    for e in entities
+                ]
+        except Exception:
+            return []
+
+
+def get_entity_options(engine, date_range=None):
+    """Get available entities for dropdown filter with simulation counts."""
+    try:
+        with Session(engine) as db:
+            # Base query: get entities with simulation counts
+            query = db.query(
+                Entity,
+                func.count(TradingSimulation.simulation_id).label('sim_count')
+            ).outerjoin(
+                TradingSimulation,
+                TradingSimulation.entity_id == Entity.entity_id
+            ).filter(Entity.entity_type == "company")
+
+            # Apply date range filter if provided
+            if date_range and len(date_range) == 2 and (date_range[0] or date_range[1]):
+                start, end = date_range
+                start = _normalize_date(start)
+                end = _normalize_date(end)
+                
+                # Filter simulations by date range
                 if start:
                     query = query.filter(
                         TradingSimulation.created_at >= datetime.combine(start, datetime.min.time())
@@ -355,13 +447,33 @@ def get_entity_options(engine, date_range=None):
                     query = query.filter(
                         TradingSimulation.created_at <= datetime.combine(end, datetime.max.time())
                     )
-                query = query.distinct()
 
-            entities = query.order_by(Entity.entity_name).all()
+            # Group by entity to get counts
+            query = query.group_by(Entity.entity_id, Entity.entity_name)
+            
+            # If no date filter, only show entities that have simulations
+            if not (date_range and len(date_range) == 2 and (date_range[0] or date_range[1])):
+                query = query.having(func.count(TradingSimulation.simulation_id) > 0)
+            
+            query = query.order_by(Entity.entity_name)
+
+            results = query.all()
 
             return [
-                {"label": f"{e.entity_name} ({e.entity_id})", "value": e.entity_id}
-                for e in entities
+                {
+                    "label": f"{entity.entity_name} ({entity.entity_id}) - {sim_count} Simulation{'s' if sim_count != 1 else ''}",
+                    "value": entity.entity_id
+                }
+                for entity, sim_count in results
             ]
-    except Exception:
-        return []
+    except Exception as e:
+        # Fallback: return entities without counts if there's an error
+        try:
+            with Session(engine) as db:
+                entities = db.query(Entity).filter(Entity.entity_type == "company").order_by(Entity.entity_name).all()
+                return [
+                    {"label": f"{e.entity_name} ({e.entity_id})", "value": e.entity_id}
+                    for e in entities
+                ]
+        except Exception:
+            return []
