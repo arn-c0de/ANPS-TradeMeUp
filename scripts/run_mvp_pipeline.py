@@ -91,7 +91,7 @@ def main():
         print_section("PHASE 2: Quality Assessment (Agent 1.5)")
 
         activity_logger.log_agent_start("Data Quality Agent", "2")
-        quality = DataQualityAgent(db)
+        quality = DataQualityAgent()
         quality_results = quality.process_batch(limit=50)
         logger.info(f"Quality Results: {quality_results}")
 
@@ -107,7 +107,7 @@ def main():
         activity_logger.log_activity(f"Using LLM Provider: {settings.llm_provider}", "INFO")
 
         activity_logger.log_agent_start("Content Understanding Agent", "3")
-        content = ContentUnderstandingAgent(db)
+        content = ContentUnderstandingAgent()
         content_results = content.process_batch(limit=3)  # Small batch for LLM
         logger.info(f"Content Analysis: {content_results}")
 
@@ -120,7 +120,7 @@ def main():
         print_section("PHASE 4: Entity Mapping (Agent 3)")
 
         activity_logger.log_agent_start("Entity Mapping Agent", "4")
-        entities = EntityMappingAgent(db)
+        entities = EntityMappingAgent()
         entity_results = entities.process_batch(limit=3)
         logger.info(f"Entity Mapping: {entity_results}")
 
@@ -146,7 +146,7 @@ def main():
         print_section("PHASE 6: Surprise Quantification (Agent 4.5)")
 
         activity_logger.log_agent_start("Surprise Quantification Agent", "6")
-        surprise = SurpriseQuantificationAgent(db)
+        surprise = SurpriseQuantificationAgent()
         surprise_results = surprise.process_batch(limit=10)
         logger.info(f"Surprise Analysis: {surprise_results}")
 
@@ -159,7 +159,7 @@ def main():
         print_section("PHASE 7: Impact Scoring (Agent 4)")
 
         activity_logger.log_agent_start("Impact Scoring Agent", "7")
-        impact = ImpactScoringAgent(db)
+        impact = ImpactScoringAgent()
         impact_results = impact.process_batch(limit=5)
         logger.info(f"Impact Scoring: {impact_results}")
 
@@ -174,7 +174,7 @@ def main():
         print_section("PHASE 8: Prediction Generation (Agent 6)")
 
         activity_logger.log_agent_start("Prediction Agent", "8")
-        predictor = PredictionAgent(db)
+        predictor = PredictionAgent()
         pred_results = predictor.process_batch(limit=5)
         logger.info(f"Prediction Generation: {pred_results}")
 
