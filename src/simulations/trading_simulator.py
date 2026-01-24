@@ -372,18 +372,24 @@ class TradingSimulationEngine:
             else:
                 if entity_filter:
                     query = query.filter(Prediction.entity_id.in_(entity_filter))
+                    logger.info(f"Filtering by entities: {entity_filter}")
                 if horizon_filter and horizon_filter != "all":
                     query = query.filter(Prediction.horizon == horizon_filter)
+                    logger.info(f"Filtering by horizon: {horizon_filter}")
                 if date_range and len(date_range) == 2:
                     start, end = date_range
                     if start:
                         query = query.filter(Prediction.created_at >= start)
                     if end:
                         query = query.filter(Prediction.created_at <= end)
+                    logger.info(f"Filtering by date range: {start} to {end}")
 
             predictions = query.order_by(Prediction.created_at.desc()).limit(limit).all()
+            
+            logger.info(f"Found {len(predictions)} predictions matching filters (limit: {limit})")
 
             if not predictions:
+                logger.warning("No predictions found matching the filters")
                 return stats
 
             for prediction in predictions:
@@ -392,6 +398,7 @@ class TradingSimulationEngine:
                         Entity.entity_id == prediction.entity_id
                     ).first()
                     if not entity:
+                        logger.warning(f"Entity not found for prediction {prediction.prediction_id}, entity_id: {prediction.entity_id}")
                         stats["skipped"] += 1
                         continue
 
@@ -401,16 +408,19 @@ class TradingSimulationEngine:
 
                     simulation = self.simulate_prediction(db, prediction, entity)
                     if not simulation:
+                        logger.debug(f"Simulation skipped for prediction {prediction.prediction_id}")
                         stats["skipped"] += 1
                         continue
 
                     stats["processed"] += 1
                     if existing:
                         stats["updated"] += 1
+                        logger.debug(f"Updated simulation for prediction {prediction.prediction_id}")
                     else:
                         stats["created"] += 1
+                        logger.debug(f"Created simulation for prediction {prediction.prediction_id}")
                 except Exception as e:
-                    logger.error(f"Error simulating prediction {prediction.prediction_id}: {e}")
+                    logger.error(f"Error simulating prediction {prediction.prediction_id}: {e}", exc_info=True)
                     stats["errors"] += 1
 
             db.commit()

@@ -1081,15 +1081,19 @@ def update_simulation_table(entities, start_date, end_date, horizon, decision, _
 
 @app.callback(
     Output("create-sim-entity-filter", "options"),
-    Input("interval-component", "n_intervals")
+    [Input("interval-component", "n_intervals"),
+     Input("create-sim-date-range", "start_date"),
+     Input("create-sim-date-range", "end_date")]
 )
-def update_create_simulation_entity_options(n):
-    """Update create simulation entity filter dropdown options"""
-    return simulations.get_entity_options(engine)
+def update_create_simulation_entity_options(n, start_date, end_date):
+    """Update create simulation entity filter dropdown options - shows entities from predictions"""
+    date_range = (start_date, end_date) if start_date or end_date else None
+    return simulations.get_prediction_entity_options(engine, date_range=date_range)
 
 
 @app.callback(
-    Output("create-sim-status", "children"),
+    [Output("create-sim-status", "children"),
+     Output("sim-filter-sync-store", "data")],
     Input("btn-create-simulations", "n_clicks"),
     [State("create-sim-entity-filter", "value"),
      State("create-sim-date-range", "start_date"),
@@ -1109,55 +1113,162 @@ def create_simulations_from_predictions(n_clicks, entities, start_date, end_date
 
         engine_sim = TradingSimulationEngine()
 
-        # Prepare date range
+        # Prepare date range - only use if explicitly set by user
         date_range = None
         if start_date and end_date:
-            start = datetime.fromisoformat(start_date) if isinstance(start_date, str) else start_date
-            end = datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
-            date_range = (start, end)
+            try:
+                start = datetime.fromisoformat(start_date) if isinstance(start_date, str) else start_date
+                end = datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
+                
+                # Check if dates are date objects and convert to datetime
+                if hasattr(start, 'date') and not isinstance(start, datetime):
+                    start = datetime.combine(start, datetime.min.time())
+                if hasattr(end, 'date') and not isinstance(end, datetime):
+                    end = datetime.combine(end, datetime.max.time())
+                
+                date_range = (start, end)
+                logger.info(f"Using date range filter: {start} to {end}")
+            except Exception as e:
+                logger.warning(f"Error parsing date range: {e}, using None")
+                date_range = None
+        else:
+            logger.info("No date range filter - will include all predictions")
+
+        # Log the filters being used
+        logger.info(f"Creating simulations with filters: entities={entities} (type: {type(entities)}), horizon={horizon}, date_range={date_range}, limit={limit}")
+        
+        # Debug: Check if entities is a list
+        if entities:
+            logger.info(f"Entity filter contains {len(entities)} entities: {entities}")
+        else:
+            logger.info("No entity filter provided - will use all entities")
 
         # Create simulations
         stats = engine_sim.create_simulations_from_predictions(
-            entity_filter=entities if entities else None,
+            entity_filter=entities if entities and len(entities) > 0 else None,
             horizon_filter=horizon if horizon != "all" else None,
             date_range=date_range,
             limit=limit or 50
         )
+
+        logger.info(f"Simulation creation stats: {stats}")
+
+        # Store filter values for synchronization
+        filter_sync_data = {
+            "entities": entities if entities and len(entities) > 0 else None,
+            "horizon": horizon if horizon != "all" else None,
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
         return dbc.Alert(
             f"✓ Created {stats['created']} simulations, updated {stats['updated']}, skipped {stats['skipped']}, errors {stats['errors']}",
             color="success" if stats['errors'] == 0 else "warning",
             dismissable=True,
             duration=5000
-        )
+        ), filter_sync_data
     except Exception as e:
-        logger.error(f"Error creating simulations: {e}")
+        logger.error(f"Error creating simulations: {e}", exc_info=True)
         return dbc.Alert(
             f"✗ Error creating simulations: {str(e)}",
             color="danger",
             dismissable=True,
             duration=5000
-        )
+        ), dash.no_update
+
+
+@app.callback(
+    [Output("sim-entity-filter", "value"),
+     Output("sim-horizon-filter", "value")],
+    Input("sim-filter-sync-store", "data"),
+    [State("sim-entity-filter", "value"),
+     State("sim-horizon-filter", "value")],
+    prevent_initial_call=True
+)
+def sync_simulation_filters(sync_data, current_entities, current_horizon):
+    """Sync filter values from create simulations to filter simulations when simulations are created."""
+    if not sync_data or not sync_data.get("timestamp"):
+        raise PreventUpdate
+    
+    # Only update if sync_data has values
+    new_entities = sync_data.get("entities")
+    new_horizon = sync_data.get("horizon")
+    
+    # Update entities filter if provided
+    if new_entities:
+        return new_entities, new_horizon if new_horizon else current_horizon
+    elif new_horizon:
+        return current_entities, new_horizon
+    
+    raise PreventUpdate
 
 
 @app.callback(
     [Output({"type": "delete-sim", "index": ALL}, "disabled"),
      Output("sim-delete-status", "data")],
-    Input({"type": "delete-sim", "index": ALL}, "n_clicks"),
-    State({"type": "delete-sim", "index": ALL}, "id"),
+    [Input({"type": "delete-sim", "index": ALL}, "n_clicks"),
+     Input("btn-confirm-clear-simulations", "n_clicks")],
+    [State({"type": "delete-sim", "index": ALL}, "id")],
     prevent_initial_call=True
 )
-def delete_simulation(n_clicks, button_ids):
-    """Delete a simulation."""
-    if not n_clicks or not any(n_clicks):
-        raise PreventUpdate
-
+def delete_simulation(n_clicks, clear_all_clicks, button_ids):
+    """Delete a simulation or clear all simulations."""
     ctx = dash.callback_context
     if not ctx.triggered:
         raise PreventUpdate
 
-    import json
     triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    
+    # Handle "Clear All" action
+    if triggered_id == "btn-confirm-clear-simulations":
+        if not clear_all_clicks:
+            raise PreventUpdate
+        
+        try:
+            from src.models.database import get_scoped_session
+            from src.models.trading_simulation import TradingSimulation
+            from sqlalchemy import delete
+            
+            with get_scoped_session() as db:
+                # Count before deletion
+                count = db.query(TradingSimulation).count()
+                
+                # Use explicit DELETE statement to ensure all records are deleted
+                # This works better than query().delete() especially with foreign keys
+                delete_stmt = delete(TradingSimulation)
+                db.execute(delete_stmt)
+                db.commit()
+                
+                # Verify deletion
+                remaining = db.query(TradingSimulation).count()
+                
+                logger.info(f"Deleted all {count} simulations (remaining: {remaining})")
+                activity_logger.log_activity(f"Deleted all {count} simulations (remaining: {remaining})", "WARNING")
+                
+                # Return disabled states for all delete buttons (they'll be refreshed anyway)
+                disabled_states = [False] * (len(button_ids) if button_ids else 0)
+                return disabled_states, {
+                    "action": "clear_all",
+                    "count": count,
+                    "remaining": remaining,
+                    "deleted": True,
+                    "ts": datetime.utcnow().isoformat()
+                }
+        except Exception as e:
+            logger.error(f"Error clearing all simulations: {e}")
+            activity_logger.log_activity(f"Error clearing all simulations: {e}", "ERROR")
+            disabled_states = [False] * (len(button_ids) if button_ids else 0)
+            return disabled_states, {
+                "action": "clear_all",
+                "error": str(e),
+                "deleted": False,
+                "ts": datetime.utcnow().isoformat()
+            }
+    
+    # Handle single simulation deletion
+    if not n_clicks or not any(n_clicks):
+        raise PreventUpdate
+
+    import json
     try:
         button_id = json.loads(triggered_id)
     except Exception:
@@ -1217,6 +1328,32 @@ def refresh_simulation(n_clicks, button_id):
     except Exception as e:
         logger.error(f"Error refreshing simulation: {e}")
         return False
+
+
+@app.callback(
+    Output("modal-clear-all-simulations", "is_open"),
+    [Input("btn-clear-all-simulations", "n_clicks"),
+     Input("btn-cancel-clear-simulations", "n_clicks"),
+     Input("btn-confirm-clear-simulations", "n_clicks")],
+    State("modal-clear-all-simulations", "is_open"),
+    prevent_initial_call=True
+)
+def toggle_clear_all_simulations_modal(open_clicks, cancel_clicks, confirm_clicks, is_open):
+    """Toggle the clear all simulations confirmation modal."""
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+    
+    button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    
+    if button_id == "btn-clear-all-simulations":
+        return True
+    elif button_id in ["btn-cancel-clear-simulations", "btn-confirm-clear-simulations"]:
+        return False
+    
+    return is_open
+
+
 
 
 @app.callback(
