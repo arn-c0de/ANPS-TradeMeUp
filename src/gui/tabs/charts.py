@@ -97,7 +97,7 @@ def create_layout():
                                     options=[
                                         {"label": " Volume", "value": "volume"},
                                         {"label": " MA", "value": "ma"},
-                                        {"label": " Stats", "value": "stats"}
+                                        {"label": " Trading Overlay", "value": "stats"}
                                     ],
                                     value=["volume", "stats"],
                                     inline=True,
@@ -208,7 +208,7 @@ def create_layout():
                     options=[
                         {"label": " Show Volume", "value": "volume"},
                         {"label": " Show Moving Averages", "value": "ma"},
-                        {"label": " Show Statistics", "value": "stats"}
+                        {"label": " Show Trading Overlay", "value": "stats"}
                     ],
                     value=["volume", "stats"],
                     inline=False,
@@ -462,6 +462,9 @@ def get_comparison_chart(symbols: list, timeframe: str = '3mo'):
 
 def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, panel_id: str = None):
     """Create trading action overlay for chart panels."""
+    if not show_stats:
+        return None
+
     stats_block = None
     if show_stats and stats_data:
         stats_block = html.Div([
@@ -609,28 +612,28 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True):
     # Get chart content and stats for overlay
     chart_component, stats_data = get_stock_chart_components(symbol, timeframe, chart_type, show_volume, show_ma)
     chart_content = chart_component
-    trading_overlay = create_trading_overlay(stats_data, show_stats, panel_id=panel_id)
+    trading_overlay = create_trading_overlay(stats_data, show_stats, panel_id=panel_id) if show_stats else None
 
     return dbc.Card([
         dbc.CardHeader(header_content, className="py-1", style={'padding': '4px 12px', 'minHeight': '32px', 'maxHeight': '32px'}) if show_controls else None,
-        dbc.CardBody([
-            trading_overlay,
-            dcc.Loading(
-                id={"type": "loading-panel", "index": panel_id},
-                type="default",
-                children=html.Div(
-                    chart_content,
-                    id={"type": "chart-content", "index": panel_id},
-                    style={
-                        'height': '100%',
-                        'width': '100%',
-                        'overflow': 'hidden',
-                        'display': 'flex',
-                        'flexDirection': 'column'
-                    }
+        dbc.CardBody(
+            ([trading_overlay] if trading_overlay else []) + [
+                dcc.Loading(
+                    id={"type": "loading-panel", "index": panel_id},
+                    type="default",
+                    children=html.Div(
+                        chart_content,
+                        id={"type": "chart-content", "index": panel_id},
+                        style={
+                            'height': '100%',
+                            'width': '100%',
+                            'overflow': 'hidden',
+                            'display': 'flex',
+                            'flexDirection': 'column'
+                        }
+                    )
                 )
-            )
-        ],
+            ],
         className="p-1",
         style={ # ADDED position: relative HERE
             'position': 'relative',
