@@ -2388,182 +2388,166 @@ def search_new_tab_symbols(search_value):
     prevent_initial_call='initial_duplicate'
 )
 def render_chart_display(tabs_data, quad_data, chart_options, fullscreen_data, layout_preset, refresh_clicks):
-    """Render chart display area - single or quad mode with options and fullscreen"""
+    """
+    Render chart display area using a 'hide/show' pattern for performance.
+    It creates all chart divs at once and uses CSS to toggle visibility.
+    """
     tabs = tabs_data.get('tabs', [])
     active_tab_id = tabs_data.get('active_tab')
-    quad_enabled = quad_data.get('enabled', False)
+    quad_enabled = (quad_data or {}).get('enabled', False)
     is_fullscreen = fullscreen_data.get('fullscreen', False)
-    
+
     show_volume = 'volume' in (chart_options or [])
     show_ma = 'ma' in (chart_options or [])
-    show_stats = 'stats' in (chart_options or [])
-    
-    # Container class based on fullscreen
-    container_class = 'position-fixed top-0 start-0 w-100 h-100 bg-dark' if is_fullscreen else 'chart-container-normal'
-    
+    show_overlay = 'stats' in (chart_options or [])
+
+    container_class = 'chart-container-fullscreen' if is_fullscreen else 'chart-container-normal'
+
     if not tabs:
         return dbc.Alert("No charts open. Click '+ New' to add a chart.", color="info", className="mt-3"), container_class
-    
-    if quad_enabled:
-        # Render quad view - only show existing tabs, respect individual settings
-        panels = []
-        
-        # Calculate height based on number of panels and fullscreen mode
-        num_tabs = len(tabs)
-        if num_tabs == 0:
-            return dbc.Alert("No charts open. Click '+ New' to add a chart.", color="info", className="mt-3"), container_class
-        
-        # Use up to 4 tabs for quad view
-        tabs_to_show = tabs[:4]
-        panel_height = 'calc(50vh - 80px)' if is_fullscreen else '500px'
-        
-        for tab in tabs_to_show:
-            # Use individual tab settings, not global ones
-            tab_show_volume = tab.get('show_volume', True)
-            tab_show_ma = tab.get('show_ma', False)
-            # Stats still use global setting
-            
-            chart_component, stats_data = charts.get_stock_chart_components(
-                tab['symbol'],
-                tab['timeframe'],
-                tab['chart_type'],
-                show_volume=tab_show_volume,
-                show_ma=tab_show_ma
-            )
-            chart = html.Div([chart_component], style={'height': '100%', 'display': 'flex', 'flexDirection': 'column'})
-            trading_overlay = charts.create_trading_overlay(stats_data, show_stats, panel_id=tab['id'])
-            
-            # Panel with settings button next to symbol/stats
-            panel_content = html.Div([
-                chart,
-                trading_overlay,
-            ], style={'position': 'relative', 'height': '100%'})
-            
-            # Clickable panel wrapper to focus tab on click
-            is_active = tab['id'] == active_tab_id
-            panel_wrapper = html.Div(
-                panel_content,
-                id={"type": "quad-panel", "index": tab['id']},
-                style={
-                    'height': panel_height,
-                    'overflow': 'hidden',
-                    'cursor': 'pointer',
-                    'borderRadius': '8px',
-                    'transition': 'border-color 0.3s ease, box-shadow 0.3s ease'
-                },
-                className='quad-panel-hover' + (' panel-focused' if is_active else '')
-            )
-            panels.append(panel_wrapper)
-        
-        # Create dynamic grid based on number of panels and layout preset
-        if num_tabs == 1:
-            # Single panel - full width
-            content = dbc.Container([
-                dbc.Row([dbc.Col(panels[0], width=12)])
-            ], fluid=True, className="px-2" + (" h-100" if is_fullscreen else ""))
-        elif num_tabs == 2:
-            # Two panels - apply layout preset with vertical splitter
-            if layout_preset == 'left-focus':
-                left_width, right_width = '66%', 'calc(34% - 8px)'
-            elif layout_preset == 'right-focus':
-                left_width, right_width = '34%', 'calc(66% - 8px)'
-            else:  # equal or grid
-                left_width, right_width = '49%', '49%'
-            
-            content = dbc.Container([
-                html.Div([
-                    html.Div(panels[0], style={'width': left_width, 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel"),
-                    html.Div(id="splitter-v-main", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top'}),
-                    html.Div(panels[1], style={'width': right_width, 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel")
-                ], style={'height': '100%'})
-            ], fluid=True, className="px-2" + (" h-100" if is_fullscreen else ""))
-        elif num_tabs == 3:
-            # Three panels - apply layout preset with resize handles
-            if layout_preset == 'left-focus':
-                # 1 large left, 2 stacked right with vertical splitter
-                content = dbc.Container([
-                    html.Div([
-                        html.Div(panels[0], style={'width': '66%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel"),
-                        html.Div(id="splitter-v-1", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top'}),
-                        html.Div([
-                            html.Div(panels[1], style={'height': '49%'}, className="resizable-panel"),
-                            html.Div(id="splitter-h-1", className="chart-splitter-horizontal"),
-                            html.Div(panels[2], style={'height': '49%'}, className="resizable-panel")
-                        ], style={'width': 'calc(34% - 8px)', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'})
-                    ], style={'height': '100%'})
-                ], fluid=True, className="px-2" + (" h-100" if is_fullscreen else ""))
-            elif layout_preset == 'right-focus':
-                # 2 stacked left, 1 large right with vertical splitter
-                content = dbc.Container([
-                    html.Div([
-                        html.Div([
-                            html.Div(panels[0], style={'height': '49%'}, className="resizable-panel"),
-                            html.Div(id="splitter-h-2", className="chart-splitter-horizontal"),
-                            html.Div(panels[1], style={'height': '49%'}, className="resizable-panel")
-                        ], style={'width': '34%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}),
-                        html.Div(id="splitter-v-2", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top'}),
-                        html.Div(panels[2], style={'width': 'calc(66% - 8px)', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel")
-                    ], style={'height': '100%'})
-                ], fluid=True, className="px-2" + (" h-100" if is_fullscreen else ""))
-            else:  # equal or grid - 2 top, 1 bottom with horizontal splitter
-                content = dbc.Container([
-                    html.Div([
-                        html.Div([
-                            html.Div(panels[0], style={'width': '49%', 'display': 'inline-block', 'height': '100%', 'verticalAlign': 'top'}, className="resizable-panel"),
-                            html.Div(id="splitter-v-3", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top', 'height': '100%'}),
-                            html.Div(panels[1], style={'width': '49%', 'display': 'inline-block', 'height': '100%', 'verticalAlign': 'top'}, className="resizable-panel")
-                        ], style={'height': 'calc(50% - 4px)', 'display': 'block'}),
-                        html.Div(id="splitter-h-3", className="chart-splitter-horizontal"),
-                        html.Div(panels[2], style={'height': 'calc(50% - 4px)', 'display': 'block'}, className="resizable-panel")
-                    ], style={'height': '100%', 'display': 'block'})
-                ], fluid=True, className="px-2 h-100")
-        else:
-            # Four panels - 2x2 grid with splitters
-            content = dbc.Container([
-                html.Div([
-                    html.Div([
-                        html.Div(panels[0], style={'width': '49%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel"),
-                        html.Div(id="splitter-v-top", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top'}),
-                        html.Div(panels[1], style={'width': '49%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel")
-                    ], style={'height': '49%'}),
-                    html.Div(id="splitter-h-middle", className="chart-splitter-horizontal"),
-                    html.Div([
-                        html.Div(panels[2], style={'width': '49%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel"),
-                        html.Div(id="splitter-v-bottom", className="chart-splitter-vertical", style={'display': 'inline-block', 'verticalAlign': 'top'}),
-                        html.Div(panels[3], style={'width': '49%', 'height': '100%', 'display': 'inline-block', 'verticalAlign': 'top'}, className="resizable-panel")
-                    ], style={'height': '49%'})
-                ], style={'height': '100%'})
-            ], fluid=True, className="px-2" + (" h-100" if is_fullscreen else ""))
-        
-        return content, container_class
-    else:
-        # Render single active chart
-        active_tab = next((t for t in tabs if t['id'] == active_tab_id), None)
-        if not active_tab:
-            return dbc.Alert("No active chart", color="warning"), container_class
-        
-        # Use individual tab settings
-        tab_show_volume = active_tab.get('show_volume', True)
-        tab_show_ma = active_tab.get('show_ma', False)
-        
+
+    def build_tab_panel(tab, panel_height, is_active, clickable=True):
+        tab_show_volume = tab.get('show_volume', show_volume)
+        tab_show_ma = tab.get('show_ma', show_ma)
+
         chart_component, stats_data = charts.get_stock_chart_components(
-            active_tab['symbol'],
-            active_tab['timeframe'],
-            active_tab['chart_type'],
+            tab['symbol'],
+            tab['timeframe'],
+            tab['chart_type'],
             show_volume=tab_show_volume,
             show_ma=tab_show_ma
         )
-        chart = html.Div([chart_component], style={'height': '100%', 'display': 'flex', 'flexDirection': 'column'})
-        trading_overlay = charts.create_trading_overlay(stats_data, show_stats, panel_id=active_tab_id)
-        
-        # Chart with settings button next to symbol/stats
-        chart_content = html.Div([
-            chart,
-            trading_overlay,
-        ], style={'position': 'relative', 'height': '100%'})
-        
+
+        chart_div = html.Div(
+            [chart_component],
+            style={'height': '100%', 'display': 'flex', 'flexDirection': 'column'}
+        )
+        trading_overlay = charts.create_trading_overlay(stats_data, show_overlay, panel_id=tab['id']) if show_overlay else None
+
+        panel_content = html.Div(
+            ([trading_overlay] if trading_overlay else []) + [chart_div],
+            style={'position': 'relative', 'height': '100%'}
+        )
+
+        panel_style = {
+            'height': panel_height,
+            'overflow': 'hidden'
+        }
+        panel_class = None
+
+        if clickable:
+            panel_style.update({
+                'minHeight': '260px',
+                'border': '2px solid rgba(255,255,255,0.1)',
+                'borderRadius': '6px',
+                'cursor': 'pointer'
+            })
+            panel_class = "quad-panel-hover"
+            if is_active:
+                panel_class = f"{panel_class} panel-focused"
+
+            return html.Div(
+                panel_content,
+                id={"type": "quad-panel", "index": tab['id']},
+                className=panel_class,
+                style=panel_style
+            )
+
+        return html.Div(panel_content, style=panel_style)
+
+    if quad_enabled:
+        selected_tabs = (quad_data or {}).get('selected_tabs', []) or []
+        tabs_by_id = {tab['id']: tab for tab in tabs}
+        max_panels = min(4, len(tabs))
+        if max_panels == 0:
+            return dbc.Alert("No charts available for quad view.", color="info", className="mt-3"), container_class
+
+        quad_tabs = []
+        seen_tabs = set()
+
+        def add_tab(tab):
+            if not tab:
+                return
+            tab_id = tab.get('id')
+            if tab_id and tab_id not in seen_tabs:
+                quad_tabs.append(tab)
+                seen_tabs.add(tab_id)
+
+        for tab_id in selected_tabs:
+            add_tab(tabs_by_id.get(tab_id))
+            if len(quad_tabs) >= max_panels:
+                break
+
+        if len(quad_tabs) < max_panels:
+            for tab in tabs:
+                add_tab(tab)
+                if len(quad_tabs) >= max_panels:
+                    break
+
+        panel_height = 'calc(50vh - 80px)' if is_fullscreen else '500px'
+        row_class = "g-1" if is_fullscreen else "g-2"
+        margin_class = "mb-1" if is_fullscreen else "mb-3"
+
+        left_width, right_width = (6, 6)
+        if layout_preset == 'left-focus':
+            left_width, right_width = (8, 4)
+        elif layout_preset == 'right-focus':
+            left_width, right_width = (4, 8)
+
+        panel_wrappers = [
+            build_tab_panel(tab, panel_height, tab['id'] == active_tab_id)
+            for tab in quad_tabs
+        ]
+
+        if max_panels == 1:
+            quad_layout = html.Div([
+                dbc.Row([dbc.Col(panel_wrappers[0], md=12)], className=row_class)
+            ])
+        elif max_panels == 2:
+            quad_layout = html.Div([
+                dbc.Row([
+                    dbc.Col(panel_wrappers[0], md=left_width, className=margin_class),
+                    dbc.Col(panel_wrappers[1], md=right_width, className=margin_class)
+                ], className=row_class)
+            ])
+        elif max_panels == 3:
+            quad_layout = html.Div([
+                dbc.Row([
+                    dbc.Col(panel_wrappers[0], md=left_width, className=margin_class),
+                    dbc.Col(panel_wrappers[1], md=right_width, className=margin_class)
+                ], className=row_class),
+                dbc.Row([
+                    dbc.Col(panel_wrappers[2], md=12)
+                ], className=row_class)
+            ])
+        else:
+            quad_layout = html.Div([
+                dbc.Row([
+                    dbc.Col(panel_wrappers[0], md=left_width, className=margin_class),
+                    dbc.Col(panel_wrappers[1], md=right_width, className=margin_class)
+                ], className=row_class),
+                dbc.Row([
+                    dbc.Col(panel_wrappers[2], md=left_width, className=margin_class),
+                    dbc.Col(panel_wrappers[3], md=right_width, className=margin_class)
+                ], className=row_class)
+            ])
+
+        return quad_layout, container_class
+
+    all_chart_divs = []
+    for tab in tabs:
+        is_active = tab['id'] == active_tab_id
+        # Set style to 'display: none' for inactive tabs
+        display_style = {'display': 'block' if is_active else 'none'}
+
+        # Combine with existing height styles
         height = 'calc(100vh - 180px)' if is_fullscreen else 'calc(100vh - 320px)'
-        return html.Div(chart_content, style={'height': height, 'minHeight': '600px'}), container_class
+        final_style = {**display_style, 'height': height, 'minHeight': '600px'}
+
+        panel_content = build_tab_panel(tab, "100%", is_active, clickable=False)
+        all_chart_divs.append(html.Div(panel_content, style=final_style))
+
+    return all_chart_divs, container_class
 
 
 @app.callback(

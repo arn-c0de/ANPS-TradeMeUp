@@ -23,6 +23,7 @@ from typing import Dict, List, Optional
 import logging
 import time
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,7 @@ class MarketDataProvider:
                 logger.debug(f"Error fetching price for {symbol}: {e}")
             return self._get_cached_data(symbol)
     
+    @lru_cache(maxsize=32)
     def get_historical_data(
         self, 
         symbol: str, 
@@ -172,6 +174,7 @@ class MarketDataProvider:
                 logger.debug(f"Error fetching historical data for {symbol}: {e}")
             return None
     
+    @lru_cache(maxsize=32)
     def get_intraday_data(self, symbol: str, days: int = 1) -> Optional[pd.DataFrame]:
         """
         Get intraday data with 1-minute intervals
