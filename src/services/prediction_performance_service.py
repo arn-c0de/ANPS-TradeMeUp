@@ -344,6 +344,62 @@ class PredictionPerformanceService:
             logger.error(f"Error saving prediction performance: {e}", exc_info=True)
             db_session.rollback()
             return False
+    
+    def calculate_and_save_performance(self, engine, prediction_id: str) -> Dict:
+        """
+        Combined method to calculate and save prediction performance
+        
+        Args:
+            engine: SQLAlchemy engine
+            prediction_id: Prediction UUID
+            
+        Returns:
+            Dict with performance metrics
+        """
+        from sqlalchemy.orm import Session
+        
+        with Session(engine) as db:
+            try:
+                # Get prediction and entity
+                prediction = db.query(Prediction).filter(
+                    Prediction.prediction_id == prediction_id
+                ).first()
+                
+                if not prediction:
+                    logger.warning(f"Prediction {prediction_id} not found")
+                    return {"status": "error", "error": "Prediction not found"}
+                
+                entity = db.query(Entity).filter(
+                    Entity.entity_id == prediction.entity_id
+                ).first()
+                
+                if not entity:
+                    logger.warning(f"Entity {prediction.entity_id} not found")
+                    return {"status": "error", "error": "Entity not found"}
+                
+                # Calculate performance
+                performance = self.get_prediction_performance(prediction, entity)
+                
+                if not performance:
+                    return {"status": "no_data", "error": "No market data available"}
+                
+                # Save performance
+                success = self.save_prediction_performance(prediction_id, performance, db)
+                db.commit()
+                
+                if success:
+                    return {
+                        "status": "success",
+                        "total_return_pct": performance.get('total_return_pct', 0),
+                        "is_correct": performance.get('is_correct', False)
+                    }
+                else:
+                    return {"status": "error", "error": "Failed to save performance"}
+                    
+            except Exception as e:
+                logger.error(f"Error calculating and saving performance: {e}", exc_info=True)
+                db.rollback()
+                return {"status": "error", "error": str(e)}
 
 
 # Global instance
