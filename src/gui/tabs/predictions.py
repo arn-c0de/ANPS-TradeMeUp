@@ -156,7 +156,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
         refreshing_prediction_id: ID of prediction currently being refreshed (for visual feedback)
     """
     try:
-        with Session(engine) as db:
+        with Session(engine, expire_on_commit=False) as db:
             # Use eager loading to fetch entity and outcome in single query (fixes N+1 problem)
             query = db.query(Prediction).options(
                 joinedload(Prediction.entity),
@@ -238,8 +238,10 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
 
                 if outcome and outcome.actual_return is not None:
                     # Show ONLY saved performance data - NEVER recalculate on refresh
-                    # actual_return is already stored as percentage, don't multiply by 100
+                    # actual_return is already stored as percentage (e.g., -17.03 = -17.03%)
                     return_val = outcome.actual_return
+                    
+                    logger.info(f"📊 Showing saved performance for {pred.prediction_id}: return_val={return_val}, outcome.actual_return={outcome.actual_return}")
                     
                     # Format last update time
                     if outcome.evaluation_timestamp:
@@ -506,8 +508,8 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
         actual_return_pct = ((current_price - prediction_price) / prediction_price) * 100
         logger.info(f"   Calculated return: {actual_return_pct:+.2f}%")
     else:
-        # Fallback to saved outcome
-        actual_return_pct = (outcome.actual_return or 0) * 100
+        # Fallback to saved outcome - already stored as percentage
+        actual_return_pct = outcome.actual_return or 0
         logger.info(f"   Using saved return: {actual_return_pct:+.2f}%")
     
     # Recalculate actual direction from current return
