@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Import tab modules
 from src.gui.tabs import dashboard, predictions, news, statistics, charts, simulations, system, control, testing
 from src.gui.tabs import settings as settings_tab
+from src.gui.charts import MarketDataProvider
 
 # Initialize Dash app with Bootstrap dark theme
 app = dash.Dash(
@@ -2199,16 +2200,139 @@ def open_ticker_in_charts(n_clicks_list, button_ids, tabs_data):
     return "charts", tabs_data, dash.no_update
 
 
+# ===== DATABASE FUNCTIONS FOR CHART OVERLAYS =====
+
+def load_overlays_from_db():
+    """Load all chart overlays from database."""
+    from sqlalchemy.orm import Session
+    from src.models.chart_overlays import ChartOverlay
+
+    try:
+        with Session(engine) as db:
+            overlays_db = db.query(ChartOverlay).all()
+            logger.info(f"[DB Load] Found {len(overlays_db)} overlays in database")
+
+            overlays_dict = {"tabs": {}}
+
+            for overlay in overlays_db:
+                # Create key from symbol + timeframe
+                key = f"{overlay.symbol}_{overlay.timeframe}"
+                if key not in overlays_dict["tabs"]:
+                    overlays_dict["tabs"][key] = {"brackets": [], "breaks": []}
+
+                overlays_dict["tabs"][key][overlay.group].append(overlay.to_dict())
+                logger.info(f"[DB Load]   {overlay.symbol} {overlay.timeframe} {overlay.group}: ${overlay.price} ({overlay.name})")
+
+            logger.info(f"[DB Load] Loaded {len(overlays_dict['tabs'])} overlay groups")
+            return overlays_dict
+    except Exception as e:
+        logger.error(f"[DB Load] Error loading overlays from DB: {e}", exc_info=True)
+        return {"tabs": {}}
+
+
+def save_overlays_to_db(overlays_data, tabs_data):
+    """Save chart overlays to database."""
+    from sqlalchemy.orm import Session
+    from src.models.chart_overlays import ChartOverlay
+    import uuid
+
+    try:
+        tabs = tabs_data.get('tabs', []) if isinstance(tabs_data, dict) else []
+        tab_map = {tab['id']: (tab['symbol'], tab['timeframe']) for tab in tabs if 'id' in tab}
+
+        logger.info(f"[DB Save] Tab map: {tab_map}")
+        logger.info(f"[DB Save] Overlays tabs: {list(overlays_data.get('tabs', {}).keys())}")
+
+        with Session(engine) as db:
+            # Clear existing overlays
+            deleted_count = db.query(ChartOverlay).delete()
+            logger.info(f"[DB Save] Deleted {deleted_count} existing overlays")
+
+            # Save all overlays
+            overlays = overlays_data.get("tabs", {})
+            saved_count = 0
+            for tab_id, tab_data in overlays.items():
+                # Get symbol and timeframe
+                # Support both real tab IDs (from tab_map) and symbol_timeframe format
+                if tab_id in tab_map:
+                    # Real tab ID from active tabs
+                    symbol, timeframe = tab_map[tab_id]
+                elif "_" in tab_id:
+                    # symbol_timeframe format (e.g., "TSLA_1d_1m")
+                    parts = tab_id.split("_", 1)
+                    if len(parts) == 2:
+                        symbol, timeframe = parts
+                    else:
+                        logger.warning(f"[DB Save] Cannot parse tab_id {tab_id}, skipping")
+                        continue
+                else:
+                    logger.warning(f"[DB Save] Tab ID {tab_id} not recognized, skipping")
+                    continue
+
+                logger.info(f"[DB Save] Processing {symbol} {timeframe} (tab_id: {tab_id})")
+
+                for group in ["brackets", "breaks"]:
+                    items = tab_data.get(group, [])
+                    logger.info(f"[DB Save]   {group}: {len(items)} items")
+                    for item in items:
+                        # Try to parse existing UUID, or generate new one if invalid
+                        try:
+                            overlay_id = uuid.UUID(item.get("id", ""))
+                        except (ValueError, AttributeError):
+                            overlay_id = uuid.uuid4()
+
+                        overlay = ChartOverlay(
+                            overlay_id=overlay_id,
+                            symbol=symbol,
+                            timeframe=timeframe,
+                            group=group,
+                            price=float(item["price"]),
+                            name=item.get("name", ""),
+                            color=item.get("color", "#00ff88" if group == "brackets" else "#ff4444"),
+                            visible=item.get("visible", True)
+                        )
+                        db.add(overlay)
+                        saved_count += 1
+                        logger.info(f"[DB Save]     Added {group} at ${item['price']} (name: {item.get('name', 'N/A')})")
+
+            db.commit()
+            logger.info(f"[DB Save] Successfully saved {saved_count} overlays to database")
+    except Exception as e:
+        logger.error(f"[DB Save] Error saving overlays to DB: {e}", exc_info=True)
+
+
 @app.callback(
     Output("chart-overlays-store", "data"),
     Input("chart-tabs-store", "data"),
     State("chart-overlays-store", "data")
 )
 def sync_chart_overlays(tabs_data, overlays_data):
-    """Keep overlay store in sync with existing chart tabs."""
+    """Keep overlay store in sync with existing chart tabs and load from DB on first run."""
     import copy
+    from dash import callback_context
 
-    overlays = _normalize_overlay_store(copy.deepcopy(overlays_data))
+    # On first load, try to load overlays from database
+    if not overlays_data or not overlays_data.get('tabs'):
+        logger.info("Loading overlays from database...")
+        overlays = load_overlays_from_db()
+        if overlays and overlays.get('tabs'):
+            logger.info(f"Loaded {len(overlays['tabs'])} overlay groups from DB")
+            # Map DB overlays (symbol_timeframe) to tab IDs
+            tabs = tabs_data.get('tabs', []) if isinstance(tabs_data, dict) else []
+            mapped_overlays = {"tabs": {}}
+            for tab in tabs:
+                tab_id = tab.get('id')
+                symbol = tab.get('symbol')
+                timeframe = tab.get('timeframe')
+                db_key = f"{symbol}_{timeframe}"
+                if db_key in overlays['tabs']:
+                    mapped_overlays['tabs'][tab_id] = overlays['tabs'][db_key]
+            overlays = mapped_overlays
+        else:
+            overlays = {"tabs": {}}
+    else:
+        overlays = _normalize_overlay_store(copy.deepcopy(overlays_data))
+
     tabs = tabs_data.get('tabs', []) if isinstance(tabs_data, dict) else []
     tab_ids = {tab.get('id') for tab in tabs if tab.get('id')}
 
@@ -2241,62 +2365,77 @@ def sync_chart_overlays(tabs_data, overlays_data):
 
 
 @app.callback(
-    Output("chart-tab-buttons", "children"),
-    Input("chart-tabs-store", "data")
+    Output("chart-price-cache-store", "data"),
+    [Input("chart-price-update-interval", "n_intervals"),
+     Input("chart-tabs-store", "data")],
+    prevent_initial_call=False
 )
-def render_chart_tabs(tabs_data):
-    """Render the browser-style tab buttons with market data"""
+def update_price_cache(n_intervals, tabs_data):
+    """Update price cache in background (non-blocking for UI)"""
+    import concurrent.futures
     from src.gui.charts.market_data import market_data
-    
+
+    tabs = tabs_data.get('tabs', [])
+    if not tabs:
+        return {}
+
+    symbols = list(set([tab['symbol'] for tab in tabs]))
+    price_cache = {}
+
+    def fetch_price(symbol):
+        try:
+            quote = market_data.get_live_price(symbol)
+            return symbol, quote
+        except:
+            return symbol, None
+
+    # Parallel price fetching (max 5 concurrent)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        results = executor.map(fetch_price, symbols)
+        for symbol, quote in results:
+            if quote:
+                price_cache[symbol] = quote
+
+    return price_cache
+
+
+@app.callback(
+    Output("chart-tab-buttons", "children"),
+    [Input("chart-tabs-store", "data"),
+     Input("chart-price-cache-store", "data")]
+)
+def render_chart_tabs(tabs_data, price_cache):
+    """Render the browser-style tab buttons with cached price data"""
     tabs = tabs_data.get('tabs', [])
     active_tab = tabs_data.get('active_tab')
-    
+    price_cache = price_cache or {}
+
     tab_buttons = []
     for tab in tabs:
         is_active = tab['id'] == active_tab
         symbol = tab['symbol']
         timeframe = tab.get('timeframe', '1mo')
-        
-        # Get live price data
-        try:
-            quote = market_data.get_live_price(symbol)
-            if quote:
-                price = quote.get('price', 0)
-                change = quote.get('change', 0)
-                change_pct = quote.get('change_percent', 0)
-                high = quote.get('high', 0)
-                low = quote.get('low', 0)
-                volume = quote.get('volume', 0)
-                
-                # Format volume
-                vol_str = f"{volume/1000000:.1f}M" if volume > 1000000 else f"{volume/1000:.1f}K"
-                
-                # Color based on change
-                price_color = "#00ff88" if change >= 0 else "#ff4444"
-                
-                tab_title = (
-                    f"{symbol} | ${price:.2f} {change:+.2f} ({change_pct:+.2f}%) "
-                    f"| H {high:.2f} L {low:.2f} Vol {vol_str} | {timeframe}"
-                )
-                price_class = "chart-tab-price chart-tab-positive" if change >= 0 else "chart-tab-price chart-tab-negative"
-                change_class = "chart-tab-change chart-tab-positive" if change >= 0 else "chart-tab-change chart-tab-negative"
-                # Compact, browser-like tab content
-                tab_content = html.Span([
-                    html.Span(symbol, className="chart-tab-symbol"),
-                    html.Span(f"${price:.2f}", className=price_class),
-                    html.Span(f"{change:+.2f} ({change_pct:+.2f}%)", className=change_class)
-                ], className="chart-tab-label", title=tab_title)
-            else:
-                # Fallback if no data
-                tab_content = html.Span([
-                    html.Span(symbol, className="chart-tab-symbol"),
-                    html.Span(f"[{timeframe}]", className="chart-tab-timeframe")
-                ], className="chart-tab-label", title=f"{symbol} | {timeframe}")
-        except Exception as e:
-            # Fallback on error
+
+        # Get cached price data (non-blocking)
+        quote = price_cache.get(symbol)
+        if quote:
+            price = quote.get('price', 0)
+            change = quote.get('change', 0)
+            change_pct = quote.get('change_percent', 0)
+
+            price_class = "chart-tab-price chart-tab-positive" if change >= 0 else "chart-tab-price chart-tab-negative"
+            change_class = "chart-tab-change chart-tab-positive" if change >= 0 else "chart-tab-change chart-tab-negative"
+
             tab_content = html.Span([
                 html.Span(symbol, className="chart-tab-symbol"),
-                html.Span(f"[{timeframe}]", className="chart-tab-timeframe")
+                html.Span(f"${price:.2f}", className=price_class),
+                html.Span(f"{change:+.2f} ({change_pct:+.2f}%)", className=change_class)
+            ], className="chart-tab-label", title=f"{symbol} | {timeframe}")
+        else:
+            # Fallback if no cached data yet
+            tab_content = html.Span([
+                html.Span(symbol, className="chart-tab-symbol"),
+                html.Span(f" • {timeframe}", className="chart-tab-timeframe", style={'opacity': '0.7'})
             ], className="chart-tab-label", title=f"{symbol} | {timeframe}")
         
         tab_button = dbc.ButtonGroup([
@@ -2368,30 +2507,97 @@ def toggle_trading_overlay_modal(manage_clicks, close_click, is_open, manage_ids
      Input("overlay-modal-tab-id", "data")]
 )
 def render_overlay_lists(overlays_data, tabs_data, active_tab_id):
-    """Render grouped bracket/break lists for all charts."""
+    """Render grouped bracket/break lists for all charts (active tabs + DB overlays)."""
+    from sqlalchemy.orm import Session
+    from src.models.chart_overlays import ChartOverlay
+
+    # Get active tabs
     tabs = tabs_data.get("tabs", []) if isinstance(tabs_data, dict) else []
-    if not tabs:
+    overlays = _normalize_overlay_store(overlays_data)
+
+    # Build combined list: symbol_timeframe -> data
+    all_charts = {}  # {symbol_timeframe: {symbol, timeframe, tab_id, brackets, breaks}}
+
+    # 1. Add all ACTIVE tabs first (from chart-tabs-store)
+    for tab in tabs:
+        tab_id = tab.get("id")
+        symbol = tab.get("symbol", "Unknown")
+        timeframe = tab.get("timeframe", "1mo")
+        key = f"{symbol}_{timeframe}"
+
+        tab_overlays = overlays.get("tabs", {}).get(tab_id, {})
+        all_charts[key] = {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "tab_id": tab_id,  # Use real tab_id for active tabs
+            "brackets": tab_overlays.get("brackets", []) or [],
+            "breaks": tab_overlays.get("breaks", []) or []
+        }
+
+    # 2. Add DB-only overlays (symbols WITHOUT active tabs)
+    try:
+        with Session(engine) as db:
+            overlays_db = db.query(ChartOverlay).all()
+            logger.info(f"[Overlay List] Found {len(overlays_db)} overlays in DB")
+
+            for overlay in overlays_db:
+                key = f"{overlay.symbol}_{overlay.timeframe}"
+
+                # ONLY add if this symbol_timeframe is NOT in active tabs (to avoid duplicates)
+                if key not in all_charts:
+                    # Create new entry for DB-only symbol
+                    all_charts[key] = {
+                        "symbol": overlay.symbol,
+                        "timeframe": overlay.timeframe,
+                        "tab_id": key,  # Use symbol_timeframe as tab_id for DB-only
+                        "brackets": [],
+                        "breaks": []
+                    }
+                    # Add overlay to the appropriate group
+                    all_charts[key][overlay.group].append(overlay.to_dict())
+                    logger.info(f"[Overlay List] Added DB-only: {overlay.symbol} {overlay.timeframe} {overlay.group}")
+    except Exception as e:
+        logger.error(f"Error loading DB overlays for list: {e}", exc_info=True)
+
+    if not all_charts:
         empty = html.Div("No charts available.", className="overlay-empty")
         return empty, empty
 
-    overlays = _normalize_overlay_store(overlays_data)
-    tab_ids = [tab.get("id") for tab in tabs if tab.get("id")]
-    active_item = [active_tab_id] if active_tab_id in tab_ids else []
+    # Determine active accordion item
+    active_item = []
+    if active_tab_id:
+        # Find matching symbol_timeframe for active tab
+        for tab in tabs:
+            if tab.get("id") == active_tab_id:
+                key = f"{tab.get('symbol')}_{tab.get('timeframe')}"
+                active_item = [key]
+                break
 
     def build_group(group, default_color, label):
         accordion_items = []
-        for tab in tabs:
-            tab_id = tab.get("id")
-            symbol = tab.get("symbol", "Unknown")
-            timeframe = tab.get("timeframe", "1mo")
-            tab_overlays = overlays.get("tabs", {}).get(tab_id, {})
-            items = tab_overlays.get(group, []) or []
+
+        # Iterate over all charts (active tabs + DB-only)
+        for key, chart_data in all_charts.items():
+            symbol = chart_data["symbol"]
+            timeframe = chart_data["timeframe"]
+            tab_id = chart_data["tab_id"]  # Real tab_id or symbol_timeframe
+            items = chart_data.get(group, []) or []
+
+            # Get current price for this symbol
+            current_price = None
+            try:
+                df = charts.market_data.get_historical_data(symbol, period='1d')
+                if df is not None and not df.empty:
+                    current_price = df['Close'].iloc[-1]
+            except:
+                pass
 
             rows = []
             if items:
                 for item in items:
                     item_id = item.get("id")
                     price_value = item.get("price")
+                    name_value = item.get("name", "")
                     color_value = item.get("color") or default_color
                     is_visible = item.get("visible", True)
                     rows.append(
@@ -2403,9 +2609,21 @@ def render_overlay_lists(overlays_data, tabs_data, active_tab_id):
                                     step="0.01",
                                     value=price_value,
                                     debounce=True,
+                                    placeholder="Price",
                                     className="overlay-price-input"
                                 ),
-                                width=4
+                                width=3
+                            ),
+                            dbc.Col(
+                                dbc.Input(
+                                    id={"type": "overlay-item-name", "group": group, "tab": tab_id, "index": item_id},
+                                    type="text",
+                                    value=name_value,
+                                    debounce=True,
+                                    placeholder="Label",
+                                    className="overlay-name-input"
+                                ),
+                                width=3
                             ),
                             dbc.Col(
                                 dbc.Input(
@@ -2467,7 +2685,17 @@ def render_overlay_lists(overlays_data, tabs_data, active_tab_id):
                             debounce=True,
                             className="overlay-price-input"
                         ),
-                        width=4
+                        width=3
+                    ),
+                    dbc.Col(
+                        dbc.Input(
+                            id={"type": "overlay-add-name", "group": group, "tab": tab_id},
+                            type="text",
+                            placeholder="Label (optional)",
+                            debounce=True,
+                            className="overlay-name-input"
+                        ),
+                        width=3
                     ),
                     dbc.Col(
                         dbc.Input(
@@ -2500,11 +2728,15 @@ def render_overlay_lists(overlays_data, tabs_data, active_tab_id):
                 ], className="g-2 align-items-center")
             )
 
+            # Build title with current price if available
+            price_str = f" ${current_price:.2f}" if current_price else ""
+            title_text = f"{symbol}{price_str} • {timeframe} ({len(items)})"
+
             accordion_items.append(
                 dbc.AccordionItem(
                     rows,
-                    title=f"{symbol} • {timeframe} ({len(items)})",
-                    item_id=tab_id
+                    title=title_text,
+                    item_id=key  # Use symbol_timeframe as accordion item_id
                 )
             )
 
@@ -2526,18 +2758,22 @@ def render_overlay_lists(overlays_data, tabs_data, active_tab_id):
     [State({"type": "overlay-add-btn", "group": ALL, "tab": ALL}, "id"),
      State({"type": "overlay-add-price", "group": ALL, "tab": ALL}, "id"),
      State({"type": "overlay-add-price", "group": ALL, "tab": ALL}, "value"),
+     State({"type": "overlay-add-name", "group": ALL, "tab": ALL}, "id"),
+     State({"type": "overlay-add-name", "group": ALL, "tab": ALL}, "value"),
      State({"type": "overlay-add-color", "group": ALL, "tab": ALL}, "id"),
      State({"type": "overlay-add-color", "group": ALL, "tab": ALL}, "value"),
      State({"type": "overlay-add-visible", "group": ALL, "tab": ALL}, "id"),
      State({"type": "overlay-add-visible", "group": ALL, "tab": ALL}, "value"),
-     State("chart-overlays-store", "data")],
+     State("chart-overlays-store", "data"),
+     State("chart-tabs-store", "data")],
     prevent_initial_call=True
 )
 def add_overlay_item(n_clicks, add_btn_ids,
                      price_ids, price_values,
+                     name_ids, name_values,
                      color_ids, color_values,
                      visible_ids, visible_values,
-                     overlays_data):
+                     overlays_data, tabs_data):
     """Add a new bracket/break overlay line for a specific chart."""
     from dash import callback_context
     import json
@@ -2565,6 +2801,7 @@ def add_overlay_item(n_clicks, add_btn_ids,
         return None
 
     price = value_for(price_ids, price_values)
+    name = value_for(name_ids, name_values)
     color = value_for(color_ids, color_values)
     visible = value_for(visible_ids, visible_values)
 
@@ -2579,27 +2816,35 @@ def add_overlay_item(n_clicks, add_btn_ids,
     tab_overlays[group].append({
         "id": f"{item_prefix}-{uuid.uuid4().hex[:8]}",
         "price": float(price),
+        "name": name or "",
         "color": color or default_color,
         "visible": "visible" in (visible or [])
     })
+
+    # Save to database
+    save_overlays_to_db(overlays, tabs_data)
+
     return overlays
 
 
 @app.callback(
     Output("chart-overlays-store", "data", allow_duplicate=True),
     [Input({"type": "overlay-item-price", "group": "brackets", "tab": ALL, "index": ALL}, "value"),
+     Input({"type": "overlay-item-name", "group": "brackets", "tab": ALL, "index": ALL}, "value"),
      Input({"type": "overlay-item-color", "group": "brackets", "tab": ALL, "index": ALL}, "value"),
      Input({"type": "overlay-item-visible", "group": "brackets", "tab": ALL, "index": ALL}, "value"),
      Input({"type": "overlay-item-delete", "group": "brackets", "tab": ALL, "index": ALL}, "n_clicks")],
     [State({"type": "overlay-item-price", "group": "brackets", "tab": ALL, "index": ALL}, "id"),
+     State({"type": "overlay-item-name", "group": "brackets", "tab": ALL, "index": ALL}, "id"),
      State({"type": "overlay-item-color", "group": "brackets", "tab": ALL, "index": ALL}, "id"),
      State({"type": "overlay-item-visible", "group": "brackets", "tab": ALL, "index": ALL}, "id"),
      State({"type": "overlay-item-delete", "group": "brackets", "tab": ALL, "index": ALL}, "id"),
-     State("chart-overlays-store", "data")],
+     State("chart-overlays-store", "data"),
+     State("chart-tabs-store", "data")],
     prevent_initial_call=True
 )
-def update_bracket_items(price_values, color_values, visible_values, delete_clicks,
-                         price_ids, color_ids, visible_ids, delete_ids, overlays_data):
+def update_bracket_items(price_values, name_values, color_values, visible_values, delete_clicks,
+                         price_ids, name_ids, color_ids, visible_ids, delete_ids, overlays_data, tabs_data):
     """Update bracket items when fields change."""
     from dash import callback_context
     import json
@@ -2627,6 +2872,7 @@ def update_bracket_items(price_values, color_values, visible_values, delete_clic
 
     if action_type == "overlay-item-delete":
         tab_overlays["brackets"] = [item for item in items if item.get("id") != item_id]
+        save_overlays_to_db(overlays, tabs_data)
         return overlays
 
     def value_by_id(ids, values):
@@ -2645,6 +2891,10 @@ def update_bracket_items(price_values, color_values, visible_values, delete_clic
                     item["price"] = float(new_value)
                 except (TypeError, ValueError):
                     pass
+        elif action_type == "overlay-item-name":
+            new_value = value_by_id(name_ids, name_values)
+            if new_value is not None:
+                item["name"] = new_value or ""
         elif action_type == "overlay-item-color":
             new_value = value_by_id(color_ids, color_values)
             if new_value:
@@ -2654,24 +2904,30 @@ def update_bracket_items(price_values, color_values, visible_values, delete_clic
             item["visible"] = "visible" in (new_value or [])
         break
 
+    # Save to database
+    save_overlays_to_db(overlays, tabs_data)
+
     return overlays
 
 
 @app.callback(
     Output("chart-overlays-store", "data", allow_duplicate=True),
     [Input({"type": "overlay-item-price", "group": "breaks", "tab": ALL, "index": ALL}, "value"),
+     Input({"type": "overlay-item-name", "group": "breaks", "tab": ALL, "index": ALL}, "value"),
      Input({"type": "overlay-item-color", "group": "breaks", "tab": ALL, "index": ALL}, "value"),
      Input({"type": "overlay-item-visible", "group": "breaks", "tab": ALL, "index": ALL}, "value"),
      Input({"type": "overlay-item-delete", "group": "breaks", "tab": ALL, "index": ALL}, "n_clicks")],
     [State({"type": "overlay-item-price", "group": "breaks", "tab": ALL, "index": ALL}, "id"),
+     State({"type": "overlay-item-name", "group": "breaks", "tab": ALL, "index": ALL}, "id"),
      State({"type": "overlay-item-color", "group": "breaks", "tab": ALL, "index": ALL}, "id"),
      State({"type": "overlay-item-visible", "group": "breaks", "tab": ALL, "index": ALL}, "id"),
      State({"type": "overlay-item-delete", "group": "breaks", "tab": ALL, "index": ALL}, "id"),
-     State("chart-overlays-store", "data")],
+     State("chart-overlays-store", "data"),
+     State("chart-tabs-store", "data")],
     prevent_initial_call=True
 )
-def update_break_items(price_values, color_values, visible_values, delete_clicks,
-                       price_ids, color_ids, visible_ids, delete_ids, overlays_data):
+def update_break_items(price_values, name_values, color_values, visible_values, delete_clicks,
+                       price_ids, name_ids, color_ids, visible_ids, delete_ids, overlays_data, tabs_data):
     """Update break items when fields change."""
     from dash import callback_context
     import json
@@ -2699,6 +2955,7 @@ def update_break_items(price_values, color_values, visible_values, delete_clicks
 
     if action_type == "overlay-item-delete":
         tab_overlays["breaks"] = [item for item in items if item.get("id") != item_id]
+        save_overlays_to_db(overlays, tabs_data)
         return overlays
 
     def value_by_id(ids, values):
@@ -2717,6 +2974,10 @@ def update_break_items(price_values, color_values, visible_values, delete_clicks
                     item["price"] = float(new_value)
                 except (TypeError, ValueError):
                     pass
+        elif action_type == "overlay-item-name":
+            new_value = value_by_id(name_ids, name_values)
+            if new_value is not None:
+                item["name"] = new_value or ""
         elif action_type == "overlay-item-color":
             new_value = value_by_id(color_ids, color_values)
             if new_value:
@@ -2726,7 +2987,100 @@ def update_break_items(price_values, color_values, visible_values, delete_clicks
             item["visible"] = "visible" in (new_value or [])
         break
 
+    # Save to database
+    save_overlays_to_db(overlays, tabs_data)
+
     return overlays
+
+
+@app.callback(
+    Output("chart-overlays-store", "data", allow_duplicate=True),
+    Input({"type": "chart-graph", "index": ALL}, "relayoutData"),
+    [State("chart-overlays-store", "data"),
+     State("chart-tabs-store", "data"),
+     State({"type": "chart-graph", "index": ALL}, "id")],
+    prevent_initial_call=True
+)
+def update_overlays_from_chart_drag(relayout_data_list, overlays_data, tabs_data, graph_ids):
+    """Update overlay prices when user drags shapes in the chart."""
+    from dash import callback_context
+    import json
+    import copy
+
+    if not callback_context.triggered:
+        return dash.no_update
+
+    # Find which graph triggered
+    trigger = callback_context.triggered[0]["prop_id"]
+    if ".relayoutData" not in trigger:
+        return dash.no_update
+
+    try:
+        trigger_id_str = trigger.split(".")[0]
+        trigger_id = json.loads(trigger_id_str)
+        tab_id = trigger_id.get("index")
+    except:
+        return dash.no_update
+
+    # Get the relayout data for this graph
+    trigger_index = None
+    for idx, graph_id in enumerate(graph_ids):
+        if graph_id.get("index") == tab_id:
+            trigger_index = idx
+            break
+
+    if trigger_index is None or trigger_index >= len(relayout_data_list):
+        return dash.no_update
+
+    relayout_data = relayout_data_list[trigger_index]
+    if not relayout_data:
+        return dash.no_update
+
+    # Check if shapes were modified
+    shape_updates = {}
+    for key, value in relayout_data.items():
+        if key.startswith("shapes[") and (key.endswith(".y0") or key.endswith(".y1")):
+            # Extract shape index
+            import re
+            match = re.match(r"shapes\[(\d+)\]\.(y\d)", key)
+            if match:
+                shape_idx = int(match.group(1))
+                y_coord = match.group(2)
+                if shape_idx not in shape_updates:
+                    shape_updates[shape_idx] = {}
+                shape_updates[shape_idx][y_coord] = value
+
+    if not shape_updates:
+        return dash.no_update
+
+    # Update overlays
+    overlays = _normalize_overlay_store(copy.deepcopy(overlays_data))
+    tab_overlays = overlays.get("tabs", {}).get(tab_id, {})
+
+    # Count all items to map shape index to overlay
+    all_items = []
+    for group in ["brackets", "breaks"]:
+        items = tab_overlays.get(group, [])
+        for item in items:
+            all_items.append((group, item))
+
+    # Update prices based on shape movements
+    changed = False
+    for shape_idx, coords in shape_updates.items():
+        if shape_idx < len(all_items):
+            group, item = all_items[shape_idx]
+            # Use y0 for horizontal lines
+            new_price = coords.get("y0") or coords.get("y1")
+            if new_price and abs(float(item["price"]) - new_price) > 0.01:
+                item["price"] = round(new_price, 2)
+                changed = True
+                logger.info(f"[Shape Drag] Updated {group} {item.get('name', 'N/A')} to ${new_price:.2f}")
+
+    if changed:
+        # Save to database
+        save_overlays_to_db(overlays, tabs_data)
+        return overlays
+    return dash.no_update
 
 
 @app.callback(
@@ -2830,69 +3184,6 @@ def jump_to_overlay_chart(n_clicks, button_ids, tabs_data, overlays_data):
             break
 
     return tabs_data
-
-
-@app.callback(
-    Output("chart-overlays-store", "data", allow_duplicate=True),
-    Input({"type": "chart-graph", "index": ALL}, "relayoutData"),
-    [State({"type": "chart-graph", "index": ALL}, "id"),
-     State("chart-overlays-store", "data")],
-    prevent_initial_call=True
-)
-def update_overlay_from_drag(relayout_list, graph_ids, overlays_data):
-    """Persist overlay price changes when lines are dragged on the chart."""
-    from dash import callback_context
-    import json
-    import re
-    import copy
-
-    if not callback_context.triggered:
-        return dash.no_update
-
-    trigger = callback_context.triggered[0]["prop_id"].split(".")[0]
-    try:
-        trigger_id = json.loads(trigger)
-    except json.JSONDecodeError:
-        return dash.no_update
-
-    tab_id = trigger_id.get("index")
-    if not tab_id:
-        return dash.no_update
-
-    graph_map = {graph_id.get("index"): idx for idx, graph_id in enumerate(graph_ids or [])}
-    graph_idx = graph_map.get(tab_id)
-    if graph_idx is None:
-        return dash.no_update
-
-    relayout_data = (relayout_list or [])[graph_idx] if graph_idx < len(relayout_list or []) else None
-    if not relayout_data:
-        return dash.no_update
-
-    shape_updates = {}
-    for key, value in relayout_data.items():
-        match = re.match(r"shapes\[(\d+)\]\.y0", key)
-        if match:
-            shape_updates[int(match.group(1))] = value
-
-    if not shape_updates:
-        return dash.no_update
-
-    overlays = _normalize_overlay_store(copy.deepcopy(overlays_data))
-    tab_overlays = _ensure_overlay_tab(overlays, tab_id)
-    flat_items = _flatten_overlay_items(tab_overlays)
-
-    updated = False
-    for shape_idx, new_value in shape_updates.items():
-        if shape_idx >= len(flat_items):
-            continue
-        group, item = flat_items[shape_idx]
-        try:
-            item["price"] = round(float(new_value), 2)
-            updated = True
-        except (TypeError, ValueError):
-            continue
-
-    return overlays if updated else dash.no_update
 
 
 @app.callback(
@@ -3018,8 +3309,9 @@ def add_new_chart_tab(n_clicks, symbol, timeframe, chart_type, tabs_data):
 )
 def search_new_tab_symbols(search_value):
     """Search for symbols in new tab modal"""
+    # Don't clear options when search_value is empty - this prevents resetting the selected value
     if not search_value or len(search_value) < 1:
-        return []
+        return dash.no_update
     
     from sqlalchemy.orm import Session
     from src.models.entities import Entity
@@ -3057,8 +3349,8 @@ def search_new_tab_symbols(search_value):
 )
 def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, fullscreen_data, layout_preset, refresh_clicks):
     """
-    Render chart display area using a 'hide/show' pattern for performance.
-    It creates all chart divs at once and uses CSS to toggle visibility.
+    Render chart display area - OPTIMIZED to only render active tab.
+    This significantly improves tab switching performance.
     """
     tabs = tabs_data.get('tabs', [])
     active_tab_id = tabs_data.get('active_tab')
@@ -3205,20 +3497,29 @@ def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, ful
 
         return quad_layout, container_class
 
-    all_chart_divs = []
+    # PERFORMANCE OPTIMIZATION: Only render the active tab
+    # This avoids expensive API calls and chart rendering for hidden tabs
+    active_tab = None
     for tab in tabs:
-        is_active = tab['id'] == active_tab_id
-        # Set style to 'display: none' for inactive tabs
-        display_style = {'display': 'block' if is_active else 'none'}
+        if tab['id'] == active_tab_id:
+            active_tab = tab
+            break
 
-        # Combine with existing height styles
-        height = 'calc(100vh - 180px)' if is_fullscreen else 'calc(100vh - 320px)'
-        final_style = {**display_style, 'height': height, 'minHeight': '600px'}
+    if not active_tab:
+        # Fallback to first tab if active not found
+        active_tab = tabs[0] if tabs else None
 
-        panel_content = build_tab_panel(tab, "100%", is_active, clickable=False)
-        all_chart_divs.append(html.Div(panel_content, style=final_style))
+    if not active_tab:
+        return dbc.Alert("No active chart.", color="info", className="mt-3"), container_class
 
-    return all_chart_divs, container_class
+    # Only render the single active tab
+    height = 'calc(100vh - 180px)' if is_fullscreen else 'calc(100vh - 320px)'
+    final_style = {'display': 'block', 'height': height, 'minHeight': '600px'}
+
+    panel_content = build_tab_panel(active_tab, "100%", True, clickable=False)
+    single_chart_div = html.Div(panel_content, style=final_style)
+
+    return single_chart_div, container_class
 
 
 @app.callback(

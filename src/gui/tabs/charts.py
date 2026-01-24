@@ -16,9 +16,13 @@ market_data = MarketDataProvider()
 def create_layout():
     """Create charts tab layout with modern tab-based interface"""
     return dbc.Container([
-        # Auto-refresh interval - reduced for better performance
+        # Auto-refresh interval for price updates
+        dcc.Interval(id='chart-price-update-interval', interval=30000, n_intervals=0),  # 30 seconds
         dcc.Interval(id='chart-update-interval', interval=60000, n_intervals=0, disabled=True),  # 60 seconds, disabled by default
-        
+
+        # Store for cached price data (non-blocking)
+        dcc.Store(id='chart-price-cache-store', storage_type='memory', data={}),
+
         # Store for open chart tabs
         dcc.Store(id='chart-tabs-store', storage_type='local', data={
             'tabs': [
@@ -29,8 +33,8 @@ def create_layout():
             'active_tab': 'tab-1'
         }),
 
-        # Store for bracket/break overlays per chart
-        dcc.Store(id='chart-overlays-store', storage_type='local', data={
+        # Store for bracket/break overlays per chart (DB-backed, memory storage only)
+        dcc.Store(id='chart-overlays-store', storage_type='memory', data={
             'tabs': {}
         }),
         

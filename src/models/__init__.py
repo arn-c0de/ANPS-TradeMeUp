@@ -11,6 +11,7 @@ from src.models.data_quality import DataQualityScore
 from src.models.analysis import MarketRegime, SurpriseScore, ImpactScore
 from src.models.predictions import Prediction, PredictionOutcome
 from src.models.trading_simulation import TradingSimulation
+from src.models.chart_overlays import ChartOverlay
 
 __all__ = [
     "Base",
@@ -27,4 +28,5 @@ __all__ = [
     "Prediction",
     "PredictionOutcome",
     "TradingSimulation",
+    "ChartOverlay",
 ]

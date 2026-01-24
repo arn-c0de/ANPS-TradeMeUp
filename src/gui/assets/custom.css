@@ -775,3 +775,24 @@ pre {
     background-color: #1a1a1a !important;
     color: #ffffff !important;
 }
+
+/* ===== OVERLAY DRAG LABEL (PRICE DISPLAY WHEN MOVING LINES) ===== */
+.overlay-drag-label {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background-color: rgba(0, 0, 0, 0.95);
+    color: #00ff88;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    border: 3px solid #00ff88;
+    box-shadow: 0 6px 20px rgba(0, 255, 136, 0.6), 0 0 30px rgba(0, 255, 136, 0.4);
+    pointer-events: none !important;
+    z-index: 99999 !important;
+    white-space: nowrap;
+    transition: opacity 0.1s ease;
+    letter-spacing: 1px;
+}
