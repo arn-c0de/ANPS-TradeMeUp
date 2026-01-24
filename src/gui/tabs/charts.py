@@ -4,7 +4,9 @@ Charts Tab - Live Market Data and Visualizations with Multi-Panel Support
 
 from dash import dcc, html
 import dash_bootstrap_components as dbc
-from src.gui.charts import MarketDataProvider, create_candlestick_chart, create_empty_chart, create_price_indicator_card
+
+from src.gui.charts import MarketDataProvider, create_empty_chart, create_price_indicator_card
+from src.gui.charts.live_charts import create_candlestick_chart, create_line_chart, create_multi_line_chart
 
 
 # Initialize market data provider
@@ -312,24 +314,51 @@ def get_price_indicator(symbol: str):
         return html.Div(f"Error loading price data: {str(e)}", className="text-danger")
 
 
-def get_stock_chart_with_stats(symbol: str, timeframe: str = '1mo', chart_type: str = 'candlestick', show_volume: bool = True, show_ma: bool = False, show_stats: bool = True):
-    """Get stock chart with optional statistics card"""
+def _build_stats_card(stats_data: dict):
+    """Build a compact statistics card from stats data."""
+    if not stats_data:
+        return None
+
+    return dbc.Card([
+        dbc.CardBody([
+            dbc.Row([
+                dbc.Col([
+                    html.Span([stats_data['arrow'], f" {stats_data['symbol']} "], className="fw-bold me-2", style={"fontSize": "0.9rem"}),
+                    html.Span(f"${stats_data['current_price']:.2f}", className=f"text-{stats_data['color']} fw-bold me-2", style={"fontSize": "0.9rem"}),
+                    html.Span(
+                        f"{stats_data['price_change']:+.2f} ({stats_data['price_change_pct']:+.2f}%)",
+                        className=f"text-{stats_data['color']} me-3",
+                        style={"fontSize": "0.75rem"}
+                    ),
+                ], width="auto", className="d-flex align-items-center"),
+                dbc.Col([
+                    html.Span(["H ", html.Strong(f"${stats_data['high']:.2f}")], className="me-2", style={"fontSize": "0.75rem"}),
+                    html.Span(["L ", html.Strong(f"${stats_data['low']:.2f}")], className="me-2", style={"fontSize": "0.75rem"}),
+                    html.Span(
+                        ["Vol ", html.Strong(
+                            f"{stats_data['volume']/1000000:.1f}M" if stats_data['volume'] > 1000000 else f"{stats_data['volume']/1000:.1f}K"
+                        )],
+                        style={"fontSize": "0.75rem"}
+                    )
+                ], width="auto", className="d-flex align-items-center")
+            ], className="align-items-center justify-content-between")
+        ], className="py-1 px-2")
+    ], className="mb-1", style={"backgroundColor": "rgba(0,0,0,0.3)"})
+
+
+def get_stock_chart_components(symbol: str, timeframe: str = '1mo', chart_type: str = 'candlestick', show_volume: bool = True, show_ma: bool = False):
+    """Get chart graph component and stats data."""
     try:
-        # Parse timeframe
         if timeframe == '1d_1m':
             df = market_data.get_intraday_data(symbol, days=1)
-            title = f"{symbol}"
         elif timeframe == '5d_5m':
             df = market_data.get_historical_data(symbol, period='5d', interval='5m')
-            title = f"{symbol}"
         else:
             df = market_data.get_historical_data(symbol, period=timeframe)
-            title = f"{symbol}"
-        
+
         if df is None or df.empty:
-            return dbc.Alert(f"No data available for {symbol}", color="warning")
-        
-        # Calculate statistics
+            return dbc.Alert(f"No data available for {symbol}", color="warning"), None
+
         current_price = df['Close'].iloc[-1]
         first_price = df['Close'].iloc[0]
         price_change = current_price - first_price
@@ -337,39 +366,27 @@ def get_stock_chart_with_stats(symbol: str, timeframe: str = '1mo', chart_type: 
         high = df['High'].max()
         low = df['Low'].min()
         volume = df['Volume'].iloc[-1] if 'Volume' in df.columns else 0
-        
-        # Determine color
+
         color = "success" if price_change >= 0 else "danger"
         arrow = "🔼" if price_change >= 0 else "🔽"
-        
-        # Statistics card - compact version
-        stats_card = None
-        if show_stats:
-            stats_card = dbc.Card([
-                dbc.CardBody([
-                    dbc.Row([
-                        dbc.Col([
-                            html.Span([arrow, f" {symbol} "], className="fw-bold me-2", style={"fontSize": "0.9rem"}),
-                            html.Span(f"${current_price:.2f}", className=f"text-{color} fw-bold me-2", style={"fontSize": "0.9rem"}),
-                            html.Span(f"{price_change:+.2f} ({price_change_pct:+.2f}%)", className=f"text-{color} me-3", style={"fontSize": "0.75rem"}),
-                        ], width="auto", className="d-flex align-items-center"),
-                        dbc.Col([
-                            html.Span(["H ", html.Strong(f"${high:.2f}")], className="me-2", style={"fontSize": "0.75rem"}),
-                            html.Span(["L ", html.Strong(f"${low:.2f}")], className="me-2", style={"fontSize": "0.75rem"}),
-                            html.Span(["Vol ", html.Strong(f"{volume/1000000:.1f}M" if volume > 1000000 else f"{volume/1000:.1f}K")], style={"fontSize": "0.75rem"})
-                        ], width="auto", className="d-flex align-items-center")
-                    ], className="align-items-center justify-content-between")
-                ], className="py-1 px-2")
-            ], className="mb-1", style={"backgroundColor": "rgba(0,0,0,0.3)"})
-        
-        # Create appropriate chart
+
+        stats_data = {
+            'symbol': symbol,
+            'current_price': current_price,
+            'price_change': price_change,
+            'price_change_pct': price_change_pct,
+            'high': high,
+            'low': low,
+            'volume': volume,
+            'color': color,
+            'arrow': arrow
+        }
+
         if chart_type == 'candlestick':
-            from src.gui.charts.live_charts import create_candlestick_chart
             fig = create_candlestick_chart(df, symbol, "", show_volume=show_volume, show_ma=show_ma)
         else:
-            from src.gui.charts.live_charts import create_line_chart
             fig = create_line_chart(df, symbol)
-        
+
         chart_graph = dcc.Graph(
             figure=fig,
             style={'height': '100%', 'width': '100%', 'flex': '1 1 auto'},
@@ -382,19 +399,39 @@ def get_stock_chart_with_stats(symbol: str, timeframe: str = '1mo', chart_type: 
             },
             className='flex-grow-1'
         )
-        
-        if show_stats:
-            return html.Div([stats_card, chart_graph], style={'height': '100%', 'display': 'flex', 'flexDirection': 'column'})
-        else:
-            return html.Div([chart_graph], style={'height': '100%', 'display': 'flex', 'flexDirection': 'column'})
-    
+
+        return chart_graph, stats_data
+
     except Exception as e:
-        return dbc.Alert(f"Error creating chart: {str(e)}", color="danger")
+        return dbc.Alert(f"Error creating chart: {str(e)}", color="danger"), None
 
 
-def get_stock_chart(symbol: str, timeframe: str = '1mo', chart_type: str = 'candlestick', show_volume: bool = True, show_ma: bool = False):
-    """Legacy function - redirects to new function"""
-    return get_stock_chart_with_stats(symbol, timeframe, chart_type, show_volume, show_ma, show_stats=False)
+def get_stock_chart_with_stats(
+    symbol: str,
+    timeframe: str = '1mo',
+    chart_type: str = 'candlestick',
+    show_volume: bool = True,
+    show_ma: bool = False,
+    show_stats: bool = True,
+    render_stats_card: bool = True
+):
+    """Get stock chart with optional statistics card."""
+    chart_component, stats_data = get_stock_chart_components(
+        symbol,
+        timeframe,
+        chart_type,
+        show_volume=show_volume,
+        show_ma=show_ma
+    )
+    if stats_data is None:
+        return chart_component
+
+    stats_card = _build_stats_card(stats_data) if show_stats and render_stats_card else None
+    children = [stats_card, chart_component] if stats_card else [chart_component]
+    return html.Div(children, style={'height': '100%', 'display': 'flex', 'flexDirection': 'column'})
+
+
+
 
 
 def get_comparison_chart(symbols: list, timeframe: str = '3mo'):
@@ -414,7 +451,6 @@ def get_comparison_chart(symbols: list, timeframe: str = '3mo'):
         if not data_dict:
             return dcc.Graph(figure=create_empty_chart("No data available for comparison"))
         
-        from src.gui.charts.live_charts import create_multi_line_chart
         fig = create_multi_line_chart(data_dict, "Stock Performance Comparison (% Change)")
         fig.update_yaxes(title="% Change from Start")
         
@@ -424,13 +460,131 @@ def get_comparison_chart(symbols: list, timeframe: str = '3mo'):
         return html.Div(f"Error creating comparison: {str(e)}", className="text-danger")
 
 
+def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, panel_id: str = None):
+    """Create trading action overlay for chart panels."""
+    stats_block = None
+    if show_stats and stats_data:
+        stats_block = html.Div([
+            html.Div([
+                html.Span([stats_data['arrow'], f" {stats_data['symbol']}"], className="fw-bold"),
+                html.Span(f"${stats_data['current_price']:.2f}", className=f"text-{stats_data['color']} fw-bold")
+            ], style={
+                'display': 'flex',
+                'flexWrap': 'wrap',
+                'gap': '4px',
+                'alignItems': 'baseline',
+                'fontSize': '0.72rem',
+                'lineHeight': '1.1'
+            }),
+            html.Div(
+                f"{stats_data['price_change']:+.2f} ({stats_data['price_change_pct']:+.2f}%)",
+                className=f"text-{stats_data['color']}",
+                style={'fontSize': '0.68rem', 'lineHeight': '1.1'}
+            )
+        ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '2px', 'minWidth': '0', 'flex': '1 1 auto'})
+
+    settings_button = None
+    if panel_id:
+        settings_button = dbc.Button(
+            html.I(className="fas fa-cog"),
+            id={"type": "panel-settings-btn", "index": panel_id},
+            color="dark",
+            size="sm",
+            className="p-0",
+            outline=True,
+            style={
+                'width': '24px',
+                'height': '22px',
+                'lineHeight': '1',
+                'display': 'flex',
+                'alignItems': 'center',
+                'justifyContent': 'center',
+                'backgroundColor': '#111',
+                'border': '1px solid #333'
+            },
+            title="Chart Settings"
+        )
+
+    overlay_children = []
+    overlay_children.append(html.Div(
+        [stats_block or html.Div(), settings_button] if settings_button else [stats_block or html.Div()],
+        style={
+            'display': 'flex',
+            'justifyContent': 'space-between',
+            'alignItems': 'flex-start',
+            'gap': '6px',
+            'marginBottom': '6px'
+        }
+    ))
+    overlay_children.extend([
+        html.Div([
+            dbc.Input(
+                type="text",
+                placeholder="Brackets",
+                size="sm",
+                style={
+                    'flex': '1 1 0',
+                    'minWidth': '0',
+                    'height': '24px',
+                    'fontSize': '0.7rem',
+                    'backgroundColor': '#111',
+                    'color': '#e8e8e8',
+                    'border': '1px solid #333'
+                }
+            ),
+            dbc.Input(
+                type="text",
+                placeholder="Breaks",
+                size="sm",
+                style={
+                    'flex': '1 1 0',
+                    'minWidth': '0',
+                    'height': '24px',
+                    'fontSize': '0.7rem',
+                    'backgroundColor': '#111',
+                    'color': '#e8e8e8',
+                    'border': '1px solid #333'
+                }
+            )
+        ], style={'display': 'flex', 'gap': '6px', 'marginBottom': '6px'}),
+        html.Div([
+            dbc.Button("Buy", color="success", size="sm", outline=True, style={'flex': '1 1 0', 'height': '24px', 'padding': '0'}),
+            dbc.Button("Sell", color="danger", size="sm", outline=True, style={'flex': '1 1 0', 'height': '24px', 'padding': '0'})
+        ], style={'display': 'flex', 'gap': '6px'})
+    ])
+
+    return html.Div(overlay_children, className="trading-overlay", style={
+        'position': 'absolute',
+        'top': '10px',
+        'left': '10px',
+        'zIndex': '1500',
+        'backgroundColor': '#000',
+        'opacity': '1',
+        'border': '1px solid #333',
+        'padding': '6px',
+        'borderRadius': '5px',
+        'width': '160px',
+        'minHeight': '0',
+        'color': '#e8e8e8',
+        'display': 'flex',
+        'flexDirection': 'column',
+        'gap': '4px'
+    })
+
+
 def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True):
-    """Create a single chart panel with controls"""
+    """Create a single chart panel with controls and a trading action overlay."""
+    # Extract configuration with sensible defaults
     symbol = config.get('symbol', 'AAPL')
     timeframe = config.get('timeframe', '1mo')
     chart_type = config.get('chart_type', 'candlestick')
     is_favorite = config.get('favorite', False)
-    
+
+    # Extract chart-specific options from the config
+    show_volume = config.get('show_volume', True)
+    show_ma = config.get('show_ma', False)
+    show_stats = config.get('show_stats', True)
+
     # Panel header with controls
     header_content = [
         dbc.Row([
@@ -451,29 +605,38 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True):
             ], width=4, className="text-end")
         ])
     ] if show_controls else [html.H6(f"{symbol}", className="mb-0")]
-    
-    # Get chart
-    chart_content = get_stock_chart(symbol, timeframe, chart_type)
-    
+
+    # Get chart content and stats for overlay
+    chart_component, stats_data = get_stock_chart_components(symbol, timeframe, chart_type, show_volume, show_ma)
+    chart_content = chart_component
+    trading_overlay = create_trading_overlay(stats_data, show_stats, panel_id=panel_id)
+
     return dbc.Card([
         dbc.CardHeader(header_content, className="py-1", style={'padding': '4px 12px', 'minHeight': '32px', 'maxHeight': '32px'}) if show_controls else None,
         dbc.CardBody([
+            trading_overlay,
             dcc.Loading(
                 id={"type": "loading-panel", "index": panel_id},
                 type="default",
                 children=html.Div(
-                    chart_content, 
+                    chart_content,
                     id={"type": "chart-content", "index": panel_id},
                     style={
-                        'height': '100%', 
+                        'height': '100%',
                         'width': '100%',
                         'overflow': 'hidden',
-                        'display': 'flex', 
+                        'display': 'flex',
                         'flexDirection': 'column'
                     }
                 )
             )
-        ], className="p-1", style={'height': 'calc(100% - 32px)', 'overflow': 'hidden'})
+        ],
+        className="p-1",
+        style={ # ADDED position: relative HERE
+            'position': 'relative',
+            'height': 'calc(100% - 32px)',
+            'overflow': 'hidden'
+        })
     ], className="h-100", style={'height': '100%', 'overflow': 'hidden'})
 
 

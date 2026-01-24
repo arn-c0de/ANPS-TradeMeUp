@@ -2423,38 +2423,20 @@ def render_chart_display(tabs_data, quad_data, chart_options, fullscreen_data, l
             tab_show_ma = tab.get('show_ma', False)
             # Stats still use global setting
             
-            chart = charts.get_stock_chart_with_stats(
+            chart_component, stats_data = charts.get_stock_chart_components(
                 tab['symbol'],
                 tab['timeframe'],
                 tab['chart_type'],
                 show_volume=tab_show_volume,
-                show_ma=tab_show_ma,
-                show_stats=show_stats
+                show_ma=tab_show_ma
             )
+            chart = html.Div([chart_component], style={'height': '100%', 'display': 'flex', 'flexDirection': 'column'})
+            trading_overlay = charts.create_trading_overlay(stats_data, show_stats, panel_id=tab['id'])
             
             # Panel with settings button next to symbol/stats
             panel_content = html.Div([
                 chart,
-                # Settings button positioned OVER the chart at top-left
-                dbc.Button(
-                    [html.I(className="fas fa-cog"), " "],
-                    id={"type": "panel-settings-btn", "index": tab['id']},
-                    color="dark",
-                    size="sm",
-                    className="position-absolute",
-                    outline=True,
-                    style={
-                        'top': '5px', 
-                        'left': '8px',
-                        'zIndex': '2000',  # Very high to be above everything
-                        'opacity': '0.9',
-                        'transition': 'all 0.2s ease',
-                        'padding': '3px 8px',
-                        'fontSize': '0.8rem',
-                        'boxShadow': '0 2px 4px rgba(0,0,0,0.3)'
-                    },
-                    title="Chart Settings"
-                )
+                trading_overlay,
             ], style={'position': 'relative', 'height': '100%'})
             
             # Clickable panel wrapper to focus tab on click
@@ -2564,38 +2546,20 @@ def render_chart_display(tabs_data, quad_data, chart_options, fullscreen_data, l
         tab_show_volume = active_tab.get('show_volume', True)
         tab_show_ma = active_tab.get('show_ma', False)
         
-        chart = charts.get_stock_chart_with_stats(
+        chart_component, stats_data = charts.get_stock_chart_components(
             active_tab['symbol'],
             active_tab['timeframe'],
             active_tab['chart_type'],
             show_volume=tab_show_volume,
-            show_ma=tab_show_ma,
-            show_stats=show_stats
+            show_ma=tab_show_ma
         )
+        chart = html.Div([chart_component], style={'height': '100%', 'display': 'flex', 'flexDirection': 'column'})
+        trading_overlay = charts.create_trading_overlay(stats_data, show_stats, panel_id=active_tab_id)
         
         # Chart with settings button next to symbol/stats
         chart_content = html.Div([
             chart,
-            # Settings button positioned OVER the chart at top-left
-            dbc.Button(
-                [html.I(className="fas fa-cog"), " "],
-                id={"type": "panel-settings-btn", "index": active_tab_id},
-                color="dark",
-                size="sm",
-                className="position-absolute",
-                outline=True,
-                style={
-                    'top': '5px', 
-                    'left': '8px',
-                    'zIndex': '2000',  # Very high to be above everything
-                    'opacity': '0.9',
-                    'transition': 'all 0.2s ease',
-                    'padding': '3px 8px',
-                    'fontSize': '0.8rem',
-                    'boxShadow': '0 2px 4px rgba(0,0,0,0.3)'
-                },
-                title="Chart Settings"
-            )
+            trading_overlay,
         ], style={'position': 'relative', 'height': '100%'})
         
         height = 'calc(100vh - 180px)' if is_fullscreen else 'calc(100vh - 320px)'
