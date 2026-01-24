@@ -36,7 +36,8 @@ def create_layout():
                                     dcc.Dropdown(
                                         id="pred-entity-filter",
                                         multi=True,
-                                        placeholder="All entities..."
+                                        placeholder="All entities...",
+                                        searchable=True
                                     )
                                 ], width=3),
                                 dbc.Col([
@@ -407,12 +408,14 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
 
 
 def get_entity_options(engine):
-    """Get available entities for dropdown filter"""
+    """Get available entities for dropdown filter - includes all entities that have predictions"""
     try:
         with Session(engine) as db:
-            entities = db.query(Entity).filter(
-                Entity.entity_type == 'company'
-            ).order_by(Entity.entity_name).all()
+            # Get all entities that have predictions (regardless of entity_type)
+            # This includes companies, ETFs, indices, etc.
+            entities = db.query(Entity).join(
+                Prediction, Entity.entity_id == Prediction.entity_id
+            ).distinct().order_by(Entity.entity_name).all()
 
             return [
                 {'label': f"{e.entity_name} ({e.entity_id})", 'value': e.entity_id}
