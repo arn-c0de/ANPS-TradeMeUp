@@ -107,7 +107,7 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", sho
     fig.update_layout(
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(10,10,10,1)',
+        plot_bgcolor='rgba(0,0,0,0)',
         xaxis_rangeslider_visible=False,
         height=None,  # Auto height
         autosize=True,  # Enable autosizing
@@ -177,7 +177,7 @@ def create_line_chart(df: pd.DataFrame, symbol: str, column: str = 'Close') -> g
     fig.update_layout(
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(10,10,10,1)',
+        plot_bgcolor='rgba(0,0,0,0)',
         title=f'{symbol} {column}',
         height=None,  # Allow dynamic height
         autosize=True,
@@ -218,7 +218,7 @@ def create_multi_line_chart(data_dict: dict, title: str = "Comparison") -> go.Fi
     fig.update_layout(
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(10,10,10,1)',
+        plot_bgcolor='rgba(0,0,0,0)',
         title=title,
         height=None,  # Allow dynamic height
         autosize=True,
@@ -297,7 +297,7 @@ def create_empty_chart(message: str = "No data available") -> go.Figure:
     fig.update_layout(
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(10,10,10,1)',
+        plot_bgcolor='rgba(0,0,0,0)',
         xaxis=dict(visible=False),
         yaxis=dict(visible=False),
         height=None,  # Allow dynamic height
@@ -329,7 +329,7 @@ def create_heatmap(data: pd.DataFrame, title: str = "Correlation Heatmap") -> go
     fig.update_layout(
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(10,10,10,1)',
+        plot_bgcolor='rgba(0,0,0,0)',
         title=title,
         height=None,  # Allow dynamic height
         autosize=True,
