@@ -165,8 +165,8 @@ def main():
 
         imp_stats = impact.get_statistics()
         logger.info(f"📊 Impact Stats: {imp_stats}")
-        if imp_stats['top_impactful']:
-            logger.info(f"Top Impactful News: {imp_stats['top_impactful'][:3]}")
+        if imp_stats.get('top_impactful'):
+            logger.info(f"Top Impactful News: {imp_stats.get('top_impactful')[:3]}")
         activity_logger.log_agent_success("Impact Scoring Agent", impact_results.get('processed', 0))
 
         # ===== PHASE 8: PREDICTION GENERATION =====

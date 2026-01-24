@@ -1106,8 +1106,13 @@ def set_refresh_loading_state(refresh_clicks, button_ids, horizon, entities, sta
             # Add task to queue
             def refresh_task():
                 """Execute the refresh in background"""
-                from src.services.prediction_performance_service import prediction_performance_service
-                return prediction_performance_service.calculate_and_save_performance(engine, prediction_id)
+                try:
+                    from src.services.prediction_performance_service import prediction_performance_service
+                    result = prediction_performance_service.calculate_and_save_performance(engine, prediction_id)
+                    return result if result else {"status": "completed"}
+                except Exception as e:
+                    logger.error(f"Error in refresh_task for {prediction_id}: {e}", exc_info=True)
+                    return {"status": "error", "error": str(e)}
             
             # Get queue stats
             queue_mgr = get_task_queue()
@@ -1162,55 +1167,65 @@ def refresh_prediction_performance(n_intervals, loading_state, horizon, entities
     """Check task queue and update UI when tasks complete"""
     from src.gui.utils.task_queue import TaskStatus
     
-    # Check if we have an active task
-    if not loading_state or "task_id" not in loading_state:
+    try:
+        # Check if we have an active task
+        if not loading_state or "task_id" not in loading_state:
+            raise dash.exceptions.PreventUpdate
+        
+        task_id = loading_state.get("task_id")
+        prediction_id = loading_state.get("prediction_id")
+        
+        if not task_id or not prediction_id:
+            raise dash.exceptions.PreventUpdate
+        
+        # Check task status
+        queue_mgr = get_task_queue()
+        status = queue_mgr.get_task_status(task_id)
+    except Exception as e:
+        logger.error(f"Error in refresh_prediction_performance: {e}", exc_info=True)
         raise dash.exceptions.PreventUpdate
-    
-    task_id = loading_state.get("task_id")
-    prediction_id = loading_state.get("prediction_id")
-    
-    if not task_id or not prediction_id:
-        raise dash.exceptions.PreventUpdate
-    
-    # Check task status
-    queue_mgr = get_task_queue()
-    status = queue_mgr.get_task_status(task_id)
     
     # Task not found or still pending/running
     if status is None or status in [TaskStatus.PENDING, TaskStatus.RUNNING]:
         raise dash.exceptions.PreventUpdate
     
     # Task completed or failed - update UI
-    date_range = (start_date, end_date) if start_date or end_date else None
-    table = predictions.get_predictions_table(
-        engine,
-        entity_filter=entities,
-        date_range=date_range,
-        min_confidence=min_conf or 0,
-        horizon=horizon or '5d',
-        surprise_filter=surprise_filter or 'all',
-        refreshing_prediction_id=None
-    )
+    try:
+        date_range = (start_date, end_date) if start_date or end_date else None
+        table = predictions.get_predictions_table(
+            engine,
+            entity_filter=entities,
+            date_range=date_range,
+            min_confidence=min_conf or 0,
+            horizon=horizon or '5d',
+            surprise_filter=surprise_filter or 'all',
+            refreshing_prediction_id=None
+        )
+        
+        toast_msg = ""
+        toast_icon = "info"
+        
+        if status == TaskStatus.COMPLETED:
+            result = queue_mgr.get_task_result(task_id)
+            if result and isinstance(result, dict):
+                toast_msg = f"✅ Performance updated: {result.get('total_return_pct', 0):+.2f}%"
+                toast_icon = "success"
+            else:
+                toast_msg = "✅ Performance updated"
+                toast_icon = "success"
+        elif status == TaskStatus.FAILED:
+            toast_msg = "❌ Error updating performance"
+            toast_icon = "danger"
+        elif status == TaskStatus.CANCELLED:
+            toast_msg = "⚠️ Task cancelled"
+            toast_icon = "warning"
+        
+        return table, True, toast_msg, toast_icon, {}
     
-    toast_msg = ""
-    toast_icon = "info"
-    
-    if status == TaskStatus.COMPLETED:
-        result = queue_mgr.get_task_result(task_id)
-        if result:
-            toast_msg = f"✅ Performance updated: {result.get('total_return_pct', 0):+.2f}%"
-            toast_icon = "success"
-        else:
-            toast_msg = "✅ Performance updated"
-            toast_icon = "success"
-    elif status == TaskStatus.FAILED:
-        toast_msg = "❌ Error updating performance"
-        toast_icon = "danger"
-    elif status == TaskStatus.CANCELLED:
-        toast_msg = "⚠️ Task cancelled"
-        toast_icon = "warning"
-    
-    return table, True, toast_msg, toast_icon, {}
+    except Exception as e:
+        logger.error(f"Error updating UI after task completion: {e}", exc_info=True)
+        # Return minimal safe values
+        return dash.no_update, True, "❌ Error displaying results", "danger", {}
 
 
 @app.callback(

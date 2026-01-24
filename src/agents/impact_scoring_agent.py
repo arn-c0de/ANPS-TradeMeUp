@@ -484,7 +484,17 @@ class ImpactScoringAgent:
             current_regime = self._get_current_regime(db)
             regime_sensitivity = self._calculate_regime_sensitivity(current_regime)
 
-            sector_code = entity.metadata.get('sector') if entity.metadata else None
+            # Determine sector sensitivity from entity metadata (use metadata_ column)
+            try:
+                import json as _json
+                if entity.metadata_:
+                    meta = entity.metadata_ if isinstance(entity.metadata_, dict) else _json.loads(entity.metadata_)
+                else:
+                    meta = {}
+            except Exception:
+                meta = {}
+
+            sector_code = meta.get('sector') if meta else None
             sector_sensitivity = self._get_sector_sensitivity(sector_code or 'default')
 
             historical_reaction = self._calculate_historical_reaction(
@@ -566,11 +576,24 @@ class ImpactScoringAgent:
                 ImpactScore.impact_score >= 0.7
             ).count()
 
+            # Top impactful scores (news_id, entity_id, score)
+            top_scores = db.query(ImpactScore).order_by(ImpactScore.impact_score.desc()).limit(5).all()
+            top_impactful = [
+                {
+                    'news_id': str(s.news_id),
+                    'entity_id': s.entity_id,
+                    'impact_score': float(s.impact_score),
+                    'time_horizon': s.time_horizon
+                }
+                for s in top_scores
+            ]
+
             return {
                 'total_scores': total_scores,
                 'high_impact_count': high_impact_count,
                 'by_time_horizon': {
                     horizon: {'avg_score': float(avg), 'count': count}
                     for horizon, avg, count in by_horizon
-                }
+                },
+                'top_impactful': top_impactful
             }
