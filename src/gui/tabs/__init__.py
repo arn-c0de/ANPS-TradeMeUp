@@ -1,5 +1,5 @@
 """
-GUI Tabs Package - Modular tab components for TradeMeUp Dashboard
+GUI Tabs Package - Modular tab components for ANPS-TradeMeUp Dashboard
 """
 
 from . import dashboard

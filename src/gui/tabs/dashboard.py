@@ -22,6 +22,7 @@ from src.models.predictions import Prediction
 from src.models.analysis import MarketRegime, SurpriseScore, FactVerification
 from src.models.trading_simulation import TradingSimulation
 from src.gui.components import create_metric_card
+from src.config.settings import VERSION
 
 
 def create_layout():
@@ -155,7 +156,7 @@ def get_metrics(engine):
             return dbc.Row([
                 dbc.Col([
                     dbc.Alert([
-                        html.H4("🚀 Willkommen bei TradeMeUp!", className="alert-heading"),
+                        html.H4("🚀 Willkommen bei ANPS-TradeMeUp!", className="alert-heading"),
                         html.Hr(),
                         html.P("Die Datenbank ist leer. Starte die Pipeline um Daten zu sammeln:", className="mb-3"),
                         html.Ul([
@@ -401,8 +402,8 @@ def get_server_logs():
     log_file = Path("logs/dashboard.log")
     
     if not log_file.exists():
-        return """╔══════════════════════════════════════════════════════════════╗
-║  TradeMeUp Dashboard - Live Server Logs                     ║
+        return f"""╔══════════════════════════════════════════════════════════════╗
+║  ANPS-TradeMeUp Dashboard v{VERSION} - Live Server Logs         ║
 ╚══════════════════════════════════════════════════════════════╝
 
 ✨ Dashboard wurde erfolgreich gestartet!

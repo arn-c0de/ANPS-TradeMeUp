@@ -122,6 +122,49 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => schedulePlotlyResize(chartArea), 250);
     }
 
+    // Observe tabs container for tab changes
+    const tabsContainer = document.getElementById('tabs');
+    if (tabsContainer && chartArea) {
+        const tabsObserver = new MutationObserver(function(mutations) {
+            // Check if active tab changed (class changes on tab buttons)
+            mutations.forEach(function(mutation) {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                    // Tab was activated, schedule resize
+                    schedulePlotlyResize(chartArea);
+                    // Additional delayed resizes for reliable behavior
+                    setTimeout(() => schedulePlotlyResize(chartArea), 50);
+                    setTimeout(() => schedulePlotlyResize(chartArea), 250);
+                    setTimeout(() => schedulePlotlyResize(chartArea), 500);
+                    setTimeout(() => schedulePlotlyResize(chartArea), 1000);
+                }
+            });
+        });
+        tabsObserver.observe(tabsContainer, { 
+            attributes: true, 
+            attributeFilter: ['class'],
+            subtree: true,
+            childList: true
+        });
+    }
+
+    // Listen for tab clicks (Bootstrap tabs)
+    if (chartArea) {
+        document.addEventListener('click', function(e) {
+            // Check if clicked element is a tab button
+            const tabButton = e.target.closest('[role="tab"], .nav-link, [data-bs-toggle="tab"]');
+            if (tabButton) {
+                // Small delay to allow tab content to render
+                setTimeout(() => {
+                    schedulePlotlyResize(chartArea);
+                }, 100);
+                // Additional delayed resizes
+                setTimeout(() => schedulePlotlyResize(chartArea), 250);
+                setTimeout(() => schedulePlotlyResize(chartArea), 500);
+                setTimeout(() => schedulePlotlyResize(chartArea), 1000);
+            }
+        }, true);
+    }
+
     window.addEventListener('resize', function() {
         schedulePlotlyResize(chartArea);
     });
