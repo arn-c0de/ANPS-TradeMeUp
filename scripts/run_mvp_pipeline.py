@@ -29,6 +29,7 @@ from src.agents.impact_scoring_agent import ImpactScoringAgent
 from src.agents.prediction_agent import PredictionAgent
 from src.agents.trading_simulation_agent import TradingSimulationAgent
 from src.config.settings import settings
+from src.utils.redact import redact_url
 from src.utils.activity_logger import activity_logger
 import logging
 from datetime import datetime
@@ -56,7 +57,7 @@ def main():
     print_section("TradeMeUp MVP Pipeline - Complete Run")
     logger.info(f"Start Time: {start_time}")
     logger.info(f"LLM Provider: {settings.llm_provider}")
-    logger.info(f"Database: {settings.database_url}")
+    logger.info(f"Database: {redact_url(settings.database_url)}")
 
     # Create database session
     db = SessionLocal()
