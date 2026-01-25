@@ -2,15 +2,23 @@
 Agent Control Tab - Start, Stop and Monitor Agents
 """
 
-from dash import dcc, html, Input, Output, State
-import dash_bootstrap_components as dbc
-from datetime import datetime
-import subprocess
+import logging
 import os
+import subprocess
+import sys
+from datetime import datetime
 from pathlib import Path
+
+import dash
+import dash_bootstrap_components as dbc
+from dash import dcc, html, Input, Output, State
+
+from src.utils.activity_logger import activity_logger
+from src.utils.process_utils import stop_process
 
 # Get project root
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+logger = logging.getLogger(__name__)
 
 
 def create_layout():
@@ -397,5 +405,283 @@ def get_process_output(process):
                 break
             output.append(line)
         return "".join(output)
-    except:
+    except Exception:
         return ""
+
+
+def register_callbacks(app):
+    """Register control tab callbacks (continuous pipeline, RSS fetch, status)."""
+
+    @app.callback(
+        [
+            Output("continuous-pipeline-state", "data"),
+            Output("btn-start-continuous", "disabled"),
+            Output("btn-stop-continuous", "disabled"),
+        ],
+        [Input("btn-start-continuous", "n_clicks"), Input("btn-stop-continuous", "n_clicks")],
+        State("continuous-pipeline-state", "data"),
+        prevent_initial_call=True,
+    )
+    def control_continuous_pipeline(start_clicks, stop_clicks, current_state):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return dash.no_update
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        if button_id == "btn-start-continuous":
+            logger.info("Starting continuous pipeline with Python: %s", sys.executable)
+            wrapper_script = Path("scripts/run_continuous_pipeline_wrapper.bat").absolute()
+            if not wrapper_script.exists():
+                error_msg = "Wrapper script not found: %s" % wrapper_script
+                activity_logger.log_activity(error_msg, "ERROR")
+                logger.error(error_msg)
+                return dash.no_update
+            try:
+                cmd = 'start "TradeMeUp Pipeline" /D "%s" "%s" --interval 300' % (
+                    Path.cwd(),
+                    wrapper_script,
+                )
+                process = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
+                logger.info("Started pipeline with command: %s", cmd)
+                activity_logger.log_activity(
+                    "Continuous Pipeline console opened - Check the new terminal window",
+                    "SUCCESS",
+                )
+                logger.info("Pipeline console started with PID: %s", process.pid)
+                return ({"running": True, "pid": process.pid}, True, False)
+            except Exception as e:
+                activity_logger.log_activity("Failed to start continuous pipeline: %s" % e, "ERROR")
+                logger.error("Failed to start: %s", e, exc_info=True)
+                return dash.no_update
+        if button_id == "btn-stop-continuous":
+            if current_state and current_state.get("pid"):
+                success, message = stop_process(current_state["pid"])
+                if success:
+                    activity_logger.log_activity("Continuous Pipeline STOPPED: %s" % message, "INFO")
+                else:
+                    activity_logger.log_activity("Warning stopping pipeline: %s" % message, "WARNING")
+            return ({"running": False, "pid": None}, False, True)
+        return dash.no_update
+
+    @app.callback(
+        Output("rss-fetch-status-store", "data"),
+        Input("btn-fetch-rss-only", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def fetch_rss_only(n_clicks):
+        if not n_clicks:
+            return dash.no_update
+        try:
+            wrapper_script = Path("scripts/run_rss_fetch_wrapper.bat").absolute()
+            if not wrapper_script.exists():
+                error_msg = "RSS fetch script not found: %s" % wrapper_script
+                activity_logger.log_activity(error_msg, "ERROR")
+                logger.error(error_msg)
+                return {"status": "error", "message": str(error_msg)}
+            cmd = 'start "TradeMeUp RSS Fetch" /D "%s" "%s"' % (Path.cwd(), wrapper_script)
+            subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
+            logger.info("RSS fetch terminal opened with command: %s", cmd)
+            activity_logger.log_activity(
+                "RSS Feed Fetch: Terminal window opened - Check the new window",
+                "INFO",
+            )
+            return {"status": "success", "message": "RSS fetch started in new terminal"}
+        except Exception as e:
+            logger.error("Error opening RSS fetch terminal: %s", e, exc_info=True)
+            activity_logger.log_activity("RSS Fetch Error: %s" % str(e), "ERROR")
+            return {"status": "error", "message": str(e)}
+
+    @app.callback(
+        Output("continuous-status", "children"),
+        Input("interval-component", "n_intervals"),
+        State("continuous-pipeline-state", "data"),
+    )
+    def update_continuous_status(n, state):
+        if state and state.get("running"):
+            return html.Div([
+                html.Span("🔄 ", className="text-success"),
+                html.Small("Auto Mode", className="text-success fw-bold"),
+            ])
+        return html.Div([
+            html.Span("⏸️ ", className="text-muted"),
+            html.Small("Manual Mode", className="text-muted"),
+        ])
+
+    @app.callback(
+        Output("btn-run-single-agent", "disabled"),
+        Input("agent-selector", "value"),
+    )
+    def toggle_single_agent_button(selected_agent):
+        return selected_agent is None
+
+    @app.callback(
+        [
+            Output("pipeline-log", "value", allow_duplicate=True),
+            Output("badge-pipeline-status", "children", allow_duplicate=True),
+            Output("badge-pipeline-status", "color", allow_duplicate=True),
+        ],
+        Input("interval-component", "n_intervals"),
+        State("store-pipeline-state", "data"),
+        prevent_initial_call=True,
+    )
+    def update_pipeline_log(n, state):
+        if not state or not state.get("running"):
+            return dash.no_update
+        try:
+            output_file = Path("logs") / "pipeline_output.log"
+            if output_file.exists():
+                with open(output_file, "r", encoding="utf-8", errors="ignore") as f:
+                    lines = f.readlines()
+                    recent = "".join(lines[-100:])
+                if "PIPELINE COMPLETE" in recent or "COMPLETED SUCCESSFULLY" in recent:
+                    return recent, "COMPLETED", "success"
+                if "ERROR" in recent and "Traceback" in recent:
+                    return recent, "ERROR", "danger"
+                return recent, "RUNNING", "warning"
+            log_file = Path("logs") / "pipeline_activity.log"
+            if log_file.exists():
+                with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+                    recent = "".join(f.readlines()[-50:])
+                return recent, "RUNNING", "warning"
+        except Exception:
+            pass
+        return dash.no_update
+
+    @app.callback(
+        [
+            Output("store-pipeline-state", "data", allow_duplicate=True),
+            Output("pipeline-log", "value", allow_duplicate=True),
+            Output("badge-pipeline-status", "children", allow_duplicate=True),
+            Output("badge-pipeline-status", "color", allow_duplicate=True),
+        ],
+        Input("btn-run-full-pipeline", "n_clicks"),
+        [State("slider-article-limit", "value"), State("check-force-refresh", "value"), State("check-verbose", "value")],
+        prevent_initial_call=True,
+    )
+    def run_full_pipeline(n_clicks, limit, force, verbose):
+        if not n_clicks:
+            return dash.no_update
+        activity_logger.log_activity("User initiated Full MVP Pipeline from GUI", "INFO")
+        activity_logger.log_pipeline_start("TradeMeUp MVP Pipeline (GUI)")
+        wrapper = Path("scripts/run_mvp_pipeline_wrapper.bat").absolute()
+        if not wrapper.exists():
+            msg = f"Wrapper script not found: {wrapper}"
+            activity_logger.log_activity(msg, "ERROR")
+            return {"running": False}, msg, "ERROR", "danger"
+        try:
+            cmd = f'start "TradeMeUp MVP Pipeline" /D "{Path.cwd()}" "{wrapper}"'
+            proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
+        except Exception as e:
+            activity_logger.log_agent_error("Full Pipeline (GUI)", str(e))
+            return {"running": False}, str(e), "ERROR", "danger"
+        state = {"running": True, "process_id": proc.pid, "start_time": datetime.now().strftime("%H:%M:%S"), "type": "full_pipeline"}
+        log = f"[{datetime.now().strftime('%H:%M:%S')}] Full MVP Pipeline console opened\nProcess ID: {proc.pid}\nArticles: {limit}\n" + "-" * 60 + "\nCheck the new terminal window for live progress!\n"
+        activity_logger.log_activity(f"Pipeline process started (PID: {proc.pid})", "SUCCESS")
+        return state, log, "RUNNING", "warning"
+
+    @app.callback(
+        [
+            Output("store-pipeline-state", "data", allow_duplicate=True),
+            Output("pipeline-log", "value", allow_duplicate=True),
+            Output("badge-pipeline-status", "children", allow_duplicate=True),
+            Output("badge-pipeline-status", "color", allow_duplicate=True),
+        ],
+        Input("btn-run-quick-test", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def run_quick_test(n_clicks):
+        if not n_clicks:
+            return dash.no_update
+        activity_logger.log_activity("User initiated Quick Test from GUI", "INFO")
+        wrapper = Path("scripts/run_mvp_pipeline_wrapper.bat").absolute()
+        if not wrapper.exists():
+            msg = f"Wrapper script not found: {wrapper}"
+            activity_logger.log_activity(msg, "ERROR")
+            return {"running": False}, msg, "ERROR", "danger"
+        try:
+            cmd = f'start "TradeMeUp Quick Test" /D "{Path.cwd()}" "{wrapper}" --quick'
+            proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
+        except Exception as e:
+            activity_logger.log_agent_error("Quick Test (GUI)", str(e))
+            return {"running": False}, str(e), "ERROR", "danger"
+        state = {"running": True, "process_id": proc.pid, "start_time": datetime.now().strftime("%H:%M:%S"), "type": "quick_test"}
+        log = f"[{datetime.now().strftime('%H:%M:%S')}] Quick Test console opened\nProcess ID: {proc.pid}\n" + "-" * 60 + "\nCheck the new terminal window for live progress!\n"
+        activity_logger.log_activity(f"Quick test started (PID: {proc.pid})", "SUCCESS")
+        return state, log, "RUNNING", "warning"
+
+    @app.callback(
+        [
+            Output("store-pipeline-state", "data", allow_duplicate=True),
+            Output("pipeline-log", "value", allow_duplicate=True),
+            Output("badge-pipeline-status", "children", allow_duplicate=True),
+            Output("badge-pipeline-status", "color", allow_duplicate=True),
+        ],
+        Input("btn-run-full-backfill", "n_clicks"),
+        State("slider-backfill-batch", "value"),
+        prevent_initial_call=True,
+    )
+    def run_full_backfill(n_clicks, batch_size):
+        if not n_clicks:
+            return dash.no_update
+        activity_logger.log_activity("User initiated Full Backfill from GUI", "INFO")
+        wrapper = Path("scripts/run_backfill_wrapper.bat").absolute()
+        if not wrapper.exists():
+            msg = f"Wrapper script not found: {wrapper}"
+            activity_logger.log_activity(msg, "ERROR")
+            return {"running": False}, msg, "ERROR", "danger"
+        try:
+            cmd = f'start "TradeMeUp Backfill" /D "{Path.cwd()}" "{wrapper}" --batch-size {batch_size}'
+            proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
+        except Exception as e:
+            activity_logger.log_agent_error("Backfill (GUI)", str(e))
+            return {"running": False}, str(e), "ERROR", "danger"
+        state = {"running": True, "process_id": proc.pid, "start_time": datetime.now().strftime("%H:%M:%S"), "type": "full_backfill"}
+        log = f"[{datetime.now().strftime('%H:%M:%S')}] Full Backfill console opened\nProcess ID: {proc.pid}\nBatch: {batch_size}\n" + "-" * 60 + "\nCheck the new terminal window for live progress!\n"
+        activity_logger.log_activity(f"Full backfill started (PID: {proc.pid})", "SUCCESS")
+        return state, log, "RUNNING", "warning"
+
+    @app.callback(
+        [
+            Output("store-pipeline-state", "data", allow_duplicate=True),
+            Output("pipeline-log", "value", allow_duplicate=True),
+            Output("badge-pipeline-status", "children", allow_duplicate=True),
+            Output("badge-pipeline-status", "color", allow_duplicate=True),
+        ],
+        Input("btn-run-selective-backfill", "n_clicks"),
+        [State("check-backfill-phases", "value"), State("slider-backfill-batch", "value")],
+        prevent_initial_call=True,
+    )
+    def run_selective_backfill(n_clicks, selected_phases, batch_size):
+        if not n_clicks or not selected_phases:
+            return dash.no_update
+        activity_logger.log_activity("User initiated Selective Backfill from GUI", "INFO")
+        wrapper = Path("scripts/run_backfill_wrapper.bat").absolute()
+        if not wrapper.exists():
+            msg = f"Wrapper script not found: {wrapper}"
+            activity_logger.log_activity(msg, "ERROR")
+            return {"running": False}, msg, "ERROR", "danger"
+        all_phases = ["quality", "content", "entities", "facts", "surprises", "impact", "predictions"]
+        args = ["--batch-size", str(batch_size)]
+        for p in all_phases:
+            if p not in selected_phases:
+                args.append(f"--skip-{p}")
+        try:
+            cmd = f'start "TradeMeUp Backfill" /D "{Path.cwd()}" "{wrapper}" {" ".join(args)}'
+            proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
+        except Exception as e:
+            activity_logger.log_agent_error("Backfill (GUI)", str(e))
+            return {"running": False}, str(e), "ERROR", "danger"
+        state = {"running": True, "process_id": proc.pid, "start_time": datetime.now().strftime("%H:%M:%S"), "type": "selective_backfill"}
+        phase_names = {"quality": "Quality Assessment", "content": "Content Understanding", "entities": "Entity Mapping", "facts": "Fact Verification", "surprises": "Surprise Scoring", "impact": "Impact Scoring", "predictions": "Predictions"}
+        log = f"[{datetime.now().strftime('%H:%M:%S')}] Selective Backfill started\nProcess ID: {proc.pid}\nBatch: {batch_size}\n"
+        for ph in selected_phases:
+            log += f"  ✓ {phase_names.get(ph, ph)}\n"
+        log += "-" * 60 + "\n"
+        activity_logger.log_activity(f"Selective backfill started (PID: {proc.pid})", "SUCCESS")
+        return state, log, "RUNNING", "warning"
+
+    @app.callback(
+        Output("recent-executions", "children"),
+        Input("interval-component", "n_intervals"),
+    )
+    def update_recent_executions_cb(n):
+        return get_recent_executions()
