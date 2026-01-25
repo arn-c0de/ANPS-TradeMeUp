@@ -8,6 +8,7 @@ OPTIMIZED VERSION:
 - ✅ No session state leaks between batches
 """
 import logging
+import re
 from typing import Dict, List, Optional
 from datetime import datetime
 from pathlib import Path
@@ -209,6 +210,49 @@ Respond ONLY with JSON."""
                 unique_entities.append(entity)
         
         return unique_entities
+
+    def _find_ticker_by_company_name(self, company_name: str) -> Optional[str]:
+        """
+        Try to find ticker symbol by searching with company name.
+        
+        Args:
+            company_name: Company name to search for
+            
+        Returns:
+            Ticker symbol if found, None otherwise
+        """
+        # Check cache first
+        if company_name in self._ticker_cache:
+            return self._ticker_cache[company_name]
+        
+        try:
+            # Try searching with company name directly
+            ticker_obj = yf.Ticker(company_name)
+            info = ticker_obj.info
+            
+            if info and 'symbol' in info:
+                symbol = info['symbol']
+                self._ticker_cache[company_name] = symbol
+                logger.debug(f"Found ticker '{symbol}' for company '{company_name}'")
+                return symbol
+        except Exception:
+            pass
+        
+        # Try with cleaned name
+        try:
+            clean_name = company_name.replace(' Inc.', '').replace(' Corp.', '').replace(' LLC', '').replace(',', '').strip()
+            if clean_name != company_name:
+                ticker_obj = yf.Ticker(clean_name)
+                info = ticker_obj.info
+                if info and 'symbol' in info:
+                    symbol = info['symbol']
+                    self._ticker_cache[company_name] = symbol
+                    logger.debug(f"Found ticker '{symbol}' for cleaned company name '{clean_name}'")
+                    return symbol
+        except Exception:
+            pass
+        
+        return None
 
     def _normalize_ticker(self, company_name: str, suggested_ticker: Optional[str] = None) -> Optional[str]:
         """
@@ -424,8 +468,24 @@ Respond ONLY with JSON."""
                     # Validate ticker
                     ticker = self._normalize_ticker(entity_text, suggested_ticker)
 
+                    # If ticker validation failed, try to find ticker by company name
+                    if not ticker:
+                        logger.debug(f"Ticker validation failed for '{entity_text}' (suggested: '{suggested_ticker}'). Trying company name lookup...")
+                        ticker = self._find_ticker_by_company_name(entity_text)
+                    
+                    # If still no ticker, use normalized company name as fallback entity_id
+                    if not ticker:
+                        # Create a normalized entity_id from company name
+                        normalized_name = re.sub(r'[^a-zA-Z0-9]', '', entity_text.upper())[:20]  # Max 20 chars
+                        ticker = f"COMP_{normalized_name}"
+                        logger.warning(f"Using fallback entity_id '{ticker}' for company '{entity_text}' (suggested ticker '{suggested_ticker}' was invalid)")
+
                     if ticker:
                         # Check if entity exists or create new
+                        # Calculate normalized name for metadata comparison
+                        normalized_name_fallback = re.sub(r'[^a-zA-Z0-9]', '', entity_text.upper())[:20]
+                        is_validated = ticker != f"COMP_{normalized_name_fallback}"
+                        
                         entity = self._get_or_create_entity_no_commit(
                             db,
                             entity_id=ticker,
@@ -433,7 +493,9 @@ Respond ONLY with JSON."""
                             entity_name=entity_text,
                             metadata={
                                 'sector': ent.get('sector'),
-                                'industry': ent.get('industry')
+                                'industry': ent.get('industry'),
+                                'suggested_ticker': suggested_ticker,  # Store original suggestion
+                                'ticker_validated': is_validated
                             }
                         )
 

@@ -384,18 +384,22 @@ class PredictionAgent:
             List of ImpactScore objects
         """
         # Get high-impact scores that are recent (last 7 days)
-        from datetime import datetime, timedelta
-        cutoff_date = datetime.now() - timedelta(days=7)
+        from datetime import datetime, timedelta, timezone
+        # Use UTC to match impact score timestamps
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=7)
+        
+        # Use configurable threshold (default 0.4, can be lowered to 0.3 for more predictions)
+        min_impact_threshold = settings.min_prediction_impact_threshold
         
         impact_scores = db.query(ImpactScore).filter(
-            ImpactScore.impact_score >= 0.4,  # Only significant impact
+            ImpactScore.impact_score >= min_impact_threshold,  # Only significant impact
             ImpactScore.created_at >= cutoff_date  # Recent only
         ).order_by(
             ImpactScore.created_at.desc()  # Newest first
         ).limit(limit * 5).all()  # Get more candidates for filtering
         
         if not impact_scores:
-            logger.info("No high-impact scores found (impact >= 0.4)")
+            logger.info(f"No high-impact scores found (impact >= {min_impact_threshold})")
             return []
 
         logger.info(f"Found {len(impact_scores)} high-impact scores to check")
@@ -471,8 +475,10 @@ class PredictionAgent:
                 return None
 
             # Only predict if impact score is significant
-            if impact.impact_score < 0.4:
-                logger.debug(f"Impact score too low ({impact.impact_score:.2f}), skipping prediction")
+            # Use configurable threshold (default 0.4, can be lowered to 0.3 for more predictions)
+            min_impact_threshold = settings.min_prediction_impact_threshold
+            if impact.impact_score < min_impact_threshold:
+                logger.debug(f"Impact score too low ({impact.impact_score:.2f} < {min_impact_threshold}), skipping prediction")
                 return None
 
             # Extract features
