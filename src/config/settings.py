@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 
 # Application Version
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 
 class Settings(BaseSettings):
@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-3.5-turbo", alias="OPENAI_MODEL")
+    openai_base_url: str = Field(default="", alias="OPENAI_BASE_URL")  # Optional: for custom endpoints/proxies
 
     # Anthropic
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
@@ -71,6 +72,9 @@ class Settings(BaseSettings):
     enable_calibration: bool = Field(default=True, alias="ENABLE_CALIBRATION")
     enable_meta_strategy: bool = Field(default=True, alias="ENABLE_META_STRATEGY")
     enable_scenarios: bool = Field(default=True, alias="ENABLE_SCENARIOS")
+    
+    # Prediction Settings
+    min_prediction_impact_threshold: float = Field(default=0.4, alias="MIN_PREDICTION_IMPACT_THRESHOLD")
 
 
 # Global settings instance

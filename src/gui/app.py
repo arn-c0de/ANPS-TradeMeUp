@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 from src.gui.tabs import dashboard, predictions, news, statistics, charts, simulations, system, control, testing
 from src.gui.tabs import settings as settings_tab
 from src.gui.charts import MarketDataProvider
+from src.gui.charts.chart_data_manager import get_chart_data_manager
 
 # Initialize Dash app with Bootstrap dark theme
 app = dash.Dash(
@@ -655,7 +656,11 @@ engine = create_engine(settings.database_url)
 # MAIN LAYOUT
 # ============================================================================
 
+VALID_MAIN_TAB_IDS = {"dashboard", "news", "predictions", "simulations", "statistics", "charts", "control", "testing", "system", "settings"}
+
 app.layout = html.Div([
+    dcc.Location(id="url", refresh=False),
+    dcc.Interval(id="url-tab-startup", interval=400, n_intervals=0, max_intervals=1),  # once after 400ms for hash-ready
     dcc.Interval(id="interval-component", interval=5*1000, n_intervals=0),  # 5 seconds for live updates
     dcc.Store(id="continuous-pipeline-state", data={"running": False, "pid": None}),
     dcc.Store(id="delete-action-store", data={"action": None, "params": None}),
@@ -674,9 +679,64 @@ app.layout = html.Div([
             dbc.Tab(testing.create_layout(), label="🧪 Testing", tab_id="testing", className="text-light"),
             dbc.Tab(system.create_layout(), label="🔧 System Health", tab_id="system", className="text-light"),
             dbc.Tab(settings_tab.create_layout(), label="⚙️ Settings", tab_id="settings", className="text-light")
-        ], id="tabs", active_tab="dashboard", persistence=True, persistence_type="local")
+        ], id="tabs", active_tab="dashboard", persistence=False)
     ], fluid=True)
 ], className="bg-dark text-light min-vh-100")
+
+
+# ============================================================================
+# URL-BASED TAB ROUTING (per-window independent, no sync between windows)
+# ============================================================================
+
+def _tab_from_hash(hash_val):
+    """Parse tab id from URL hash. Returns 'dashboard' if missing/invalid."""
+    tab = (hash_val or "").lstrip("#").strip() or "dashboard"
+    return tab if tab in VALID_MAIN_TAB_IDS else "dashboard"
+
+
+@app.callback(
+    Output("tabs", "active_tab", allow_duplicate=True),
+    Input("url", "hash"),
+    State("tabs", "active_tab"),
+    prevent_initial_call=True
+)
+def set_tab_from_url_hash_change(hash_val, current_tab):
+    """React to hash changes (navigation / our own sync). Ignore initial load – startup does that."""
+    want = _tab_from_hash(hash_val)
+    if current_tab == want:
+        return dash.no_update
+    return want
+
+
+@app.callback(
+    Output("tabs", "active_tab", allow_duplicate=True),
+    Input("url-tab-startup", "n_intervals"),
+    State("url", "hash"),
+    State("tabs", "active_tab"),
+    prevent_initial_call=True
+)
+def set_tab_from_url_on_load(n_intervals, hash_val, current_tab):
+    """Run once after ~400ms. Location hash is ready; set tab from URL so reload keeps it."""
+    if not n_intervals:
+        return dash.no_update
+    want = _tab_from_hash(hash_val)
+    if current_tab == want:
+        return dash.no_update
+    return want
+
+
+@app.callback(
+    Output("url", "hash"),
+    Input("tabs", "active_tab"),
+    State("url", "hash"),
+    prevent_initial_call=True
+)
+def set_url_from_tab(active_tab, current_hash):
+    """Keep URL hash in sync with active tab. Reload preserves tab via hash."""
+    new_hash = f"#{active_tab}" if active_tab else "#dashboard"
+    if current_hash == new_hash:
+        return dash.no_update
+    return new_hash
 
 
 # ============================================================================
@@ -1949,66 +2009,97 @@ def update_entity_sentiment_chart(n, start_date, end_date, active_filter, timefr
 
 @app.callback(
     [Output("top-positive-entities", "children"),
-     Output("positive-entities-toggle", "children"),
-     Output("positive-entities-toggle", "style"),
-     Output("positive-entities-expanded", "data")],
+     Output("positive-entities-limit", "data")],
     [Input("interval-component", "n_intervals"),
      Input("stats-date-range", "start_date"),
      Input("stats-date-range", "end_date"),
      Input("active-filter-store", "data"),
      Input("positive-entity-search-input", "value"),
-     Input("positive-entities-toggle", "n_clicks")],
-    [State("positive-entities-expanded", "data")]
+     Input("positive-entities-scroll-trigger", "value")],
+    [State("positive-entities-limit", "data")]
 )
-def update_top_positive_entities(n, start_date, end_date, active_filter, search_term, n_clicks, is_expanded):
-    """Update top positive entities with optional search filter and expand/collapse"""
+def update_top_positive_entities(n, start_date, end_date, active_filter, search_term, scroll_trigger_value, current_limit):
+    """Update top positive entities with optional search filter and infinite scroll"""
     from dash import callback_context
     
-    # Toggle expanded state if button was clicked
-    if callback_context.triggered and "positive-entities-toggle" in callback_context.triggered[0]["prop_id"]:
-        is_expanded = not is_expanded
+    # Check if scroll triggered load more
+    if callback_context.triggered:
+        trigger_id = callback_context.triggered[0]["prop_id"]
+        if "scroll-trigger" in trigger_id and scroll_trigger_value:
+            try:
+                scroll_count = int(scroll_trigger_value) if scroll_trigger_value else 0
+                # Increase limit by 50 when scrolled to bottom
+                if scroll_count > (current_limit // 50):
+                    current_limit = current_limit + 50
+            except:
+                pass
     
-    # Get entities with appropriate limit
+    # Reset limit when search term or date range changes
+    if callback_context.triggered:
+        trigger_id = callback_context.triggered[0]["prop_id"]
+        if "search-input" in trigger_id or "date-range" in trigger_id or "active-filter" in trigger_id:
+            current_limit = 50
+    
+    # Get entities with current limit
     date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-    entities = statistics.get_top_positive_entities(engine, search_term or "", show_all=is_expanded, date_range=date_range)
+    result = statistics.get_top_positive_entities(engine, search_term or "", show_all=True, date_range=date_range, limit=current_limit)
     
-    # Update button text and visibility
-    button_text = "Show Less" if is_expanded else "Show More"
-    button_style = {"display": "none" if search_term else "inline-block"}
+    # Handle tuple return (entities, total_count)
+    if isinstance(result, tuple):
+        entities, total_count = result
+    else:
+        entities = result
+        total_count = 0
     
-    return entities, button_text, button_style, is_expanded
+    return entities, current_limit
 
 
 @app.callback(
     [Output("top-negative-entities", "children"),
-     Output("negative-entities-toggle", "children"),
-     Output("negative-entities-toggle", "style"),
-     Output("negative-entities-expanded", "data")],
+     Output("negative-entities-limit", "data")],
     [Input("interval-component", "n_intervals"),
      Input("stats-date-range", "start_date"),
      Input("stats-date-range", "end_date"),
      Input("active-filter-store", "data"),
      Input("negative-entity-search-input", "value"),
-     Input("negative-entities-toggle", "n_clicks")],
-    [State("negative-entities-expanded", "data")]
+     Input("negative-entities-scroll-trigger", "value")],
+    [State("negative-entities-limit", "data")]
 )
-def update_top_negative_entities(n, start_date, end_date, active_filter, search_term, n_clicks, is_expanded):
-    """Update top negative entities with optional search filter and expand/collapse"""
+def update_top_negative_entities(n, start_date, end_date, active_filter, search_term, scroll_trigger_value, current_limit):
+    """Update top negative entities with optional search filter and infinite scroll"""
     from dash import callback_context
     
-    # Toggle expanded state if button was clicked
-    if callback_context.triggered and "negative-entities-toggle" in callback_context.triggered[0]["prop_id"]:
-        is_expanded = not is_expanded
+    # Check if scroll triggered load more
+    if callback_context.triggered:
+        trigger_id = callback_context.triggered[0]["prop_id"]
+        if "scroll-trigger" in trigger_id and scroll_trigger_value:
+            try:
+                scroll_count = int(scroll_trigger_value) if scroll_trigger_value else 0
+                # Increase limit by 50 when scrolled to bottom
+                if scroll_count > (current_limit // 50):
+                    current_limit = current_limit + 50
+            except:
+                pass
     
-    # Get entities with appropriate limit
+    # Reset limit when search term or date range changes
+    if callback_context.triggered:
+        trigger_id = callback_context.triggered[0]["prop_id"]
+        if "search-input" in trigger_id or "date-range" in trigger_id or "active-filter" in trigger_id:
+            current_limit = 50
+    
+    # Get entities with current limit
     date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-    entities = statistics.get_top_negative_entities(engine, search_term or "", show_all=is_expanded, date_range=date_range)
+    result = statistics.get_top_negative_entities(engine, search_term or "", show_all=True, date_range=date_range, limit=current_limit)
     
-    # Update button text and visibility
-    button_text = "Show Less" if is_expanded else "Show More"
-    button_style = {"display": "none" if search_term else "inline-block"}
+    # Handle tuple return (entities, total_count)
+    if isinstance(result, tuple):
+        entities, total_count = result
+    else:
+        entities = result
+        total_count = 0
     
-    return entities, button_text, button_style, is_expanded
+    return entities, current_limit
+
 
 
 @app.callback(
@@ -3295,6 +3386,387 @@ def save_chart_view_state(relayout_data_list, view_state_data, tabs_data, graph_
     return state
 
 
+def _find_index_binary(indices, target_value):
+    """
+    Binary search for finding index in sorted array.
+    Returns index of first element >= target_value, or 0 if not found.
+    O(log n) instead of O(n) for better performance.
+    
+    Handles type mismatches by attempting conversion or falling back to linear search.
+    """
+    if not indices or len(indices) == 0:
+        return 0
+    
+    # Try to normalize types for comparison
+    try:
+        # If target is datetime-like and indices are pandas Timestamps, ensure compatibility
+        from pandas import to_datetime
+        if hasattr(target_value, 'timestamp') or isinstance(target_value, str):
+            try:
+                target_value = to_datetime(target_value)
+            except (ValueError, TypeError):
+                pass
+    except Exception:
+        pass
+    
+    left = 0
+    right = len(indices) - 1
+    result = 0
+    
+    while left <= right:
+        mid = (left + right) // 2
+        
+        try:
+            mid_val = indices[mid]
+            # Try direct comparison first
+            if mid_val >= target_value:
+                result = mid
+                right = mid - 1  # Continue searching left
+            else:
+                left = mid + 1
+        except (TypeError, ValueError) as e:
+            # Fallback to linear search if comparison fails
+            logger.debug(f"[Binary Search] Type mismatch, falling back to linear search: {e}")
+            for i, idx_val in enumerate(indices):
+                try:
+                    if idx_val >= target_value:
+                        return i
+                except (TypeError, ValueError):
+                    continue
+            return 0
+    
+    return result
+
+
+@app.callback(
+    [Output("chart-loaded-data-store", "data", allow_duplicate=True),
+     Output("chart-scroll-state-store", "data", allow_duplicate=True)],
+    Input({"type": "chart-graph", "index": ALL}, "relayoutData"),
+    [State("chart-loaded-data-store", "data"),
+     State("chart-scroll-state-store", "data"),
+     State("chart-tabs-store", "data"),
+     State("chart-interaction-modes", "data"),
+     State({"type": "chart-graph", "index": ALL}, "id")],
+    prevent_initial_call=True
+)
+def handle_infinite_scroll(relayout_data_list, loaded_data_store, scroll_state_store, tabs_data, interaction_modes, graph_ids):
+    """
+    Handle infinite scroll: detect when user scrolls and load more data symmetrically.
+    
+    Features:
+    - Tracks visible range and centered candle
+    - Symmetric loading: loads historical data (left) and future data (right)
+    - Buffer zone: maintains 2x visible range for smooth scrolling
+    - Position persistence: saves position to view_state to prevent jumping on refresh
+    - Optimized with binary search and improved throttling
+    """
+    from dash import callback_context
+    import json
+    import copy
+    import time
+    
+    if not callback_context.triggered:
+        return dash.no_update, dash.no_update
+    
+    # Find which graph triggered
+    trigger = callback_context.triggered[0]["prop_id"]
+    if ".relayoutData" not in trigger:
+        return dash.no_update, dash.no_update
+    
+    try:
+        trigger_id_str = trigger.split(".")[0]
+        trigger_id = json.loads(trigger_id_str)
+        tab_id = trigger_id.get("index")
+    except Exception as e:
+        logger.debug(f"[Infinite Scroll] Error parsing trigger ID: {e}")
+        return dash.no_update, dash.no_update
+    
+    # Get the relayout data for this graph
+    trigger_index = None
+    for idx, graph_id in enumerate(graph_ids):
+        if graph_id.get("index") == tab_id:
+            trigger_index = idx
+            break
+    
+    if trigger_index is None or trigger_index >= len(relayout_data_list):
+        return dash.no_update, dash.no_update
+    
+    relayout_data = relayout_data_list[trigger_index]
+    if not relayout_data:
+        return dash.no_update, dash.no_update
+    
+    # Only process x-axis range changes (ignore other relayout events like y-axis, shapes, etc.)
+    if 'xaxis.range' not in relayout_data and 'xaxis.range[0]' not in relayout_data:
+        return dash.no_update, dash.no_update
+    
+    # Get chart configuration
+    tabs = tabs_data.get('tabs', []) if tabs_data else []
+    tab_config = None
+    for tab in tabs:
+        if tab.get('id') == tab_id:
+            tab_config = tab
+            break
+    
+    if not tab_config:
+        return dash.no_update, dash.no_update
+    
+    symbol = tab_config.get('symbol')
+    timeframe = tab_config.get('timeframe', '1mo')
+    
+    if not symbol:
+        return dash.no_update, dash.no_update
+    
+    # Get interaction mode to check if auto_scroll is enabled
+    interaction_modes_dict = interaction_modes if interaction_modes else {'tabs': {}}
+    tab_interaction = interaction_modes_dict.get('tabs', {}).get(tab_id, {})
+    auto_scroll = tab_interaction.get('auto_scroll', False)
+    
+    # Check scroll state to prevent race conditions
+    scroll_state = copy.deepcopy(scroll_state_store) if scroll_state_store else {'tabs': {}}
+    if 'tabs' not in scroll_state:
+        scroll_state['tabs'] = {}
+    
+    tab_scroll_state = scroll_state['tabs'].get(tab_id, {})
+    
+    # Check if already loading
+    if tab_scroll_state.get('loading', False):
+        return dash.no_update, dash.no_update
+    
+    # Debounce: check last load time (200ms for responsive loading)
+    current_time = time.time()
+    last_load_time = tab_scroll_state.get('last_load_time', 0)
+    if current_time - last_load_time < 0.2:  # 200ms debounce for fast response
+        return dash.no_update, dash.no_update
+    
+    # Get visible range
+    visible_range = None
+    if 'xaxis.range' in relayout_data:
+        visible_range = relayout_data['xaxis.range']
+    elif 'xaxis.range[0]' in relayout_data and 'xaxis.range[1]' in relayout_data:
+        visible_range = [relayout_data['xaxis.range[0]'], relayout_data['xaxis.range[1]']]
+    
+    if not visible_range or not isinstance(visible_range, list) or len(visible_range) != 2:
+        return dash.no_update, dash.no_update
+    
+    # Validate range values and convert to proper types
+    try:
+        left_value = visible_range[0]
+        right_value = visible_range[1]
+        if left_value is None or right_value is None:
+            return dash.no_update, dash.no_update
+
+        logger.debug(f"[Infinite Scroll] Received range: left={left_value} (type={type(left_value).__name__}), right={right_value} (type={type(right_value).__name__})")
+
+        # Convert string timestamps to datetime if needed (Plotly sends ISO strings for date-type x-axis)
+        # For category-type x-axis, Plotly sends numeric indices (int/float)
+        from pandas import to_datetime
+        if isinstance(left_value, str):
+            try:
+                left_value = to_datetime(left_value)
+            except (ValueError, TypeError):
+                logger.debug(f"[Infinite Scroll] Could not parse left_value: {left_value}")
+                return dash.no_update, dash.no_update
+        if isinstance(right_value, str):
+            try:
+                right_value = to_datetime(right_value)
+            except (ValueError, TypeError):
+                logger.debug(f"[Infinite Scroll] Could not parse right_value: {right_value}")
+                return dash.no_update, dash.no_update
+    except (TypeError, ValueError) as e:
+        logger.debug(f"[Infinite Scroll] Error validating range values: {e}")
+        return dash.no_update, dash.no_update
+    
+    # Get loaded data metadata
+    loaded_store = copy.deepcopy(loaded_data_store) if loaded_data_store else {'tabs': {}}
+    if 'tabs' not in loaded_store:
+        loaded_store['tabs'] = {}
+    
+    # Get data manager
+    data_manager = get_chart_data_manager()
+    
+    # Get cached data to check total points
+    cached_df = data_manager.get_cached_data(symbol, timeframe)
+    if cached_df is None or cached_df.empty:
+        # No cached data yet, initialize
+        cached_df = data_manager.get_initial_data(symbol, timeframe)
+        if cached_df is None or cached_df.empty:
+            return dash.no_update, dash.no_update
+    
+    total_points = len(cached_df)
+    if total_points == 0:
+        return dash.no_update, dash.no_update
+    
+    # Find left and right indices in visible range
+    # With type='category' x-axis, Plotly sends numeric indices (0, 1, 2...) not timestamps
+    indices = list(cached_df.index)
+
+    try:
+        # Check if values are already numeric indices (from category-type x-axis)
+        if isinstance(left_value, (int, float)) and isinstance(right_value, (int, float)):
+            # Direct numeric indices - no need for binary search
+            left_index = int(round(left_value))
+            right_index = int(round(right_value))
+            logger.debug(f"[Infinite Scroll] Using numeric indices: left={left_index}, right={right_index}")
+        else:
+            # Timestamp values - use binary search (legacy behavior)
+            left_index = _find_index_binary(indices, left_value)
+            right_index = _find_index_binary(indices, right_value)
+            logger.debug(f"[Infinite Scroll] Using binary search for timestamps")
+
+        # Validate indices
+        if left_index < 0 or left_index >= total_points:
+            left_index = 0
+        if right_index < 0 or right_index >= total_points:
+            right_index = total_points - 1
+        if right_index < left_index:
+            right_index = left_index
+        
+        # Calculate visible candle count and centered candle
+        visible_candle_count = right_index - left_index + 1
+        centered_index = left_index + (visible_candle_count // 2)
+        centered_candle = indices[centered_index] if centered_index < len(indices) else indices[-1]
+        
+        # Serialize centered_candle safely (handle pandas Timestamp, datetime, or string)
+        try:
+            if hasattr(centered_candle, 'isoformat'):
+                centered_candle_str = centered_candle.isoformat()
+            elif hasattr(centered_candle, 'strftime'):
+                centered_candle_str = centered_candle.strftime('%Y-%m-%dT%H:%M:%S')
+            else:
+                centered_candle_str = str(centered_candle)
+        except Exception:
+            centered_candle_str = str(centered_candle)
+        
+        # Calculate buffer zone (2x visible range for smooth scrolling)
+        buffer_size = max(visible_candle_count * 2, 50)  # Minimum 50 candles buffer
+        
+        # Save current visible range and centered candle to scroll_state_store
+        scroll_state['tabs'][tab_id] = {
+            'loading': tab_scroll_state.get('loading', False),
+            'last_load_time': tab_scroll_state.get('last_load_time', 0),
+            'last_threshold_check': current_time,
+            'xaxis_range': visible_range,  # NEW: Save current visible range
+            'centered_candle': centered_candle_str,  # NEW: Save centered candle (safely serialized)
+            'visible_candle_count': visible_candle_count,  # NEW: Save visible candle count
+            'left_index': left_index,  # NEW: Save indices for position restoration
+            'right_index': right_index
+        }
+        
+        # Check if we need to load more data (symmetric loading: left AND right)
+        should_load_left = data_manager.should_load_more_left(left_index, total_points, buffer_size)
+        should_load_right = data_manager.should_load_more_right(right_index, total_points, buffer_size)
+
+        logger.info(f"[Infinite Scroll] Threshold check for {symbol} ({timeframe}): left_index={left_index}, right_index={right_index}, total={total_points}, buffer={buffer_size}, should_load_left={should_load_left}, should_load_right={should_load_right}")
+
+        # If no loading needed, just save the state and return
+        if not should_load_left and not should_load_right:
+            return dash.no_update, scroll_state
+        
+        # Set loading flag BEFORE starting async operation
+        scroll_state['tabs'][tab_id]['loading'] = True
+        
+        combined_df = cached_df.copy()
+        data_loaded = False
+        index_offset = 0  # Track how many points were prepended (shifts indices right)
+
+        # Load historical data if needed (scrolling left)
+        if should_load_left:
+            earliest_date = cached_df.index[0]
+            new_historical_df = data_manager.load_more_historical(symbol, timeframe, earliest_date)
+
+            if new_historical_df is not None and not new_historical_df.empty:
+                # Prepend new data
+                old_len = len(combined_df)
+                combined_df = data_manager.prepend_data(combined_df, new_historical_df)
+                new_len = len(combined_df)
+                index_offset = new_len - old_len  # How many points were added at the beginning
+                data_loaded = True
+                logger.info(f"[Infinite Scroll] Loaded {len(new_historical_df)} historical points for {symbol} ({timeframe}), index_offset={index_offset}")
+            else:
+                logger.debug(f"[Infinite Scroll] No more historical data for {symbol} ({timeframe})")
+
+        # Load future data if needed (scrolling right)
+        if should_load_right:
+            latest_date = combined_df.index[-1]
+            new_future_df = data_manager.load_more_future(symbol, timeframe, latest_date)
+
+            if new_future_df is not None and not new_future_df.empty:
+                # Append new data (no index offset needed - data added at end)
+                combined_df = data_manager.append_data(combined_df, new_future_df)
+                data_loaded = True
+                logger.info(f"[Infinite Scroll] Loaded {len(new_future_df)} future points for {symbol} ({timeframe})")
+            else:
+                logger.debug(f"[Infinite Scroll] No more future data for {symbol} ({timeframe})")
+        
+        # Only update if we actually loaded data
+        if data_loaded:
+            # Update cache
+            data_manager.update_cached_data(symbol, timeframe, combined_df)
+
+            # Update loaded data store (safely serialize dates)
+            earliest_date_str = None
+            latest_date_str = None
+            if len(combined_df) > 0:
+                try:
+                    earliest_date = combined_df.index[0]
+                    latest_date = combined_df.index[-1]
+                    if hasattr(earliest_date, 'isoformat'):
+                        earliest_date_str = earliest_date.isoformat()
+                    elif hasattr(earliest_date, 'strftime'):
+                        earliest_date_str = earliest_date.strftime('%Y-%m-%dT%H:%M:%S')
+                    else:
+                        earliest_date_str = str(earliest_date)
+
+                    if hasattr(latest_date, 'isoformat'):
+                        latest_date_str = latest_date.isoformat()
+                    elif hasattr(latest_date, 'strftime'):
+                        latest_date_str = latest_date.strftime('%Y-%m-%dT%H:%M:%S')
+                    else:
+                        latest_date_str = str(latest_date)
+                except Exception as e:
+                    logger.debug(f"[Infinite Scroll] Error serializing dates: {e}")
+                    earliest_date_str = str(combined_df.index[0]) if len(combined_df) > 0 else None
+                    latest_date_str = str(combined_df.index[-1]) if len(combined_df) > 0 else None
+
+            import time
+            loaded_store['tabs'][tab_id] = {
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'earliest_date': earliest_date_str,
+                'latest_date': latest_date_str,
+                'data_points': len(combined_df),
+                'index_offset': index_offset,  # NEW: Store offset for position correction
+                'offset_timestamp': time.time()  # Timestamp when offset was set
+            }
+
+            # Note: view_state is saved automatically by save_chart_view_state callback
+            # which listens to the same relayoutData events
+            load_direction = "left" if should_load_left else "right" if should_load_right else "both"
+            logger.info(f"[Infinite Scroll] Loaded data ({load_direction}) for {symbol} ({timeframe}): {len(combined_df)} total points, index_offset={index_offset}")
+        else:
+            # No data loaded, but still update scroll state
+            pass
+        
+        # Reset loading flag
+        scroll_state['tabs'][tab_id]['loading'] = False
+        scroll_state['tabs'][tab_id]['last_load_time'] = current_time
+        
+        return loaded_store, scroll_state
+        
+    except Exception as e:
+        tab_id_str = str(tab_id) if 'tab_id' in locals() else 'unknown'
+        logger.error(f"[Infinite Scroll] Error handling scroll for tab {tab_id_str}: {e}", exc_info=True)
+        # Ensure scroll_state is initialized before accessing it
+        if 'tabs' not in scroll_state:
+            scroll_state['tabs'] = {}
+        # Only try to reset loading flag if tab_id is valid
+        if 'tab_id' in locals() and tab_id is not None:
+            if tab_id not in scroll_state['tabs']:
+                scroll_state['tabs'][tab_id] = {}
+            scroll_state['tabs'][tab_id]['loading'] = False
+        return dash.no_update, scroll_state
+
+
 @app.callback(
     Output("chart-tabs-store", "data", allow_duplicate=True),
     Input({"type": "overlay-jump-btn", "group": ALL, "tab": ALL, "index": ALL}, "n_clicks"),
@@ -3573,10 +4045,11 @@ def search_new_tab_symbols(search_value):
      Input("refresh-all-panels", "n_clicks"),
      Input("chart-update-interval", "n_intervals"),
      Input("chart-interaction-modes", "data"),
-     Input("chart-view-state", "data")],
+     Input("chart-view-state", "data"),
+     Input("chart-loaded-data-store", "data")],  # NEW: Listen to loaded data changes
     prevent_initial_call='initial_duplicate'
 )
-def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, fullscreen_data, layout_preset, refresh_clicks, n_intervals, interaction_modes, view_state_data):
+def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, fullscreen_data, layout_preset, refresh_clicks, n_intervals, interaction_modes, view_state_data, loaded_data_store):
     """
     Render chart display area - OPTIMIZED to only render active tab.
     This significantly improves tab switching performance.
@@ -3610,6 +4083,39 @@ def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, ful
         if view_state_data and view_state_data.get('tabs'):
             view_state = view_state_data.get('tabs', {}).get(tab['id'])
 
+        # Get loaded data from cache (for infinite scroll)
+        loaded_data = None
+        index_offset = 0  # Offset to adjust range when new data is prepended
+        if loaded_data_store and loaded_data_store.get('tabs'):
+            tab_loaded = loaded_data_store.get('tabs', {}).get(tab['id'])
+            if tab_loaded:
+                # Get cached data from ChartDataManager
+                from src.gui.charts.chart_data_manager import get_chart_data_manager
+                data_manager = get_chart_data_manager()
+                loaded_data = data_manager.get_cached_data(tab['symbol'], tab['timeframe'])
+
+                # Get index offset (if new data was prepended, we need to adjust the view)
+                index_offset = tab_loaded.get('index_offset', 0)
+                offset_timestamp = tab_loaded.get('offset_timestamp', 0)
+
+                # Apply offset to view_state range if needed
+                # Only apply if offset is fresh (set within last 2 seconds) to avoid applying it multiple times
+                import time
+                if index_offset > 0 and view_state and 'xaxis_range' in view_state:
+                    time_since_offset = time.time() - offset_timestamp
+                    if time_since_offset < 2.0:  # Only apply if fresh (within 2 seconds)
+                        old_range = view_state['xaxis_range']
+                        try:
+                            # For category-type x-axis, range is in index form (numeric)
+                            # Shift range right by the number of prepended points
+                            new_range = [old_range[0] + index_offset, old_range[1] + index_offset]
+                            view_state['xaxis_range'] = new_range
+                            logger.info(f"[Infinite Scroll] Adjusted view range by offset {index_offset}: {old_range} -> {new_range}")
+                        except (TypeError, ValueError, IndexError) as e:
+                            logger.warning(f"[Infinite Scroll] Could not adjust range: {e}")
+                    else:
+                        logger.debug(f"[Infinite Scroll] Offset too old ({time_since_offset:.2f}s), skipping adjustment")
+
         chart_component, stats_data = charts.get_stock_chart_components(
             tab['symbol'],
             tab['timeframe'],
@@ -3620,7 +4126,8 @@ def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, ful
             graph_id={"type": "chart-graph", "index": tab['id']},
             dragmode=dragmode,
             auto_scroll=auto_scroll,
-            view_state=view_state
+            view_state=view_state,
+            loaded_data=loaded_data  # NEW: Pass loaded data for infinite scroll
         )
 
         chart_div = html.Div(
@@ -4046,10 +4553,11 @@ def update_chart_config(layout_single, layout_h, layout_v, layout_quad,
      Input("chart-overlays-store", "data"),
      Input("chart-fullscreen-state", "data"),
      Input("chart-interaction-modes", "data"),
-     Input("chart-view-state", "data")],
+     Input("chart-view-state", "data"),
+     Input("chart-loaded-data-store", "data")],  # NEW: Listen to loaded data changes
     prevent_initial_call='initial_duplicate'
 )
-def render_chart_panels(config, n_intervals, refresh_clicks, overlays_data, fullscreen_state, interaction_modes, view_state_data):
+def render_chart_panels(config, n_intervals, refresh_clicks, overlays_data, fullscreen_state, interaction_modes, view_state_data, loaded_data_store):
     """Render the multi-panel chart layout with fullscreen support"""
     # Handle None values
     if not config:
@@ -4082,7 +4590,7 @@ def render_chart_panels(config, n_intervals, refresh_clicks, overlays_data, full
     container_class = 'chart-container-fullscreen' if is_fullscreen else 'chart-container-normal'
     
     try:
-        chart_layout = charts.render_multi_panel_layout(layout, panels, is_fullscreen, overlays_data, view_state_data)
+        chart_layout = charts.render_multi_panel_layout(layout, panels, is_fullscreen, overlays_data, view_state_data, loaded_data_store)
         return chart_layout, container_class
     except Exception as e:
         logger.error(f"Error rendering chart panels: {e}", exc_info=True)

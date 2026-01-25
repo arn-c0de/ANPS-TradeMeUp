@@ -36,10 +36,62 @@ class LLMService:
         if self.provider == "openai":
             try:
                 from openai import OpenAI
-                self.openai_client = OpenAI(api_key=settings.openai_api_key)
+                import os
+                import httpx
+                
+                # Configure OpenAI client with timeout and proxy support
+                client_kwargs = {
+                    "api_key": settings.openai_api_key,
+                    "timeout": 60.0,  # 60 second timeout
+                }
+                
+                # Add custom base URL if configured (for proxies/custom endpoints)
+                if hasattr(settings, 'openai_base_url') and settings.openai_base_url:
+                    client_kwargs["base_url"] = settings.openai_base_url
+                    logger.info(f"Using custom OpenAI base URL: {settings.openai_base_url}")
+                
+                # Check proxy configuration
+                http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+                https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+                
+                # Detect invalid proxy configurations (e.g., discard port 9)
+                invalid_proxy_ports = [9]  # Port 9 is discard port
+                use_proxy = True
+                
+                if http_proxy or https_proxy:
+                    # Check if proxy points to invalid port
+                    for proxy_url in [http_proxy, https_proxy]:
+                        if proxy_url:
+                            try:
+                                from urllib.parse import urlparse
+                                parsed = urlparse(proxy_url)
+                                if parsed.port in invalid_proxy_ports:
+                                    logger.warning(f"Invalid proxy configuration detected: {proxy_url} (port {parsed.port} is discard port)")
+                                    logger.warning("Disabling proxy usage. Set correct proxy or unset HTTP_PROXY/HTTPS_PROXY if no proxy needed.")
+                                    use_proxy = False
+                                    break
+                            except Exception:
+                                pass
+                    
+                    if use_proxy:
+                        logger.info(f"Proxy detected: HTTP_PROXY={http_proxy}, HTTPS_PROXY={https_proxy}")
+                
+                # Configure httpx client - disable proxy if invalid, otherwise trust_env
+                if use_proxy:
+                    client_kwargs["http_client"] = httpx.Client(timeout=60.0, trust_env=True)
+                else:
+                    # Explicitly disable proxy by setting trust_env=False
+                    client_kwargs["http_client"] = httpx.Client(timeout=60.0, trust_env=False)
+                    logger.info("Proxy disabled due to invalid configuration")
+                
+                self.openai_client = OpenAI(**client_kwargs)
                 self.model = settings.openai_model
+                logger.info(f"OpenAI client initialized with model: {self.model}")
             except ImportError:
                 logger.error("OpenAI library not installed. Run: pip install openai")
+                raise
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenAI client: {e}")
                 raise
 
         elif self.provider == "anthropic":
@@ -153,14 +205,28 @@ class LLMService:
 
         messages.append({"role": "user", "content": prompt})
 
-        response = self.openai_client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
+        try:
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
 
-        return response.choices[0].message.content
+            return response.choices[0].message.content
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"OpenAI API error: {error_msg}")
+            
+            # Provide helpful error messages
+            if "Connection error" in error_msg or "10061" in error_msg:
+                logger.error("Connection to OpenAI API failed. Possible causes:")
+                logger.error("  1. Proxy/Network issue - check HTTP_PROXY/HTTPS_PROXY environment variables")
+                logger.error("  2. Firewall blocking connection")
+                logger.error("  3. OpenAI API endpoint unreachable")
+                logger.error("  4. Check OPENAI_BASE_URL in .env.local if using custom endpoint")
+            
+            raise
 
     def _generate_anthropic(
         self,
