@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 from src.models.raw_news import RawNews
 from src.utils.activity_logger import activity_logger
+from src.config.settings import VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class IngestionAgent:
         self.rate_limit_delay = rate_limit_delay
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'TradeMeUp/0.1.0 (Educational Research)'
+            'User-Agent': f'ANPS-TradeMeUp/{VERSION} (Educational Research)'
         })
         
         # Load RSS feeds from JSON config

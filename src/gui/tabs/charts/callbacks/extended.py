@@ -39,11 +39,17 @@ def register_charts_extended(app):
     @app.callback(
         Output("chart-price-cache-store", "data"),
         [Input("chart-price-update-interval", "n_intervals"),
-         Input("chart-tabs-store", "data")],
+         Input("chart-tabs-store", "data"),
+         Input("tabs", "active_tab")],  # Check if Charts tab is active
         prevent_initial_call=False
     )
-    def update_price_cache(n_intervals, tabs_data):
-        """Update price cache in background (non-blocking for UI)"""
+    def update_price_cache(n_intervals, tabs_data, active_main_tab):
+        """Update price cache in background (non-blocking for UI).
+        Only updates when Charts tab is active to save resources."""
+        # Early return if Charts tab is not active
+        if active_main_tab != "charts":
+            return dash.no_update
+        
         import concurrent.futures
 
         tabs = tabs_data.get('tabs', [])
@@ -1437,16 +1443,35 @@ def register_charts_extended(app):
          Input("chart-update-interval", "n_intervals"),
          Input("chart-interaction-modes", "data"),
          Input("chart-view-state", "data"),
-         Input("chart-loaded-data-store", "data")],  # NEW: Listen to loaded data changes
+         Input("chart-loaded-data-store", "data"),
+         Input("tabs", "active_tab")],  # Check if Charts tab is active
+        [State("chart-display-area", "children")],  # Track previous render for optimization
         prevent_initial_call='initial_duplicate'
     )
-    def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, fullscreen_data, layout_preset, refresh_clicks, n_intervals, interaction_modes, view_state_data, loaded_data_store):
+    def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, fullscreen_data, layout_preset, refresh_clicks, n_intervals, interaction_modes, view_state_data, loaded_data_store, active_main_tab, previous_children):
         """
         Render chart display area - OPTIMIZED to only render active tab.
         This significantly improves tab switching performance.
+        Only executes when Charts tab is active to prevent unnecessary heavy operations.
+        Uses State to track previous render and optimize re-rendering logic.
         """
+        start_time = time.time()
+        
+        # Early return if Charts tab is not active
+        if active_main_tab != "charts":
+            return dash.no_update
+        
         tabs = tabs_data.get('tabs', [])
         active_tab_id = tabs_data.get('active_tab')
+        
+        # Find active tab early for optimization checks
+        active_tab = None
+        if active_tab_id:
+            for tab in tabs:
+                if tab['id'] == active_tab_id:
+                    active_tab = tab
+                    break
+        
         # Ensure quad_data is properly initialized and preserve quad_enabled state
         if quad_data is None:
             quad_data = {'enabled': False, 'selected_tabs': []}
@@ -1459,6 +1484,16 @@ def register_charts_extended(app):
 
         if not tabs:
             return dbc.Alert("No charts open. Click '+ New' to add a chart.", color="info", className="mt-3")
+        
+        # OPTIMIZATION: Check if we can skip re-rendering
+        # If only active_tab changed but tab data is identical, we still need to render
+        # but we can log this for performance monitoring
+        from dash import callback_context
+        if callback_context.triggered:
+            trigger_id = callback_context.triggered[0]["prop_id"]
+            if trigger_id == "chart-tabs-store.data" and active_tab:
+                # Log tab switch for performance monitoring
+                logger.debug(f"[Performance] Chart tab switch to {active_tab.get('symbol', 'unknown')} ({active_tab.get('timeframe', 'unknown')})")
 
         def build_tab_panel(tab, panel_height, is_active, clickable=True):
             tab_show_volume = tab.get('show_volume', show_volume)
@@ -1481,10 +1516,14 @@ def register_charts_extended(app):
             if loaded_data_store and loaded_data_store.get('tabs'):
                 tab_loaded = loaded_data_store.get('tabs', {}).get(tab['id'])
                 if tab_loaded:
-                    # Get cached data from ChartDataManager
+                    # Get cached data from ChartDataManager (optimized - uses cache)
                     from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager
                     data_manager = get_chart_data_manager()
+                    cache_start = time.time()
                     loaded_data = data_manager.get_cached_data(tab['symbol'], tab['timeframe'])
+                    cache_time = time.time() - cache_start
+                    if cache_time > 0.1:  # Log if cache access takes more than 100ms
+                        logger.debug(f"[Performance] Cache access took {cache_time:.2f}s for {tab['symbol']} ({tab['timeframe']})")
 
                     # Get index offset (if new data was prepended, we need to adjust the view)
                     index_offset = tab_loaded.get('index_offset', 0)
@@ -1492,7 +1531,6 @@ def register_charts_extended(app):
 
                     # Apply offset to view_state range if needed
                     # Only apply if offset is fresh (set within last 2 seconds) to avoid applying it multiple times
-                    import time
                     if index_offset > 0 and view_state and 'xaxis_range' in view_state:
                         time_since_offset = time.time() - offset_timestamp
                         if time_since_offset < 2.0:  # Only apply if fresh (within 2 seconds)
@@ -1508,6 +1546,8 @@ def register_charts_extended(app):
                         else:
                             logger.debug(f"[Infinite Scroll] Offset too old ({time_since_offset:.2f}s), skipping adjustment")
 
+            # Performance logging for chart component creation
+            component_start = time.time()
             chart_component, stats_data = get_stock_chart_components(
                 tab['symbol'],
                 tab['timeframe'],
@@ -1519,8 +1559,13 @@ def register_charts_extended(app):
                 dragmode=dragmode,
                 auto_scroll=auto_scroll,
                 view_state=view_state,
-                loaded_data=loaded_data  # NEW: Pass loaded data for infinite scroll
+                loaded_data=loaded_data  # Pass loaded data for infinite scroll (uses cache)
             )
+            component_time = time.time() - component_start
+            if component_time > 1.0:  # Log if component creation takes more than 1 second
+                logger.warning(f"[Performance] get_stock_chart_components took {component_time:.2f}s for {tab['symbol']} ({tab['timeframe']})")
+            elif component_time > 0.5:
+                logger.debug(f"[Performance] get_stock_chart_components took {component_time:.2f}s for {tab['symbol']} ({tab['timeframe']})")
 
             chart_div = html.Div(
                 [chart_component],
@@ -1640,15 +1685,8 @@ def register_charts_extended(app):
 
         # PERFORMANCE OPTIMIZATION: Only render the active tab
         # This avoids expensive API calls and chart rendering for hidden tabs
-        active_tab = None
-
-        # Find the active tab - make sure we use the exact active_tab_id from the store
-        if active_tab_id:
-            for tab in tabs:
-                if tab['id'] == active_tab_id:
-                    active_tab = tab
-                    break
-
+        # (active_tab was already found above for optimization checks)
+        
         # In single mode, if active tab not found, fallback to first tab for rendering
         # But don't update the store here - let a separate callback handle that
         # IMPORTANT: Only fallback if active_tab_id is None or empty, not if it's just not found
@@ -1671,7 +1709,20 @@ def register_charts_extended(app):
         height = 'calc(100vh - 180px)' if is_fullscreen else 'calc(100vh - 320px)'
         final_style = {'display': 'block', 'height': height, 'minHeight': '600px'}
 
+        # Log performance metrics
+        render_start = time.time()
         panel_content = build_tab_panel(active_tab, "100%", True, clickable=False)
+        render_time = time.time() - render_start
+        
+        if render_time > 0.5:  # Log if rendering takes more than 500ms
+            logger.warning(f"[Performance] Chart rendering took {render_time:.2f}s for {active_tab.get('symbol', 'unknown')} ({active_tab.get('timeframe', 'unknown')})")
+        else:
+            logger.debug(f"[Performance] Chart rendering took {render_time:.2f}s for {active_tab.get('symbol', 'unknown')} ({active_tab.get('timeframe', 'unknown')})")
+        
+        total_time = time.time() - start_time
+        if total_time > 1.0:  # Log if total callback takes more than 1 second
+            logger.warning(f"[Performance] render_chart_display total time: {total_time:.2f}s")
+        
         single_chart_div = html.Div(panel_content, style=final_style)
 
         return single_chart_div

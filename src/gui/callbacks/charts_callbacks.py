@@ -5,6 +5,7 @@ Chart tab callbacks. Register via register_charts_callbacks(app).
 import copy
 import json
 import logging
+import time
 import uuid
 
 import dash
@@ -55,6 +56,41 @@ function(fullscreen_data) {
 }
 """
 
+_CLIENTSCRIPT_CHART_RESIZE = """
+function(chart_resize_trigger) {
+    if (!chart_resize_trigger || !chart_resize_trigger.resize) {
+        return window.dash_clientside.no_update;
+    }
+    
+    const chartArea = document.getElementById('chart-display-area');
+    if (!chartArea) return window.dash_clientside.no_update;
+    
+    function resizeCharts() {
+        if (!window.Plotly || !Plotly.Plots || !Plotly.Plots.resize) return;
+        const graphs = chartArea.querySelectorAll('.js-plotly-plot');
+        graphs.forEach(graph => {
+            if (graph && graph.offsetParent !== null) {
+                try {
+                    Plotly.Plots.resize(graph);
+                } catch (err) {
+                    // ignore resize errors for detached nodes
+                }
+            }
+        });
+    }
+    
+    // Immediate resize
+    setTimeout(resizeCharts, 0);
+    
+    // Additional delayed resizes for reliable behavior
+    [50, 250, 500, 1000].forEach(delay => {
+        setTimeout(resizeCharts, delay);
+    });
+    
+    return window.dash_clientside.no_update;
+}
+"""
+
 
 def register_charts_callbacks(app):
     """Register all chart tab callbacks (including ESC, fullscreen, quad mode)."""
@@ -63,6 +99,13 @@ def register_charts_callbacks(app):
         _CLIENTSCRIPT_ESC,
         Output("esc-key-listener", "value", allow_duplicate=True),
         Input("chart-fullscreen-state", "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+
+    app.clientside_callback(
+        _CLIENTSCRIPT_CHART_RESIZE,
+        Output("chart-resize-trigger", "data", allow_duplicate=True),
+        Input("chart-resize-trigger", "data"),
         prevent_initial_call="initial_duplicate",
     )
 
@@ -305,3 +348,47 @@ def register_charts_callbacks(app):
                 overlays["tabs"].pop(tab_id, None)
                 changed = True
         return overlays if changed else dash.no_update
+
+    @app.callback(
+        Output("chart-resize-trigger", "data", allow_duplicate=True),
+        Input("tabs", "active_tab"),
+        prevent_initial_call=True,
+    )
+    def handle_charts_tab_activation(active_tab):
+        """Trigger chart resize when charts tab becomes active."""
+        if active_tab == "charts":
+            return {"resize": True, "timestamp": time.time()}
+        return dash.no_update
+
+    @app.callback(
+        Output("chart-resize-trigger", "data", allow_duplicate=True),
+        Input("chart-tabs-store", "data"),
+        State("chart-resize-trigger", "data"),
+        prevent_initial_call=True,
+    )
+    def handle_chart_tab_change(tabs_data, current_trigger):
+        """Trigger chart resize when chart tab changes."""
+        from dash import callback_context
+
+        if not callback_context.triggered:
+            return dash.no_update
+
+        # Only trigger if active_tab changed (not other properties)
+        trigger_id = callback_context.triggered[0]["prop_id"]
+        if trigger_id == "chart-tabs-store.data" and tabs_data:
+            active_tab = tabs_data.get("active_tab")
+            if active_tab:
+                return {"resize": True, "timestamp": time.time()}
+
+        return dash.no_update
+
+    @app.callback(
+        Output("chart-resize-trigger", "data", allow_duplicate=True),
+        Input("quad-mode-store", "data"),
+        prevent_initial_call=True,
+    )
+    def handle_layout_mode_change(quad_data):
+        """Trigger chart resize when layout mode changes (single/quad)."""
+        if quad_data is not None:
+            return {"resize": True, "timestamp": time.time()}
+        return dash.no_update
