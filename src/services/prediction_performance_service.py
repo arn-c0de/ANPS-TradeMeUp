@@ -68,7 +68,7 @@ class PredictionPerformanceService:
             logger.debug(f"Fetching live price for {ticker}")
             current_data = self.market_data.get_live_price(ticker)
             if not current_data or not current_data.get('price'):
-                logger.warning(f"No live price data available for {ticker}")
+                logger.warning(f"❌ No live price data available for {ticker} - Check if ticker exists/is listed")
                 return None
 
             current_price = current_data['price']
@@ -92,7 +92,7 @@ class PredictionPerformanceService:
             )
             
             if hist_data is None or hist_data.empty:
-                logger.warning(f"No historical data available for {ticker}")
+                logger.warning(f"❌ No historical data available for {ticker} (period={period}) - Check ticker validity or market data source")
                 return None
 
             logger.debug(f"Got {len(hist_data)} historical data points for {ticker}")
@@ -105,7 +105,7 @@ class PredictionPerformanceService:
             closest_idx = hist_data.index.get_indexer([prediction_date], method='nearest')[0]
             
             if closest_idx < 0 or closest_idx >= len(hist_data):
-                logger.warning(f"Could not find historical price near prediction date for {ticker}")
+                logger.warning(f"❌ Could not find historical price near prediction date {prediction_date} for {ticker} - Insufficient historical data")
                 return None
                 
             prediction_price = hist_data.iloc[closest_idx]['Close']

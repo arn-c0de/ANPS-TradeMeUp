@@ -31,9 +31,21 @@ def create_navbar():
             dbc.Row([
                 dbc.Col([
                     html.Div([
-                        html.H3(f"📊 ANPS-TradeMeUp v{VERSION}", className="text-primary mb-0"),
-                        html.Small("AI News Prediction System", className="text-muted")
-                    ])
+                        html.Img(
+                            src="/assets/ANPS-LOGO.png",
+                            height="70px",
+                            className="me-3",
+                            style={
+                                "objectFit": "contain",
+                                "borderRadius": "50%",
+                                "border": "2px solid rgba(255, 255, 255, 0.1)"
+                            }
+                        ),
+                        html.Div([
+                            html.H3(f"ANPS-TradeMeUp v{VERSION}", className="text-primary mb-0"),
+                            html.Small("AI News Prediction System", className="text-muted")
+                        ])
+                    ], className="d-flex align-items-center")
                 ], width="auto"),
                 dbc.Col([
                     dbc.ButtonGroup([

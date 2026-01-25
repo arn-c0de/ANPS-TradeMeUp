@@ -27,7 +27,82 @@ def create_layout():
     return html.Div([
         dcc.Store(id="sim-delete-status"),
         dcc.Store(id="sim-filter-sync-store", data={"entities": None, "horizon": None}),
+        dcc.Store(id="portfolio-capital-store", storage_type="local", data={"capital": 100000, "currency": "USD"}),
         dbc.Container([
+            # Portfolio Settings Section (collapsible)
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        html.Details(
+                            [
+                                html.Summary(
+                                    "\U0001F4BC Portfolio Settings",
+                                    className="create-sim-summary"
+                                ),
+                                dbc.CardBody([
+                                    dbc.Row([
+                                        dbc.Col([
+                                            html.Small("Depot Capital", className="text-muted d-block mb-1"),
+                                            dcc.Input(
+                                                id="portfolio-capital-input",
+                                                type="number",
+                                                value=100000,
+                                                min=1000,
+                                                max=10000000,
+                                                step=1000,
+                                                persistence=True,
+                                                persistence_type="local",
+                                                className="form-control form-control-sm"
+                                            )
+                                        ], width=6, md=3),
+                                        dbc.Col([
+                                            html.Small("Currency", className="text-muted d-block mb-1"),
+                                            dcc.Dropdown(
+                                                id="portfolio-currency-dropdown",
+                                                options=[
+                                                    {"label": "USD ($)", "value": "USD"},
+                                                    {"label": "EUR (\u20AC)", "value": "EUR"},
+                                                    {"label": "GBP (\u00A3)", "value": "GBP"},
+                                                ],
+                                                value="USD",
+                                                clearable=False,
+                                                persistence=True,
+                                                persistence_type="local",
+                                                className="small",
+                                                style={"fontSize": "0.85rem"}
+                                            )
+                                        ], width=6, md=2),
+                                        dbc.Col([
+                                            html.Small("Risk Adjustment", className="text-muted d-block mb-1"),
+                                            dcc.Dropdown(
+                                                id="portfolio-risk-adjustment",
+                                                options=[
+                                                    {"label": "Conservative (50%)", "value": 0.5},
+                                                    {"label": "Moderate (30%)", "value": 0.3},
+                                                    {"label": "Aggressive (10%)", "value": 0.1},
+                                                    {"label": "None (0%)", "value": 0.0},
+                                                ],
+                                                value=0.3,
+                                                clearable=False,
+                                                persistence=True,
+                                                persistence_type="local",
+                                                className="small",
+                                                style={"fontSize": "0.85rem"}
+                                            )
+                                        ], width=12, md=3),
+                                        dbc.Col([
+                                            html.Div(id="portfolio-summary-display", className="mt-2")
+                                        ], width=12, md=4)
+                                    ], className="g-3")
+                                ], className="py-2")
+                            ],
+                            className="create-sim-details",
+                            open=False
+                        )
+                    ], className="mb-2")
+                ], width=12)
+            ], className="mb-2"),
+
             # Create New Simulations Section (native <details> – instant expand/collapse, no JS)
             dbc.Row([
                 dbc.Col([
@@ -53,17 +128,37 @@ def create_layout():
                                             )
                                         ], width=12, md=6, className="mb-2 mb-md-0"),
                                         dbc.Col([
-                                            html.Small("Date Range", className="text-muted d-block mb-1"),
-                                            dcc.DatePickerRange(
-                                                id="create-sim-date-range",
-                                                start_date=None,
-                                                end_date=None,
+                                            html.Small("Selection Mode", className="text-muted d-block mb-1"),
+                                            dcc.RadioItems(
+                                                id="create-sim-mode",
+                                                options=[
+                                                    {"label": "Date Range", "value": "date_range"},
+                                                    {"label": "Last N", "value": "last_n"}
+                                                ],
+                                                value="last_n",
                                                 persistence=True,
                                                 persistence_type="local",
+                                                inline=True,
                                                 className="small",
+                                                style={"fontSize": "0.85rem"}
                                             )
                                         ], width=12, md=6)
                                     ], className="g-3 mb-2"),
+                                    html.Div([
+                                        dbc.Row([
+                                            dbc.Col([
+                                                html.Small("Date Range", className="text-muted d-block mb-1"),
+                                                dcc.DatePickerRange(
+                                                    id="create-sim-date-range",
+                                                    start_date=None,
+                                                    end_date=None,
+                                                    persistence=True,
+                                                    persistence_type="local",
+                                                    className="small",
+                                                )
+                                            ], width=12)
+                                        ], className="g-3")
+                                    ], id="create-sim-date-range-container", className="mb-2"),
                                     dbc.Row([
                                         dbc.Col([
                                             html.Small("Horizon", className="text-muted d-block mb-1"),
@@ -197,13 +292,23 @@ def create_layout():
                             dbc.Row([
                                 dbc.Col(html.H6("🧪 Trading Simulations"), className="d-flex align-items-center"),
                                 dbc.Col([
-                                    dbc.Button(
-                                        "🗑️ Clear All Simulations",
-                                        id="btn-clear-all-simulations",
-                                        color="danger",
-                                        size="sm",
-                                        className="float-end"
-                                    )
+                                    dbc.ButtonGroup([
+                                        dbc.Button(
+                                            "🔄 Resimulate All",
+                                            id="btn-resimulate-all-simulations",
+                                            color="primary",
+                                            size="sm",
+                                            className="me-1",
+                                            title="Recalculate all existing simulations with latest market data"
+                                        ),
+                                        dbc.Button(
+                                            "🗑️ Clear All",
+                                            id="btn-clear-all-simulations",
+                                            color="danger",
+                                            size="sm",
+                                            title="Delete all simulations from database"
+                                        )
+                                    ], className="float-end")
                                 ], width="auto")
                             ], className="g-0")
                         ], className="py-1"),
@@ -218,6 +323,9 @@ def create_layout():
                 ], width=12)
             ]),
             
+            # Status alerts
+            html.Div(id="resimulate-status"),
+            
             # Clear All Simulations Confirmation Modal
             dbc.Modal([
                 dbc.ModalHeader(dbc.ModalTitle("⚠️ Confirm Delete All Simulations")),
@@ -229,13 +337,27 @@ def create_layout():
                     dbc.Button("Cancel", id="btn-cancel-clear-simulations", color="secondary", className="me-2"),
                     dbc.Button("Delete All", id="btn-confirm-clear-simulations", color="danger")
                 ])
-            ], id="modal-clear-all-simulations", is_open=False)
+            ], id="modal-clear-all-simulations", is_open=False),
+            
+            # Resimulate All Confirmation Modal
+            dbc.Modal([
+                dbc.ModalHeader(dbc.ModalTitle("🔄 Confirm Resimulate All")),
+                dbc.ModalBody([
+                    html.P("This will recalculate all existing simulations with the latest market data."),
+                    html.P("Depending on the number of simulations, this may take a few moments."),
+                    html.P(html.Strong("All simulation results will be updated with fresh data."), className="text-info")
+                ]),
+                dbc.ModalFooter([
+                    dbc.Button("Cancel", id="btn-cancel-resimulate-simulations", color="secondary", className="me-2"),
+                    dbc.Button("Resimulate All", id="btn-confirm-resimulate-simulations", color="primary")
+                ])
+            ], id="modal-resimulate-all-simulations", is_open=False)
         ], fluid=True)
     ])
 
 
-def get_simulation_table(engine, entity_filter=None, date_range=None, decision_filter="all", horizon_filter="all"):
-    """Get simulations table with filters."""
+def get_simulation_table(engine, entity_filter=None, date_range=None, decision_filter="all", horizon_filter="all", portfolio_capital=100000, risk_adjustment=0.3, currency="USD"):
+    """Get simulations table with filters and portfolio context."""
     try:
         with Session(engine, expire_on_commit=False) as db:
             query = db.query(TradingSimulation).options(
@@ -284,12 +406,56 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                 expected_color = "text-success" if expected_return and expected_return > 0 else "text-danger" if expected_return and expected_return < 0 else "text-muted"
 
                 actual_return = sim.actual_return_pct
-                actual_color = "text-success" if actual_return and actual_return > 0 else "text-danger" if actual_return and actual_return < 0 else "text-muted"
+                # Use different styling for missing data vs zero returns
+                if actual_return is None:
+                    actual_color = "text-muted fst-italic"
+                else:
+                    actual_color = "text-success" if actual_return > 0 else "text-danger" if actual_return < 0 else "text-muted"
 
                 divergence = sim.divergence_pct
-                divergence_color = "text-warning" if divergence and abs(divergence) > 2 else "text-muted"
+                # Highlight large divergences, but show missing data differently
+                if divergence is None:
+                    divergence_color = "text-muted fst-italic"
+                else:
+                    divergence_color = "text-warning" if abs(divergence) > 2 else "text-muted"
 
                 cost_bps = sim.transaction_cost_bps
+                overnight_bps = sim.overnight_cost_bps or 0
+                borrow_bps = sim.borrow_cost_bps or 0
+                position_size = sim.position_size_pct
+
+                # Calculate recommended investment size (risk-adjusted)
+                currency_symbol = {"EUR": "\u20AC", "USD": "$", "GBP": "\u00A3"}.get(currency, currency)
+                recommended_investment = None
+                investment_tooltip = "Portfolio capital not configured"
+                if position_size is not None and portfolio_capital > 0:
+                    base_investment = portfolio_capital * (position_size / 100)
+                    risk_factor = 1.0 - (risk_score * risk_adjustment) if risk_score is not None else 1.0
+                    recommended_investment = base_investment * risk_factor
+
+                    # Build tooltip with breakdown
+                    investment_tooltip = (
+                        f"Base: {currency_symbol}{base_investment:,.0f} ({position_size:.1f}% of {currency_symbol}{portfolio_capital:,.0f})\n"
+                        f"Risk Adjustment: {risk_adjustment*100:.0f}% * {risk_score:.2f} = {(risk_score * risk_adjustment)*100:.1f}%\n"
+                        f"Risk Factor: {risk_factor:.3f}\n"
+                        f"─────────────\n"
+                        f"Recommended: {currency_symbol}{recommended_investment:,.0f}"
+                    )
+
+                # Build detailed cost tooltip
+                cost_breakdown_text = f"Total: {cost_bps:.1f} bps"
+                if sim.cost_breakdown:
+                    cost_breakdown_text = (
+                        f"Commission: {sim.cost_breakdown.get('commission_bps', 0):.1f} bps\n"
+                        f"Spread: {sim.cost_breakdown.get('spread_bps', 0):.1f} bps\n"
+                        f"Slippage: {sim.cost_breakdown.get('slippage_bps', 0):.1f} bps\n"
+                        f"Market Impact: {sim.cost_breakdown.get('market_impact_bps', 0):.1f} bps\n"
+                        f"Overnight: {overnight_bps:.1f} bps\n"
+                        f"Borrow: {borrow_bps:.1f} bps\n"
+                        f"Regulatory: {sim.cost_breakdown.get('regulatory_bps', 0):.1f} bps\n"
+                        f"─────────────\n"
+                        f"Total: {cost_bps:.1f} bps"
+                    )
 
                 rows.append(html.Tr([
                     html.Td(sim.created_at.strftime("%Y-%m-%d %H:%M") if sim.created_at else "N/A"),
@@ -300,12 +466,27 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                             className=f"text-{risk_color} text-center"),
                     html.Td(f"{expected_return:+.2f}%" if expected_return is not None else "—",
                             className=expected_color),
-                    html.Td(f"{actual_return:+.2f}%" if actual_return is not None else "—",
-                            className=actual_color),
-                    html.Td(f"{divergence:+.2f}%" if divergence is not None else "—",
-                            className=divergence_color),
+                    html.Td(
+                        f"{actual_return:+.2f}%" if actual_return is not None else "⚠ N/A",
+                        className=actual_color,
+                        title="Market data unavailable" if actual_return is None else None
+                    ),
+                    html.Td(
+                        f"{divergence:+.2f}%" if divergence is not None else "⚠ N/A",
+                        className=divergence_color,
+                        title="Requires actual return data" if divergence is None else None
+                    ),
                     html.Td(f"{cost_bps:.1f}" if cost_bps is not None else "—",
-                            className="text-muted text-center"),
+                            className="text-muted text-center",
+                            title=cost_breakdown_text),
+                    html.Td(f"{position_size:.1f}%" if position_size is not None else "—",
+                            className="text-info text-center",
+                            title=f"Position size as % of portfolio"),
+                    html.Td(
+                        f"{currency_symbol}{recommended_investment:,.0f}" if recommended_investment is not None else "—",
+                        className="text-success text-end fw-bold",
+                        title=investment_tooltip
+                    ),
                     html.Td([
                         dbc.ButtonGroup([
                             dbc.Button(
@@ -341,11 +522,13 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                     html.Th("Entity"),
                     html.Th("Horizon"),
                     html.Th("Decision"),
-                    html.Th("Risk"),
-                    html.Th("Expected"),
-                    html.Th("Actual"),
-                    html.Th("Δ (E-R)"),
-                    html.Th("Cost (bps)"),
+                    html.Th("Risk", title="Composite risk score (0-1)"),
+                    html.Th("Expected", title="Expected return %"),
+                    html.Th("Actual", title="Actual return %"),
+                    html.Th("Δ (E-R)", title="Expected - Actual divergence"),
+                    html.Th("Cost (bps)", title="Total transaction costs (hover for breakdown)"),
+                    html.Th("Position %", title="Position size as % of portfolio"),
+                    html.Th("Recommended", title="Recommended investment size (risk-adjusted)"),
                     html.Th("Actions", className="text-center")
                 ])),
                 html.Tbody(rows)
@@ -492,6 +675,17 @@ def register_callbacks(app):
     """Register simulations tab callbacks."""
 
     @app.callback(
+        Output("create-sim-date-range-container", "style"),
+        Input("create-sim-mode", "value")
+    )
+    def toggle_date_range_visibility(mode):
+        """Show/hide date range picker based on selected mode."""
+        if mode == "date_range":
+            return {"display": "block"}
+        else:
+            return {"display": "none"}
+
+    @app.callback(
         Output("sim-entity-filter", "options"),
         [Input("interval-component", "n_intervals"),
          Input("sim-date-filter", "start_date"),
@@ -509,16 +703,29 @@ def register_callbacks(app):
          Input("sim-horizon-filter", "value"),
          Input("sim-decision-filter", "value"),
          Input("create-sim-status", "children"),
-         Input("sim-delete-status", "data")]
+         Input("sim-delete-status", "data"),
+         Input("interval-component", "n_intervals"),
+         Input("portfolio-capital-input", "value"),
+         Input("portfolio-currency-dropdown", "value"),
+         Input("portfolio-risk-adjustment", "value")]
     )
-    def update_simulation_table(entities, start_date, end_date, horizon, decision, _, __):
+    def update_simulation_table(entities, start_date, end_date, horizon, decision, _, __, n_intervals, portfolio_capital, currency, risk_adjustment):
         date_range = (start_date, end_date) if start_date or end_date else None
+
+        # Use default values if portfolio settings not configured
+        portfolio_capital = portfolio_capital or 100000
+        currency = currency or "USD"
+        risk_adjustment = risk_adjustment if risk_adjustment is not None else 0.3
+
         return get_simulation_table(
             _engine,
             entity_filter=entities,
             date_range=date_range,
             decision_filter=decision or "all",
-            horizon_filter=horizon or "all"
+            horizon_filter=horizon or "all",
+            portfolio_capital=portfolio_capital,
+            risk_adjustment=risk_adjustment,
+            currency=currency
         )
 
     @app.callback(
@@ -536,30 +743,51 @@ def register_callbacks(app):
          Output("sim-filter-sync-store", "data")],
         Input("btn-create-simulations", "n_clicks"),
         [State("create-sim-entity-filter", "value"),
+         State("create-sim-mode", "value"),
          State("create-sim-date-range", "start_date"),
          State("create-sim-date-range", "end_date"),
          State("create-sim-horizon-filter", "value"),
          State("create-sim-limit", "value")],
         prevent_initial_call=True
     )
-    def create_simulations_from_predictions(n_clicks, entities, start_date, end_date, horizon, limit):
+    def create_simulations_from_predictions(n_clicks, entities, mode, start_date, end_date, horizon, limit):
         if not n_clicks:
             return "", dash.no_update
         try:
             from src.simulations.trading_simulator import TradingSimulationEngine
             engine_sim = TradingSimulationEngine()
             date_range = None
-            if start_date and end_date:
+
+            # If mode is "last_n", ignore date range and use limit to get latest predictions
+            if mode == "last_n":
+                date_range = None
+                logger.info(f"Using 'Last N' mode with limit={limit}")
+            # Enhanced date range validation and parsing for "date_range" mode
+            elif mode == "date_range" and (start_date or end_date):
                 try:
-                    start = datetime.fromisoformat(start_date) if isinstance(start_date, str) else start_date
-                    end = datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
-                    if hasattr(start, "date") and not isinstance(start, datetime):
-                        start = datetime.combine(start, datetime.min.time())
-                    if hasattr(end, "date") and not isinstance(end, datetime):
-                        end = datetime.combine(end, datetime.max.time())
+                    if start_date:
+                        start = datetime.fromisoformat(start_date) if isinstance(start_date, str) else start_date
+                        if hasattr(start, "date") and not isinstance(start, datetime):
+                            start = datetime.combine(start, datetime.min.time())
+                    else:
+                        start = datetime(2020, 1, 1)  # Default far past
+                    
+                    if end_date:
+                        end = datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
+                        if hasattr(end, "date") and not isinstance(end, datetime):
+                            end = datetime.combine(end, datetime.max.time())
+                    else:
+                        end = datetime.utcnow()  # Default to now
+                    
+                    # Validate date range
+                    if start > end:
+                        return dbc.Alert("Start date must be before end date", color="danger", dismissable=True, duration=5000), dash.no_update
+                    
                     date_range = (start, end)
+                    logger.info(f"Creating simulations for date range: {start.date()} to {end.date()}")
                 except Exception as e:
                     logger.warning("Error parsing date range: %s", e)
+                    return dbc.Alert(f"Invalid date range: {str(e)}", color="warning", dismissable=True, duration=5000), dash.no_update
             stats = engine_sim.create_simulations_from_predictions(
                 entity_filter=entities if entities and len(entities) > 0 else None,
                 horizon_filter=horizon if horizon != "all" else None,
@@ -706,3 +934,132 @@ def register_callbacks(app):
         if button_id in ("btn-cancel-clear-simulations", "btn-confirm-clear-simulations"):
             return False
         return is_open
+
+    @app.callback(
+        Output("modal-resimulate-all-simulations", "is_open"),
+        [Input("btn-resimulate-all-simulations", "n_clicks"),
+         Input("btn-cancel-resimulate-simulations", "n_clicks"),
+         Input("btn-confirm-resimulate-simulations", "n_clicks")],
+        State("modal-resimulate-all-simulations", "is_open"),
+        prevent_initial_call=True
+    )
+    def toggle_resimulate_modal(open_clicks, cancel_clicks, confirm_clicks, is_open):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            raise PreventUpdate
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        if button_id == "btn-resimulate-all-simulations":
+            return True
+        if button_id in ("btn-cancel-resimulate-simulations", "btn-confirm-resimulate-simulations"):
+            return False
+        return is_open
+
+    @app.callback(
+        [Output("resimulate-status", "children"),
+         Output("simulation-table", "children", allow_duplicate=True),
+         Output("simulation-sync-trigger", "data", allow_duplicate=True)],  # Notify predictions tab
+        Input("btn-confirm-resimulate-simulations", "n_clicks"),
+        prevent_initial_call=True
+    )
+    def resimulate_all_simulations(n_clicks):
+        if not n_clicks:
+            return "", dash.no_update, dash.no_update
+        try:
+            from src.simulations.trading_simulator import TradingSimulationEngine
+            
+            with get_scoped_session() as db:
+                # Get all existing simulations
+                simulations = db.query(TradingSimulation).all()
+                total = len(simulations)
+                
+                if total == 0:
+                    return dbc.Alert(
+                        "No simulations found to resimulate.",
+                        color="info",
+                        dismissable=True,
+                        duration=4000
+                    ), dash.no_update, dash.no_update
+                
+                engine = TradingSimulationEngine()
+                updated_count = 0
+                error_count = 0
+                
+                # Resimulate each one
+                for sim in simulations:
+                    try:
+                        # Get the original prediction and entity
+                        prediction = db.query(Prediction).filter(
+                            Prediction.prediction_id == sim.prediction_id
+                        ).first()
+                        
+                        entity = db.query(Entity).filter(
+                            Entity.entity_id == sim.entity_id
+                        ).first()
+                        
+                        if prediction and entity:
+                            # Resimulate with fresh data
+                            updated_sim = engine.simulate_prediction(db, prediction, entity)
+                            if updated_sim:
+                                updated_count += 1
+                            else:
+                                error_count += 1
+                        else:
+                            error_count += 1
+                            logger.warning(f"Prediction or entity not found for simulation {sim.simulation_id}")
+                    except Exception as e:
+                        error_count += 1
+                        logger.error(f"Error resimulating {sim.simulation_id}: {e}")
+                
+                db.commit()
+                activity_logger.log_activity(
+                    f"Resimulated {updated_count}/{total} simulations (errors: {error_count})",
+                    "INFO"
+                )
+                
+                # Refresh the table
+                new_table = get_simulation_table(_engine)
+                
+                # Create sync trigger to notify predictions tab
+                sync_trigger = {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "updated_count": updated_count,
+                    "total": total
+                }
+                
+                return dbc.Alert(
+                    f"✅ Successfully resimulated {updated_count} of {total} simulations. Errors: {error_count}",
+                    color="success" if error_count == 0 else "warning",
+                    dismissable=True,
+                    duration=6000
+                ), new_table, sync_trigger
+                
+        except Exception as e:
+            logger.error(f"Error resimulating all simulations: {e}", exc_info=True)
+            activity_logger.log_activity(f"Error resimulating all simulations: {e}", "ERROR")
+            return dbc.Alert(
+                f"❌ Error resimulating simulations: {str(e)}",
+                color="danger",
+                dismissable=True,
+                duration=6000
+            ), dash.no_update, dash.no_update
+
+    @app.callback(
+        Output("portfolio-summary-display", "children"),
+        [Input("portfolio-capital-input", "value"),
+         Input("portfolio-currency-dropdown", "value"),
+         Input("portfolio-risk-adjustment", "value")]
+    )
+    def update_portfolio_summary(capital, currency, risk_adj):
+        if not capital or capital <= 0:
+            return html.Small("Enter depot capital to see summary", className="text-muted fst-italic")
+
+        currency_symbol = {"EUR": "\u20AC", "USD": "$", "GBP": "\u00A3"}.get(currency, currency)
+        risk_adj_pct = (risk_adj or 0.3) * 100
+
+        return html.Div([
+            html.Small("Portfolio Summary:", className="text-muted d-block mb-1"),
+            html.Div([
+                html.Strong(f"{currency_symbol}{capital:,.0f}", className="text-success d-block"),
+                html.Small(f"Risk Adjustment: {risk_adj_pct:.0f}%", className="text-muted")
+            ])
+        ])
