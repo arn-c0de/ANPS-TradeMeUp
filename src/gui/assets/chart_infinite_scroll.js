@@ -10,17 +10,14 @@
     
     /**
      * Get module references (check dynamically to handle async loading)
-     * Includes error handling and debugging
+     * Includes error handling (no verbose logging to reduce spam)
      */
     function getCenterLineOverlay() {
         try {
             const module = window.ChartCenterLineOverlay;
             if (!module) {
-                if (console && console.debug) {
-                    console.debug('[Chart Scroll] ChartCenterLineOverlay module not available');
-                }
-            } else if (console && console.debug) {
-                console.debug('[Chart Scroll] ChartCenterLineOverlay module found');
+                // Only log if module is missing (not on every check)
+                // Removed verbose logging to reduce console spam
             }
             return module;
         } catch (error) {
@@ -33,11 +30,8 @@
         try {
             const module = window.ChartTimestamps;
             if (!module) {
-                if (console && console.debug) {
-                    console.debug('[Chart Scroll] ChartTimestamps module not available');
-                }
-            } else if (console && console.debug) {
-                console.debug('[Chart Scroll] ChartTimestamps module found');
+                // Only log if module is missing (not on every check)
+                // Removed verbose logging to reduce console spam
             }
             return module;
         } catch (error) {
@@ -361,6 +355,84 @@
     }
 
     /**
+     * Find chart element by ID (handles both string IDs and Dash Pattern IDs)
+     * Dash Pattern IDs are serialized as JSON strings in the DOM
+     */
+    function findChartElementById(graphId) {
+        if (!graphId) return null;
+        
+        // Handle string IDs (try direct lookup first)
+        if (typeof graphId === 'string') {
+            const element = document.getElementById(graphId);
+            if (element) return element;
+            
+            // Try finding by Pattern ID JSON string
+            try {
+                const patternObj = {type: 'chart-graph', index: graphId};
+                const patternStr = JSON.stringify(patternObj);
+                const allElements = document.querySelectorAll('[id*="chart-graph"]');
+                for (const el of allElements) {
+                    if (el.id === patternStr) {
+                        return el;
+                    }
+                }
+            } catch (e) {
+                // Ignore JSON errors
+            }
+        } else if (typeof graphId === 'object') {
+            // Pattern ID object - find element with matching JSON string
+            try {
+                const patternStr = JSON.stringify(graphId);
+                const allElements = document.querySelectorAll('[id*="chart-graph"]');
+                for (const el of allElements) {
+                    if (el.id === patternStr) {
+                        return el;
+                    }
+                }
+                
+                // Also try to find by matching type and index separately
+                const type = graphId.type || 'chart-graph';
+                const index = graphId.index;
+                if (index) {
+                    for (const el of allElements) {
+                        try {
+                            const elId = JSON.parse(el.id);
+                            if (elId.type === type && elId.index === index) {
+                                return el;
+                            }
+                        } catch (e) {
+                            // Not a JSON ID, skip
+                        }
+                    }
+                }
+            } catch (e) {
+                // Ignore JSON errors
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Extract readable chart ID from element (for logging)
+     */
+    function extractChartId(element) {
+        if (!element || !element.id) return 'unknown';
+        
+        try {
+            // Try parsing as JSON (Pattern ID)
+            const parsed = JSON.parse(element.id);
+            if (parsed && parsed.index) {
+                return parsed.index;
+            }
+        } catch (e) {
+            // Not JSON, return as-is
+        }
+        
+        return element.id;
+    }
+    
+    /**
      * Find the actual graph element (handles wrapped graphs)
      * Returns the element that contains the Plotly instance
      */
@@ -405,19 +477,30 @@
      * Key principle:
      * - Horizontal wheel: Let Plotly handle scrolling natively for best performance
      * - Shift+Wheel: Use RequestAnimationFrame batching with Plotly.relayout() for smooth panning
+     * - Ctrl+Shift+Wheel: Also handled for panning
      * - Threshold detection: Handled by Python callback via relayoutData events
      */
     function setupInfiniteScrollListener(graphId, retryCount = 0) {
-        const graphElement = document.getElementById(graphId);
+        const chartIdStr = typeof graphId === 'object' ? JSON.stringify(graphId) : graphId;
+        const readableId = typeof graphId === 'object' ? (graphId.index || chartIdStr) : graphId;
+        
+        const graphElement = findChartElementById(graphId);
         if (!graphElement) {
             // Element not found - retry if we haven't tried too many times
             if (retryCount < 5) {
+                // Removed verbose retry logging to reduce console spam
                 setTimeout(() => setupInfiniteScrollListener(graphId, retryCount + 1), 200 * (retryCount + 1));
+            } else {
+                console.warn(`[Chart Scroll] Failed to find chart element: ${readableId}`);
             }
             return;
         }
         
-        if (chartScrollState.has(graphId)) {
+        // Removed verbose "Found chart element" logging to reduce console spam
+        
+        // Use chartIdStr as key for state tracking (consistent string representation)
+        if (chartScrollState.has(chartIdStr)) {
+            // Removed verbose "already initialized" logging to reduce console spam
             return; // Already setup
         }
 
@@ -431,23 +514,31 @@
             return;
         }
 
-        chartScrollState.set(graphId, {
+        chartScrollState.set(chartIdStr, {
             isLoading: false,
             scrollAccumulator: 0,
             rafId: null,
             centerLineRafId: null
         });
 
-        const state = chartScrollState.get(graphId);
+        const state = chartScrollState.get(chartIdStr);
 
         // Get Plotly graph instance from the actual graph element
         const graphDiv = actualGraphElement.querySelector('.js-plotly-plot');
         if (!graphDiv || !graphDiv._fullData) {
             // Wait for Plotly to initialize - retry with exponential backoff
             if (retryCount < 8) {
+                // Removed verbose retry logging to reduce console spam
                 setTimeout(() => setupInfiniteScrollListener(graphId, retryCount + 1), 150 + retryCount * 100);
+            } else {
+                console.warn(`[Chart Scroll] Chart ${readableId} Plotly instance not found after retries`);
             }
             return;
+        }
+        
+        // Only log initialization on first attempt (not retries)
+        if (retryCount === 0 && console && console.log) {
+            console.log(`[Chart Scroll] Initializing chart: ${readableId}`);
         }
 
         // Listen for afterplot event (fires after chart is fully rendered) - create overlay here
@@ -480,40 +571,40 @@
                     if (useFallback) {
                         // Use fallback functions
                         if (!actualGraphElement.querySelector('.chart-center-line-overlay')) {
-                            createOverlayFallback(actualGraphElement, graphId);
+                            createOverlayFallback(actualGraphElement, chartIdStr);
                         }
-                        updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                        updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                     } else {
                         // Use module functions
                         if (CenterLineOverlay && !actualGraphElement.querySelector('.chart-center-line-overlay')) {
                             try {
-                                CenterLineOverlay.create(actualGraphElement, graphId);
+                                CenterLineOverlay.create(actualGraphElement, chartIdStr);
                             } catch (error) {
-                                console.error('[Chart Scroll] Error creating overlay:', error);
-                                createOverlayFallback(actualGraphElement, graphId);
+                                console.error(`[Chart Scroll] Error creating overlay for ${readableId}:`, error);
+                                createOverlayFallback(actualGraphElement, chartIdStr);
                             }
                         }
                         if (ChartTimestamps) {
                             try {
-                                ChartTimestamps.updateCenterLineTimestamp(graphDiv, actualGraphElement, graphId);
+                                ChartTimestamps.updateCenterLineTimestamp(graphDiv, actualGraphElement, chartIdStr);
                             } catch (error) {
-                                console.error('[Chart Scroll] Error updating timestamp:', error);
-                                updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                                console.error(`[Chart Scroll] Error updating timestamp for ${readableId}:`, error);
+                                updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                             }
                         } else {
-                            updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                            updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                         }
                     }
                 } catch (error) {
-                    console.error('[Chart Scroll] Error in afterplot handler:', error);
+                    console.error(`[Chart Scroll] Error in afterplot handler for ${readableId}:`, error);
                     // Try fallback as last resort
                     try {
                         if (!actualGraphElement.querySelector('.chart-center-line-overlay')) {
-                            createOverlayFallback(actualGraphElement, graphId);
+                            createOverlayFallback(actualGraphElement, chartIdStr);
                         }
-                        updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                        updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                     } catch (fallbackError) {
-                        console.error('[Chart Scroll] Fallback also failed:', fallbackError);
+                        console.error(`[Chart Scroll] Fallback also failed for ${readableId}:`, fallbackError);
                     }
                 }
             });
@@ -548,40 +639,40 @@
             try {
                 if (useFallback) {
                     // Use fallback functions
-                    createOverlayFallback(actualGraphElement, graphId);
-                    updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                    createOverlayFallback(actualGraphElement, chartIdStr);
+                    updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                 } else {
                     // Use module functions
                     if (CenterLineOverlay) {
                         try {
-                            CenterLineOverlay.create(actualGraphElement, graphId);
+                            CenterLineOverlay.create(actualGraphElement, chartIdStr);
                         } catch (error) {
-                            console.error('[Chart Scroll] Error creating overlay:', error);
-                            createOverlayFallback(actualGraphElement, graphId);
+                            console.error(`[Chart Scroll] Error creating overlay for ${readableId}:`, error);
+                            createOverlayFallback(actualGraphElement, chartIdStr);
                         }
                     } else {
-                        createOverlayFallback(actualGraphElement, graphId);
+                        createOverlayFallback(actualGraphElement, chartIdStr);
                     }
                     
                     if (ChartTimestamps) {
                         try {
-                            ChartTimestamps.updateCenterLineTimestamp(graphDiv, actualGraphElement, graphId);
+                            ChartTimestamps.updateCenterLineTimestamp(graphDiv, actualGraphElement, chartIdStr);
                         } catch (error) {
-                            console.error('[Chart Scroll] Error updating timestamp:', error);
-                            updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                            console.error(`[Chart Scroll] Error updating timestamp for ${readableId}:`, error);
+                            updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                         }
                     } else {
-                        updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                        updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                     }
                 }
             } catch (error) {
-                console.error('[Chart Scroll] Error in initial setup:', error);
+                console.error(`[Chart Scroll] Error in initial setup for ${readableId}:`, error);
                 // Try fallback as last resort
                 try {
-                    createOverlayFallback(actualGraphElement, graphId);
-                    updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                    createOverlayFallback(actualGraphElement, chartIdStr);
+                    updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                 } catch (fallbackError) {
-                    console.error('[Chart Scroll] Fallback also failed:', fallbackError);
+                    console.error(`[Chart Scroll] Fallback also failed for ${readableId}:`, fallbackError);
                 }
             }
         });
@@ -608,10 +699,10 @@
                 
                 let success = false;
                 try {
-                    success = ChartTimestamps.updateCenterLineTimestamp(graphDiv, actualGraphElement, graphId);
+                    success = ChartTimestamps.updateCenterLineTimestamp(graphDiv, actualGraphElement, chartIdStr);
                 } catch (error) {
-                    console.error('[Chart Scroll] Error updating timestamp:', error);
-                    updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                    console.error(`[Chart Scroll] Error updating timestamp for ${readableId}:`, error);
+                    updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                     return;
                 }
                 
@@ -623,8 +714,8 @@
                 if (hasTimestamp || retries <= 0) {
                     if (!hasTimestamp && retries <= 0) {
                         // Try fallback as last resort
-                        console.warn('[Chart Scroll] Timestamp not set after retries, using fallback');
-                        updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                        console.warn(`[Chart Scroll] Timestamp not set after retries for ${readableId}, using fallback`);
+                        updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                     }
                     return;
                 }
@@ -632,12 +723,12 @@
                 const delay = retries > 10 ? 50 : (retries > 5 ? 100 : 200);
                 setTimeout(() => tryUpdateTimestamp(retries - 1), delay);
             } catch (error) {
-                console.error('[Chart Scroll] Error in tryUpdateTimestamp:', error);
+                console.error(`[Chart Scroll] Error in tryUpdateTimestamp for ${readableId}:`, error);
                 // Try fallback
                 try {
-                    updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                    updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                 } catch (fallbackError) {
-                    console.error('[Chart Scroll] Fallback also failed:', fallbackError);
+                    console.error(`[Chart Scroll] Fallback also failed for ${readableId}:`, fallbackError);
                 }
             }
         }
@@ -683,23 +774,25 @@
         /**
          * Handle wheel events
          * Shift+Wheel = horizontal pan
+         * Ctrl+Shift+Wheel = horizontal pan (also supported)
          * Ctrl+Wheel = zoom (Plotly default)
          * Horizontal wheel = horizontal pan
          * IMPORTANT: Must capture in capture phase to intercept before Plotly's default handler
          */
         function handleWheelEvent(event) {
-            // Ctrl+Wheel = zoom (let Plotly handle it natively)
+            // Ctrl+Wheel (without Shift) = zoom (let Plotly handle it natively)
             if (event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
                 // Let Plotly handle Ctrl+Wheel for zoom - do NOT prevent default
                 return;
             }
 
-            // Check for Shift+Wheel or horizontal scroll
-            const isShiftWheel = event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey;
+            // Check for Shift+Wheel, Ctrl+Shift+Wheel, or horizontal scroll
+            const isShiftWheel = event.shiftKey && !event.altKey && !event.metaKey;
+            const isCtrlShiftWheel = event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey;
             const isHorizontalWheel = Math.abs(event.deltaX) > Math.abs(event.deltaY);
 
-            // Handle Shift+Wheel or horizontal wheel scroll for panning
-            if (isShiftWheel || isHorizontalWheel) {
+            // Handle Shift+Wheel, Ctrl+Shift+Wheel, or horizontal wheel scroll for panning
+            if (isShiftWheel || isCtrlShiftWheel || isHorizontalWheel) {
                 // Prevent default behavior - CRITICAL for blocking Plotly zoom
                 event.preventDefault();
                 event.stopPropagation();
@@ -761,26 +854,26 @@
                 if (availability.timestamps && ChartTimestamps && !state.centerLineRafId) {
                     state.centerLineRafId = window.requestAnimationFrame(() => {
                         try {
-                            ChartTimestamps.updateCenterLineTimestamp(graphDiv, actualGraphElement, graphId);
+                            ChartTimestamps.updateCenterLineTimestamp(graphDiv, actualGraphElement, chartIdStr);
                         } catch (error) {
-                            console.error('[Chart Scroll] Error updating timestamp in relayout:', error);
-                            updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                            console.error(`[Chart Scroll] Error updating timestamp in relayout for ${readableId}:`, error);
+                            updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                         }
                         state.centerLineRafId = null;
                     });
                 } else if (!availability.timestamps && !state.centerLineRafId) {
                     // Use fallback if module not available
                     state.centerLineRafId = window.requestAnimationFrame(() => {
-                        updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                        updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                         state.centerLineRafId = null;
                     });
                 }
             } catch (error) {
-                console.error('[Chart Scroll] Error in relayout handler:', error);
+                console.error(`[Chart Scroll] Error in relayout handler for ${readableId}:`, error);
                 // Try fallback as last resort
                 if (!state.centerLineRafId) {
                     state.centerLineRafId = window.requestAnimationFrame(() => {
-                        updateTimestampFallback(graphDiv, actualGraphElement, graphId);
+                        updateTimestampFallback(graphDiv, actualGraphElement, chartIdStr);
                         state.centerLineRafId = null;
                     });
                 }
@@ -796,56 +889,194 @@
      * Reset loading state (called from callback)
      */
     function resetLoadingState(graphId) {
-        const state = chartScrollState.get(graphId);
+        // Handle both string and Pattern ID
+        const chartIdStr = typeof graphId === 'object' ? JSON.stringify(graphId) : graphId;
+        const state = chartScrollState.get(chartIdStr);
         if (state) {
             state.isLoading = false;
         }
     }
     
     /**
+     * Check if chart element is in an active container (chart-display-area or visible multi-panel-chart-area)
+     * Only charts in active containers should be initialized
+     */
+    function isChartInActiveContainer(element) {
+        // Check if element is connected to DOM
+        if (!element.isConnected) return false;
+        
+        // Walk up DOM tree to find which container this chart belongs to
+        let parent = element.parentElement;
+        let depth = 0;
+        let foundTabContainer = false;
+        let foundPanelContainer = false;
+        
+        while (parent && depth < 20) {
+            const parentId = parent.id;
+            
+            // Check if chart is in tab display area (active tabs)
+            if (parentId === 'chart-display-area') {
+                foundTabContainer = true;
+                break;
+            }
+            
+            // Check if chart is in multi-panel area
+            if (parentId === 'multi-panel-chart-area') {
+                foundPanelContainer = true;
+                // Check if multi-panel area is visible
+                const style = window.getComputedStyle(parent);
+                if (style.display === 'none' || style.visibility === 'hidden') {
+                    return false; // Multi-panel exists but is hidden
+                }
+                break;
+            }
+            
+            // Stop at body
+            if (parent === document.body) {
+                break;
+            }
+            
+            parent = parent.parentElement;
+            depth++;
+        }
+        
+        // Only accept charts in active containers
+        return foundTabContainer || foundPanelContainer;
+    }
+    
+    /**
      * Initialize scroll listeners for all charts
      * Handles both direct chart elements and wrapped graphs
+     * Enhanced to find all charts by Plotly containers first (more reliable)
+     * Only finds charts in active containers (chart-display-area or visible multi-panel-chart-area)
      */
     function initializeScrollListeners() {
-        // Find all chart graphs by ID pattern
-        const chartGraphs = document.querySelectorAll('[id*="chart-graph"]');
         const processedIds = new Set();
+        const foundCharts = [];
         
-        // Process direct chart elements
-        chartGraphs.forEach(function(graphElement) {
-            const graphId = graphElement.id;
-            if (graphId && !chartScrollState.has(graphId) && !processedIds.has(graphId)) {
-                processedIds.add(graphId);
-                setupInfiniteScrollListener(graphId);
-            }
-        });
-        
-        // Also find charts by looking for Plotly plot containers
-        // This catches charts that might be wrapped in divs or not yet have IDs set
+        // Method 1: Find all .js-plotly-plot elements first (most reliable)
+        // This catches all charts regardless of how they're wrapped
+        // Only initialize charts that are in active containers
         const plotContainers = document.querySelectorAll('.js-plotly-plot');
         plotContainers.forEach(function(plotContainer) {
-            // Find parent element with chart-graph ID
-            let parent = plotContainer.closest('[id*="chart-graph"]');
-            
-            // If no parent with ID found, walk up the tree to find it
-            if (!parent) {
-                parent = plotContainer.parentElement;
-                let depth = 0;
-                while (parent && depth < 10 && !parent.id.includes('chart-graph')) {
-                    parent = parent.parentElement;
-                    depth++;
-                }
+            if (!plotContainer || !plotContainer._fullData) {
+                return; // Skip if Plotly not initialized
             }
             
-            // If we found a parent with chart-graph ID, initialize it
-            if (parent && parent.id && parent.id.includes('chart-graph')) {
-                const graphId = parent.id;
-                if (!chartScrollState.has(graphId) && !processedIds.has(graphId)) {
-                    processedIds.add(graphId);
-                    setupInfiniteScrollListener(graphId);
+            // Check if chart is in an active container (chart-display-area or visible multi-panel-chart-area)
+            if (!isChartInActiveContainer(plotContainer)) {
+                return; // Skip charts not in active containers
+            }
+            
+            // Check if chart is visible (not hidden)
+            // Use less aggressive check - only check display/visibility, not dimensions
+            // Charts might not have dimensions yet but should still be initialized
+            const style = window.getComputedStyle(plotContainer);
+            const isVisible = style.display !== 'none' && 
+                             style.visibility !== 'hidden' &&
+                             style.opacity !== '0';
+            
+            if (!isVisible) {
+                return; // Skip hidden charts
+            }
+            
+            // Walk up DOM tree to find parent with chart ID
+            let parent = plotContainer.parentElement;
+            let depth = 0;
+            let chartElement = null;
+            
+            while (parent && depth < 15) {
+                // Check if parent has a chart-graph ID
+                if (parent.id && parent.id.includes('chart-graph')) {
+                    chartElement = parent;
+                    break;
+                }
+                parent = parent.parentElement;
+                depth++;
+            }
+            
+            if (chartElement) {
+                const chartId = chartElement.id;
+                const chartIdStr = chartId; // Use as-is for now
+                
+                if (!processedIds.has(chartIdStr)) {
+                    processedIds.add(chartIdStr);
+                    foundCharts.push({
+                        element: chartElement,
+                        id: chartId,
+                        idStr: chartIdStr
+                    });
                 }
             }
         });
+        
+        // Method 2: Also find charts by ID pattern (for charts not yet rendered)
+        // Only include charts that are in active containers and visible
+        const chartGraphs = document.querySelectorAll('[id*="chart-graph"]');
+        chartGraphs.forEach(function(graphElement) {
+            const graphId = graphElement.id;
+            if (graphId && !processedIds.has(graphId)) {
+                // Check if chart is in an active container (chart-display-area or visible multi-panel-chart-area)
+                if (!isChartInActiveContainer(graphElement)) {
+                    return; // Skip charts not in active containers
+                }
+                
+                // Check if chart is visible (not hidden)
+                // Use less aggressive check - only check display/visibility, not dimensions
+                // Charts might not have dimensions yet but should still be initialized
+                const style = window.getComputedStyle(graphElement);
+                const isVisible = style.display !== 'none' && 
+                                 style.visibility !== 'hidden' &&
+                                 style.opacity !== '0';
+                
+                if (isVisible) {
+                    processedIds.add(graphId);
+                    foundCharts.push({
+                        element: graphElement,
+                        id: graphId,
+                        idStr: graphId
+                    });
+                }
+            }
+        });
+        
+        // Initialize each found chart
+        foundCharts.forEach(function(chartInfo) {
+            try {
+                // Try to parse as Pattern ID
+                let patternId = null;
+                try {
+                    patternId = JSON.parse(chartInfo.id);
+                } catch (e) {
+                    // Not a Pattern ID, use as string
+                    patternId = chartInfo.id;
+                }
+                
+                if (!chartScrollState.has(chartInfo.idStr)) {
+                    // Log for debugging
+                    const readableId = typeof patternId === 'object' ? (patternId.index || chartInfo.idStr) : chartInfo.idStr;
+                    if (console && console.debug) {
+                        console.debug(`[Chart Scroll] Found chart to initialize: ${readableId}`);
+                    }
+                    setupInfiniteScrollListener(patternId);
+                }
+            } catch (error) {
+                console.error(`[Chart Scroll] Error initializing chart ${chartInfo.idStr}:`, error);
+            }
+        });
+        
+        // Log summary for debugging
+        if (console && console.debug && foundCharts.length > 0) {
+            const chartIds = foundCharts.map(c => {
+                try {
+                    const parsed = JSON.parse(c.id);
+                    return parsed.index || c.id;
+                } catch (e) {
+                    return c.id;
+                }
+            });
+            console.debug(`[Chart Scroll] Found ${foundCharts.length} chart(s) to initialize:`, chartIds);
+        }
     }
     
     // Run initialization when DOM is ready
@@ -891,6 +1122,7 @@
             });
         });
         if (shouldInit) {
+            // Removed verbose MutationObserver logging to reduce console spam
             debouncedInitialize();
         }
     });

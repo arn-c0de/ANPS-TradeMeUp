@@ -2508,8 +2508,8 @@ def open_ticker_in_charts(n_clicks_list, button_ids, tabs_data):
         # Switch to existing tab
         tabs_data['active_tab'] = existing_tab
     else:
-        # Create new tab
-        new_tab_id = f"tab-{uuid.uuid4().hex[:8]}"
+        # Create new tab with symbol in ID for better debugging
+        new_tab_id = f"tab-{ticker}-{uuid.uuid4().hex[:8]}"
         new_tab = {
             'id': new_tab_id,
             'symbol': ticker,
@@ -2622,6 +2622,111 @@ def save_overlays_to_db(overlays_data, tabs_data):
             logger.info(f"[DB Save] Successfully saved {saved_count} overlays to database")
     except Exception as e:
         logger.error(f"[DB Save] Error saving overlays to DB: {e}", exc_info=True)
+
+
+@app.callback(
+    [Output("chart-tabs-store", "data", allow_duplicate=True),
+     Output("chart-overlays-store", "data", allow_duplicate=True),
+     Output("chart-interaction-modes", "data", allow_duplicate=True),
+     Output("chart-view-state", "data", allow_duplicate=True),
+     Output("quad-mode-store", "data", allow_duplicate=True)],
+    Input("url", "pathname"),
+    [State("chart-tabs-store", "data"),
+     State("chart-overlays-store", "data"),
+     State("chart-interaction-modes", "data"),
+     State("chart-view-state", "data"),
+     State("quad-mode-store", "data")],
+    prevent_initial_call='initial_duplicate'
+)
+def migrate_tab_ids(pathname, tabs_data, overlays_data, interaction_modes, view_state, quad_data):
+    """Migrate old tab IDs to new format with symbol and update all related stores"""
+    import uuid
+    import copy
+    from dash import callback_context
+    
+    if not tabs_data or not tabs_data.get('tabs'):
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    
+    tabs = tabs_data.get('tabs', [])
+    old_to_new_id_map = {}
+    migrated = False
+    
+    # Check each tab for old format
+    for tab in tabs:
+        tab_id = tab.get('id', '')
+        symbol = tab.get('symbol', '')
+        
+        # Check if ID is old format (doesn't contain symbol)
+        # Old format: tab-{number} or tab-{uuid}
+        # New format: tab-{SYMBOL}-{uuid}
+        if symbol and not (f'-{symbol}-' in tab_id or tab_id.startswith(f'tab-{symbol}-')):
+            # Generate new ID
+            new_id = f"tab-{symbol}-{uuid.uuid4().hex[:8]}"
+            old_to_new_id_map[tab_id] = new_id
+            tab['id'] = new_id
+            migrated = True
+    
+    if not migrated:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    
+    # Update active_tab if it was migrated
+    active_tab = tabs_data.get('active_tab')
+    if active_tab in old_to_new_id_map:
+        tabs_data['active_tab'] = old_to_new_id_map[active_tab]
+    
+    # Update tabs list
+    tabs_data['tabs'] = tabs
+    
+    logger.info(f"Migrated {len(old_to_new_id_map)} tab IDs: {old_to_new_id_map}")
+    
+    # Update related stores with new IDs
+    overlays_updated = copy.deepcopy(overlays_data) if overlays_data else {'tabs': {}}
+    interaction_modes_updated = copy.deepcopy(interaction_modes) if interaction_modes else {'tabs': {}}
+    view_state_updated = copy.deepcopy(view_state) if view_state else {'tabs': {}}
+    quad_data_updated = copy.deepcopy(quad_data) if quad_data else {'enabled': False, 'selected_tabs': []}
+    
+    stores_updated = False
+    
+    # Migrate overlays store
+    if overlays_updated.get('tabs'):
+        for old_id, new_id in old_to_new_id_map.items():
+            if old_id in overlays_updated['tabs']:
+                overlays_updated['tabs'][new_id] = overlays_updated['tabs'].pop(old_id)
+                stores_updated = True
+    
+    # Migrate interaction modes store
+    if interaction_modes_updated.get('tabs'):
+        for old_id, new_id in old_to_new_id_map.items():
+            if old_id in interaction_modes_updated['tabs']:
+                interaction_modes_updated['tabs'][new_id] = interaction_modes_updated['tabs'].pop(old_id)
+                stores_updated = True
+    
+    # Migrate view state store
+    if view_state_updated.get('tabs'):
+        for old_id, new_id in old_to_new_id_map.items():
+            if old_id in view_state_updated['tabs']:
+                view_state_updated['tabs'][new_id] = view_state_updated['tabs'].pop(old_id)
+                stores_updated = True
+    
+    # Migrate quad mode store
+    if quad_data_updated.get('selected_tabs'):
+        updated_selected = []
+        for tab_id in quad_data_updated['selected_tabs']:
+            if tab_id in old_to_new_id_map:
+                updated_selected.append(old_to_new_id_map[tab_id])
+                stores_updated = True
+            else:
+                updated_selected.append(tab_id)
+        quad_data_updated['selected_tabs'] = updated_selected
+    
+    if stores_updated:
+        logger.info(f"Updated related stores with new tab IDs")
+    
+    return (tabs_data,
+            overlays_updated if stores_updated else dash.no_update,
+            interaction_modes_updated if stores_updated else dash.no_update,
+            view_state_updated if stores_updated else dash.no_update,
+            quad_data_updated if stores_updated else dash.no_update)
 
 
 @app.callback(
@@ -4081,8 +4186,8 @@ def add_new_chart_tab(n_clicks, symbol, timeframe, chart_type, tabs_data):
     if not n_clicks or not symbol:
         return dash.no_update
     
-    # Create new tab
-    new_tab_id = f"tab-{uuid.uuid4().hex[:8]}"
+    # Create new tab with symbol in ID for better debugging
+    new_tab_id = f"tab-{symbol}-{uuid.uuid4().hex[:8]}"
     new_tab = {
         'id': new_tab_id,
         'symbol': symbol,
