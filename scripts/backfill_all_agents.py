@@ -22,6 +22,7 @@ from src.models.data_quality import DataQualityScore
 
 # Import settings to use environment configuration
 from src.config.settings import settings
+from src.utils.redact import redact_url, set_status
 
 # Import all agents
 from src.agents.data_quality_agent import DataQualityAgent
@@ -55,18 +56,18 @@ def print_llm_config():
     print(f"Provider: {settings.llm_provider}")
     
     if settings.llm_provider == "ollama":
-        print(f"Ollama URL: {settings.ollama_base_url}")
+        print(f"Ollama URL: {redact_url(settings.ollama_base_url)}")
         print(f"Ollama Model: {settings.ollama_model}")
     elif settings.llm_provider == "openai":
-        api_key_preview = settings.openai_api_key[:10] + "..." if settings.openai_api_key else "NOT SET"
-        print(f"OpenAI API Key: {api_key_preview}")
+        # Do NOT print or reveal any portion of the API key. Always print a redacted placeholder.
+        print("OpenAI API Key: [REDACTED]")
         print(f"OpenAI Model: {settings.openai_model}")
     elif settings.llm_provider == "anthropic":
-        api_key_preview = settings.anthropic_api_key[:10] + "..." if settings.anthropic_api_key else "NOT SET"
-        print(f"Anthropic API Key: {api_key_preview}")
+        # Do NOT print or reveal any portion of the API key. Always print a redacted placeholder.
+        print("Anthropic API Key: [REDACTED]")
         print(f"Anthropic Model: {settings.anthropic_model}")
     
-    print(f"Database: {settings.database_url}")
+    print(f"Database: {redact_url(settings.database_url)}")
     print()
 
 

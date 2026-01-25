@@ -6,6 +6,7 @@ import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.config.settings import settings
+from src.utils.redact import redact_url
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class LLMService:
                 # Add custom base URL if configured (for proxies/custom endpoints)
                 if hasattr(settings, 'openai_base_url') and settings.openai_base_url:
                     client_kwargs["base_url"] = settings.openai_base_url
-                    logger.info(f"Using custom OpenAI base URL: {settings.openai_base_url}")
+                    logger.info(f"Using custom OpenAI base URL: {redact_url(settings.openai_base_url)}")
                 
                 # Check proxy configuration
                 http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
@@ -122,7 +123,7 @@ class LLMService:
             else:
                 logger.warning("Ollama server responded but may not be fully ready")
         except Exception as e:
-            logger.error(f"Failed to connect to Ollama at {self.ollama_base_url}: {e}")
+            logger.error(f"Failed to connect to Ollama (host: {redact_url(self.ollama_base_url)}): {e}")
             logger.error("Make sure Ollama is running: ollama serve")
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))

@@ -17,9 +17,10 @@ except Exception as e:
 
 try:
     from src.config.settings import settings
+    from src.utils.redact import redact_url
     print(f"✓ Settings OK - LLM Provider: {settings.llm_provider}")
-    print(f"  Database: {settings.database_url}")
-    print(f"  Ollama: {settings.ollama_base_url}")
+    print(f"  Database: {redact_url(settings.database_url)}")
+    print(f"  Ollama: {redact_url(settings.ollama_base_url)}")
     print(f"  Model: {settings.ollama_model}")
 except Exception as e:
     print(f"✗ Settings failed: {e}")
