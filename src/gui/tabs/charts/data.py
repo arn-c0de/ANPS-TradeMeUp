@@ -5,7 +5,7 @@ Charts Tab - Data Retrieval Functions
 from typing import Optional, Dict
 import pandas as pd
 
-from src.gui.tabs.charts.market_data import MarketDataProvider
+from src.services.market_data import MarketDataProvider
 from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager
 
 # Initialize market data provider

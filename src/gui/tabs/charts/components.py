@@ -7,7 +7,7 @@ import pandas as pd
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 
-from src.gui.tabs.charts.market_data import MarketDataProvider
+from src.services.market_data import MarketDataProvider
 from src.gui.tabs.charts.live_charts import create_empty_chart, create_price_indicator_card, create_multi_line_chart
 from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager
 from .data import _fetch_chart_data, _calculate_stats
