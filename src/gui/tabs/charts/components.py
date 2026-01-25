@@ -254,7 +254,156 @@ def get_price_indicator(symbol: str):
         return html.Div(f"Error loading price data: {str(e)}", className="text-danger")
 
 
-def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, panel_id: str = None):
+def create_overlay_list(panel_id: str, symbol: str, overlays_data: dict = None, timeframe: str = None):
+    """Create compact scrollable list of brackets/breaks for a panel."""
+    if not panel_id or not symbol:
+        # Always return visible container, even if empty
+        return html.Div(
+            html.Div(
+                "No overlays",
+                style={
+                    'padding': '2px 4px',
+                    'fontSize': '0.65rem',
+                    'color': '#888',
+                    'fontStyle': 'italic'
+                }
+            ),
+            id={"type": "overlay-list", "index": panel_id},
+            className="overlay-list",
+            style={
+                'maxHeight': '60px',
+                'overflowY': 'auto',
+                'overflowX': 'hidden',
+                'flex': '1 1 auto',
+                'minWidth': '80px',  # Minimum width so it's visible
+                'minHeight': '20px',  # Minimum height so empty state is visible
+                'backgroundColor': '#111',
+                'border': '1px solid #333',
+                'borderRadius': '3px',
+                'padding': '2px 0',
+                'display': 'flex'  # Always visible
+            }
+        )
+    
+    # Get overlays for this symbol/timeframe - overlays are stored by tab_id = "symbol_timeframe"
+    if not overlays_data:
+        overlays_data = {'tabs': {}}
+    
+    # Construct tab_id from symbol and timeframe
+    if timeframe:
+        tab_id = f"{symbol}_{timeframe}"
+    else:
+        # Try to find any overlay for this symbol (fallback)
+        tab_id = None
+        for key in overlays_data.get('tabs', {}).keys():
+            if key.startswith(f"{symbol}_"):
+                tab_id = key
+                break
+    
+    if not tab_id:
+        # No overlays found for this symbol/timeframe
+        panel_overlays = {'brackets': [], 'breaks': []}
+    else:
+        panel_overlays = overlays_data.get('tabs', {}).get(tab_id, {})
+    
+    brackets = panel_overlays.get('brackets', []) or []
+    breaks = panel_overlays.get('breaks', []) or []
+    
+    # Combine and sort by price
+    all_items = []
+    for item in brackets:
+        if item.get('visible', True):
+            all_items.append({
+                'type': 'Bracket',
+                'name': item.get('name', ''),
+                'price': item.get('price'),
+                'color': item.get('color', '#00ff88'),
+                'id': item.get('id', '')
+            })
+    for item in breaks:
+        if item.get('visible', True):
+            all_items.append({
+                'type': 'Break',
+                'name': item.get('name', ''),
+                'price': item.get('price'),
+                'color': item.get('color', '#ff4444'),
+                'id': item.get('id', '')
+            })
+    
+    # Sort by price (descending)
+    all_items.sort(key=lambda x: float(x['price']) if x['price'] is not None else 0, reverse=True)
+    
+    # Create list items (max 4 visible, scrollable if more)
+    list_items = []
+    for item in all_items:
+        price_str = f"${float(item['price']):.2f}" if item['price'] is not None else "N/A"
+        name_str = item['name'] if item['name'] else item['type']
+        
+        list_items.append(
+            html.Button(
+                [
+                    html.Span(name_str, style={'fontSize': '0.65rem', 'color': item['color'], 'fontWeight': 'bold'}),
+                    html.Span(price_str, style={'fontSize': '0.65rem', 'color': '#e8e8e8', 'marginLeft': '4px'})
+                ],
+                id={"type": "overlay-list-item", "index": panel_id, "overlay_id": item['id']},
+                className="overlay-list-item",
+                style={
+                    'padding': '2px 4px',
+                    'cursor': 'pointer',
+                    'borderBottom': '1px solid #333',
+                    'display': 'flex',
+                    'justifyContent': 'space-between',
+                    'alignItems': 'center',
+                    'fontSize': '0.65rem',
+                    'lineHeight': '1.2',
+                    'width': '100%',
+                    'backgroundColor': 'transparent',
+                    'border': 'none',
+                    'borderTop': 'none',
+                    'borderLeft': 'none',
+                    'borderRight': 'none',
+                    'textAlign': 'left',
+                    'color': '#e8e8e8'
+                },
+                title=f"Click to center line at {price_str}"
+            )
+        )
+    
+    if not list_items:
+        list_items.append(
+            html.Div(
+                "No overlays",
+                style={
+                    'padding': '2px 4px',
+                    'fontSize': '0.65rem',
+                    'color': '#888',
+                    'fontStyle': 'italic'
+                }
+            )
+        )
+    
+    return html.Div(
+        list_items,
+        id={"type": "overlay-list", "index": panel_id},
+        className="overlay-list",
+        style={
+            'maxHeight': '60px',  # ~4 items at 15px each
+            'overflowY': 'auto',
+            'overflowX': 'hidden',
+            'flex': '1 1 auto',  # Take remaining space
+            'minWidth': '80px',  # Minimum width so it's visible
+            'minHeight': '20px',  # Minimum height so empty state is visible
+            'backgroundColor': '#111',
+            'border': '1px solid #333',
+            'borderRadius': '3px',
+            'padding': '2px 0',
+            'display': 'flex',  # Always visible
+            'flexDirection': 'column'  # Stack items vertically
+        }
+    )
+
+
+def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, panel_id: str = None, symbol: str = None, overlays_data: dict = None, timeframe: str = None):
     """Create trading action overlay for chart panels."""
     if not show_stats:
         return None
@@ -313,21 +462,46 @@ def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, pan
             'marginBottom': '6px'
         }
     ))
+    
+    # Button and list row
     manage_button = None
+    overlay_list = None
     if panel_id:
         manage_button = dbc.Button(
-            [html.I(className="fas fa-layer-group"), " Brackets/Breaks"],
+            [html.I(className="fas fa-layer-group"), " B/B"],
             id={"type": "overlay-manage-btn", "index": panel_id},
             color="info",
             size="sm",
             outline=True,
-            className="overlay-manage-btn"
+            className="overlay-manage-btn",
+            style={
+                'width': '8.33%',  # Half of 16.67% (quarter of original 33%)
+                'minWidth': '25px',  # Minimum readable size
+                'fontSize': '0.55rem',  # Even smaller font
+                'padding': '1px 2px'  # Even tighter padding
+            }
         )
+        
+        # Always create overlay list when panel_id exists (create_overlay_list handles None overlays_data)
+        if symbol:
+            overlay_list = create_overlay_list(panel_id, symbol, overlays_data, timeframe)
+        else:
+            # Create empty list container if no symbol yet
+            overlay_list = create_overlay_list(panel_id, '', overlays_data, timeframe)
     
     overlay_children.extend([
         html.Div(
-            [manage_button] if manage_button else [],
-            className="overlay-manage-row"
+            [
+                manage_button if manage_button else html.Div(),
+                overlay_list if overlay_list else html.Div(id={"type": "overlay-list", "index": panel_id}, style={'display': 'flex', 'flex': '1 1 auto', 'minHeight': '20px'})
+            ],
+            className="overlay-manage-row",
+            style={
+                'display': 'flex',
+                'gap': '4px',
+                'alignItems': 'flex-start',
+                'width': '100%'
+            }
         ),
         html.Div([
             dbc.Button("Buy", color="success", size="sm", outline=True, className="overlay-action-btn"),
@@ -354,7 +528,7 @@ def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, pan
     })
 
 
-def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, overlays: dict = None, view_state: dict = None, loaded_data: Optional[pd.DataFrame] = None):
+def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, overlays: dict = None, view_state: dict = None, loaded_data: Optional[pd.DataFrame] = None, overlays_data: dict = None):
     """Create a single chart panel with controls and a trading action overlay."""
     # Handle None config
     if not config:
@@ -414,7 +588,9 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, 
         loaded_data=loaded_data  # NEW: Pass loaded data for infinite scroll
     )
     chart_content = chart_component
-    trading_overlay = create_trading_overlay(stats_data, show_stats, panel_id=panel_id) if show_stats else None
+    # Use passed overlays_data directly (or None if not provided)
+    # overlays_data should have structure: {'tabs': {'symbol_timeframe': {'brackets': [], 'breaks': []}}}
+    trading_overlay = create_trading_overlay(stats_data, show_stats, panel_id=panel_id, symbol=symbol, overlays_data=overlays_data, timeframe=timeframe) if show_stats else None
 
     return dbc.Card([
         dbc.CardHeader(header_content, className="py-1", style={'padding': '4px 12px', 'minHeight': '32px', 'maxHeight': '32px'}) if show_controls else None,
@@ -449,7 +625,18 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
     """Render the multi-panel layout based on selected mode"""
     
     def get_panel_overlays(panel_id: str):
-        return (overlays_data or {}).get('tabs', {}).get(panel_id, {})
+        """Get overlays for a panel by looking up symbol_timeframe from panels_config."""
+        if not overlays_data or not panels_config:
+            return {}
+        
+        panel_config = panels_config.get('panels', {}).get(panel_id, {})
+        symbol = panel_config.get('symbol')
+        timeframe = panel_config.get('timeframe')
+        
+        if symbol and timeframe:
+            tab_id = f"{symbol}_{timeframe}"
+            return (overlays_data or {}).get('tabs', {}).get(tab_id, {})
+        return {}
     
     def get_panel_view_state(panel_id: str):
         return (view_state_data or {}).get('tabs', {}).get(panel_id) if view_state_data else None
@@ -538,7 +725,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             layout_content = dbc.Row([
                 dbc.Col([
                     html.Div(
-                        create_chart_panel('panel-1', panel_config, overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1')),
+                        create_chart_panel('panel-1', panel_config, overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1'), overlays_data=overlays_data),
                         style=panel_style
                     )
                 ], width=12)
@@ -551,13 +738,13 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
         layout_content = dbc.Row([
             dbc.Col([
                 html.Div(
-                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1')),
+                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1'), overlays_data=overlays_data),
                     style=panel_style
                 )
             ], md=6, className=margin_class),
             dbc.Col([
                 html.Div(
-                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2'), loaded_data=get_panel_loaded_data('panel-2')),
+                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2'), loaded_data=get_panel_loaded_data('panel-2'), overlays_data=overlays_data),
                     style=panel_style
                 )
             ], md=6, className=margin_class)
@@ -570,7 +757,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1')),
+                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1'), overlays_data=overlays_data),
                         style=panel_style
                     )
                 ], width=12, className=margin_class)
@@ -578,7 +765,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2'), loaded_data=get_panel_loaded_data('panel-2')),
+                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2'), loaded_data=get_panel_loaded_data('panel-2'), overlays_data=overlays_data),
                         style=panel_style
                     )
                 ], width=12)
@@ -593,13 +780,13 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1')),
+                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1'), overlays_data=overlays_data),
                         style=panel_style
                     )
                 ], md=6, className=margin_class),
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2'), loaded_data=get_panel_loaded_data('panel-2')),
+                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2'), loaded_data=get_panel_loaded_data('panel-2'), overlays_data=overlays_data),
                         style=panel_style
                     )
                 ], md=6, className=margin_class)
@@ -607,13 +794,13 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-3', panels_config.get('panel-3', {}), overlays=get_panel_overlays('panel-3'), view_state=get_panel_view_state('panel-3'), loaded_data=get_panel_loaded_data('panel-3')),
+                    create_chart_panel('panel-3', panels_config.get('panel-3', {}), overlays=get_panel_overlays('panel-3'), view_state=get_panel_view_state('panel-3'), loaded_data=get_panel_loaded_data('panel-3'), overlays_data=overlays_data),
                         style=panel_style
                     )
                 ], md=6),
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-4', panels_config.get('panel-4', {}), overlays=get_panel_overlays('panel-4'), view_state=get_panel_view_state('panel-4'), loaded_data=get_panel_loaded_data('panel-4')),
+                    create_chart_panel('panel-4', panels_config.get('panel-4', {}), overlays=get_panel_overlays('panel-4'), view_state=get_panel_view_state('panel-4'), loaded_data=get_panel_loaded_data('panel-4'), overlays_data=overlays_data),
                         style=panel_style
                     )
                 ], md=6)
