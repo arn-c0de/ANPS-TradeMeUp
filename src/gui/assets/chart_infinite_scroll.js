@@ -75,24 +75,92 @@
             return;
         }
 
-        // Calculate center index of visible range
-        const centerIndex = Math.round((xaxis.range[0] + xaxis.range[1]) / 2);
-
-        // Get timestamp from data at center index
+        // Get timestamp from data at center of visible range
         let timestamp = '';
         try {
             const candlestickTrace = graphDiv._fullData.find(trace => trace.type === 'candlestick');
-            if (candlestickTrace && candlestickTrace.x && centerIndex >= 0 && centerIndex < candlestickTrace.x.length) {
-                const rawTimestamp = candlestickTrace.x[centerIndex];
-                // Format timestamp nicely
-                const date = new Date(rawTimestamp);
-                timestamp = date.toLocaleString('de-DE', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
+            if (!candlestickTrace || !candlestickTrace.x || candlestickTrace.x.length === 0) {
+                return;
+            }
+
+            const range = xaxis.range;
+            const xData = candlestickTrace.x;
+
+            // For category-type x-axis with numeric range values (indices)
+            let centerIndex = -1;
+
+            if (typeof range[0] === 'number' && typeof range[1] === 'number') {
+                // Range contains numeric indices (0, 1, 2, ...)
+                centerIndex = Math.round((range[0] + range[1]) / 2);
+
+                // Clamp to valid range
+                if (centerIndex < 0) centerIndex = 0;
+                if (centerIndex >= xData.length) centerIndex = xData.length - 1;
+            } else {
+                // Range contains category values (timestamps) - need to find index
+                const centerValue = range[0] + (range[1] - range[0]) / 2;
+
+                // Find closest index
+                for (let i = 0; i < xData.length; i++) {
+                    if (xData[i] === centerValue || String(xData[i]) === String(centerValue)) {
+                        centerIndex = i;
+                        break;
+                    }
+                }
+
+                // If exact match not found, use midpoint index as fallback
+                if (centerIndex === -1) {
+                    centerIndex = Math.floor(xData.length / 2);
+                }
+            }
+
+            // Get timestamp at center index
+            if (centerIndex >= 0 && centerIndex < xData.length) {
+                const rawTimestamp = xData[centerIndex];
+
+                // Handle different timestamp formats
+                let date;
+                if (rawTimestamp instanceof Date) {
+                    date = rawTimestamp;
+                } else if (typeof rawTimestamp === 'string') {
+                    date = new Date(rawTimestamp);
+                } else if (typeof rawTimestamp === 'number') {
+                    // Could be Unix timestamp (seconds or milliseconds)
+                    date = new Date(rawTimestamp > 1e10 ? rawTimestamp : rawTimestamp * 1000);
+                } else {
+                    date = new Date(rawTimestamp);
+                }
+
+                // Format timestamp - parse string directly to avoid timezone conversion
+                if (!isNaN(date.getTime())) {
+                    if (typeof rawTimestamp === 'string' && rawTimestamp.includes('T')) {
+                        // Parse the timestamp string manually to get the local time components
+                        const match = rawTimestamp.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+                        if (match) {
+                            const [_, year, month, day, hour, minute, second] = match;
+                            // Format using the parsed local time (not converted to browser timezone)
+                            timestamp = `${day}.${month}.${year}, ${hour}:${minute}`;
+                        } else {
+                            // Fallback to regular formatting
+                            timestamp = date.toLocaleString('de-DE', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            });
+                        }
+                    } else {
+                        // For Date objects or numeric timestamps, use regular formatting
+                        timestamp = date.toLocaleString('de-DE', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                    }
+                }
             }
         } catch (e) {
             console.warn('[Center Line] Could not get timestamp:', e);
@@ -100,8 +168,8 @@
 
         // Update timestamp label (direct DOM update, no Plotly involved!)
         const label = graphElement.querySelector('.chart-center-timestamp');
-        if (label && timestamp) {
-            label.textContent = timestamp;
+        if (label) {
+            label.textContent = timestamp || '';
         }
     }
 
@@ -179,12 +247,8 @@
          * IMPORTANT: Must capture in capture phase to intercept before Plotly's default handler
          */
         function handleWheelEvent(event) {
-            // Debug: Log what we received
-            const keyState = `Ctrl:${event.ctrlKey}, Shift:${event.shiftKey}, Alt:${event.altKey}`;
-
             // Ctrl+Wheel = zoom (let Plotly handle it natively)
             if (event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
-                console.log(`[Scroll Debug] Ctrl+Wheel detected (${keyState}) - letting Plotly handle zoom`);
                 // Let Plotly handle Ctrl+Wheel for zoom - do NOT prevent default
                 return;
             }
@@ -195,8 +259,6 @@
 
             // Handle Shift+Wheel or horizontal wheel scroll for panning
             if (isShiftWheel || isHorizontalWheel) {
-                console.log(`[Scroll Debug] Shift+Wheel/Horizontal detected (${keyState}) - horizontal pan`);
-
                 // Prevent default behavior - CRITICAL for blocking Plotly zoom
                 event.preventDefault();
                 event.stopPropagation();
@@ -230,7 +292,6 @@
                 return;
             }
 
-            console.log(`[Scroll Debug] Plain wheel (${keyState}) - ignoring`);
             // For plain vertical wheel, do nothing
         }
         
@@ -265,8 +326,6 @@
         // NOTE: Threshold checking is now handled by Python callback via relayoutData events
         // No need for plotly_relayouting listener - it was blocked by isScrolling flag anyway
         // The handle_infinite_scroll callback in app.py listens to relayoutData and handles thresholds
-
-        console.log(`[Infinite Scroll] Setup complete for chart: ${graphId} (Shift+Wheel=pan, Ctrl+Wheel=zoom, horizontal=pan, center-line=HTML-overlay)`);
     }
     
     /**
