@@ -31,6 +31,14 @@ from src.gui.tabs import dashboard, predictions, news, statistics, charts, simul
 from src.gui.tabs import settings as settings_tab
 from src.gui.charts import MarketDataProvider
 from src.gui.charts.chart_data_manager import get_chart_data_manager
+from src.gui.charts.fullscreen_manager import (
+    get_fullscreen_state,
+    create_fullscreen_state,
+    toggle_fullscreen_state,
+    get_container_classname,
+    get_toggle_button_config,
+    get_exit_button_style
+)
 
 # Initialize Dash app with Bootstrap dark theme
 app = dash.Dash(
@@ -743,40 +751,54 @@ def set_url_from_tab(active_tab, current_hash):
 # CLIENTSIDE CALLBACKS
 # ============================================================================
 
-# ESC key listener for fullscreen mode - fixed version
+# ESC key listener for fullscreen mode - clicks hidden button to trigger Python callback
 app.clientside_callback(
     """
     function(fullscreen_data) {
-        // Remove old listener if exists
+        // Cleanup old listener
         if (window.escKeyHandler) {
             document.removeEventListener('keydown', window.escKeyHandler);
+            window.escKeyHandler = null;
         }
 
-        // Only add listener if in fullscreen mode
+        // Only add listener in fullscreen mode
         if (fullscreen_data && fullscreen_data.fullscreen) {
             window.escKeyHandler = function(event) {
                 if (event.key === 'Escape' || event.key === 'Esc') {
-                    // Check if any Bootstrap modal is currently open
-                    const openModals = document.querySelectorAll('.modal.show');
-                    if (openModals.length > 0) {
-                        // Don't trigger fullscreen toggle if a modal is open
+                    // Check for modals
+                    if (document.querySelectorAll('.modal.show').length > 0) {
                         return;
                     }
 
-                    const fullscreenBtn = document.getElementById('toggle-fullscreen-btn');
-                    if (fullscreenBtn) {
-                        fullscreenBtn.click();
+                    event.preventDefault();
+                    event.stopPropagation();
+                    
+                    // Click the exit button programmatically - most reliable method
+                    const exitBtn = document.getElementById('exit-fullscreen-btn');
+                    if (exitBtn) {
+                        // Button exists - click it (works even if hidden)
+                        exitBtn.click();
+                    } else {
+                        // Fallback: try updating input value
+                        const escInput = document.getElementById('esc-key-listener');
+                        if (escInput) {
+                            const timestamp = Date.now().toString();
+                            escInput.value = timestamp;
+                            escInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            escInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
                     }
                 }
             };
-            document.addEventListener('keydown', window.escKeyHandler);
+            document.addEventListener('keydown', window.escKeyHandler, true);
         }
 
         return window.dash_clientside.no_update;
     }
     """,
-    Output("esc-key-listener", "value"),
-    Input("chart-fullscreen-state", "data")
+    Output("esc-key-listener", "value", allow_duplicate=True),
+    Input("chart-fullscreen-state", "data"),
+    prevent_initial_call='initial_duplicate'
 )
 
 # ============================================================================
@@ -4033,14 +4055,25 @@ def search_new_tab_symbols(search_value):
         return []
 
 
+# Separate callback for className to avoid re-rendering children when only fullscreen changes
 @app.callback(
-    [Output("chart-display-area", "children"),
-     Output("chart-display-area", "className")],
+    Output("chart-display-area", "className"),
+    Input("chart-fullscreen-state", "data"),
+    prevent_initial_call=False
+)
+def update_chart_display_classname(fullscreen_data):
+    """Update chart display area className based on fullscreen state - optimized to avoid re-rendering children"""
+    is_fullscreen = get_fullscreen_state(fullscreen_data)
+    return get_container_classname(is_fullscreen)
+
+
+@app.callback(
+    Output("chart-display-area", "children"),
     [Input("chart-tabs-store", "data"),
      Input("quad-mode-store", "data"),
      Input("chart-overlays-store", "data"),
      Input("chart-options-checklist", "value"),
-     Input("chart-fullscreen-state", "data"),
+     Input("chart-fullscreen-state", "data"),  # Keep for height calculation
      Input("layout-preset-dropdown", "value"),
      Input("refresh-all-panels", "n_clicks"),
      Input("chart-update-interval", "n_intervals"),
@@ -4056,17 +4089,18 @@ def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, ful
     """
     tabs = tabs_data.get('tabs', [])
     active_tab_id = tabs_data.get('active_tab')
-    quad_enabled = (quad_data or {}).get('enabled', False)
-    is_fullscreen = fullscreen_data.get('fullscreen', False)
+    # Ensure quad_data is properly initialized and preserve quad_enabled state
+    if quad_data is None:
+        quad_data = {'enabled': False, 'selected_tabs': []}
+    quad_enabled = quad_data.get('enabled', False)
+    is_fullscreen = get_fullscreen_state(fullscreen_data)
 
     show_volume = 'volume' in (chart_options or [])
     show_ma = 'ma' in (chart_options or [])
     show_overlay = 'stats' in (chart_options or [])
 
-    container_class = 'chart-container-fullscreen' if is_fullscreen else 'chart-container-normal'
-
     if not tabs:
-        return dbc.Alert("No charts open. Click '+ New' to add a chart.", color="info", className="mt-3"), container_class
+        return dbc.Alert("No charts open. Click '+ New' to add a chart.", color="info", className="mt-3")
 
     def build_tab_panel(tab, panel_height, is_active, clickable=True):
         tab_show_volume = tab.get('show_volume', show_volume)
@@ -4172,7 +4206,7 @@ def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, ful
         tabs_by_id = {tab['id']: tab for tab in tabs}
         max_panels = min(4, len(tabs))
         if max_panels == 0:
-            return dbc.Alert("No charts available for quad view.", color="info", className="mt-3"), container_class
+            return dbc.Alert("No charts available for quad view.", color="info", className="mt-3")
 
         quad_tabs = []
         seen_tabs = set()
@@ -4244,7 +4278,7 @@ def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, ful
                 ], className=row_class)
             ])
 
-        return quad_layout, container_class
+        return quad_layout
 
     # PERFORMANCE OPTIMIZATION: Only render the active tab
     # This avoids expensive API calls and chart rendering for hidden tabs
@@ -4273,7 +4307,7 @@ def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, ful
             active_tab = None
 
     if not active_tab:
-        return dbc.Alert("No active chart.", color="info", className="mt-3"), container_class
+        return dbc.Alert("No active chart.", color="info", className="mt-3")
 
     # Only render the single active tab (in single mode)
     height = 'calc(100vh - 180px)' if is_fullscreen else 'calc(100vh - 320px)'
@@ -4282,7 +4316,7 @@ def render_chart_display(tabs_data, quad_data, overlays_data, chart_options, ful
     panel_content = build_tab_panel(active_tab, "100%", True, clickable=False)
     single_chart_div = html.Div(panel_content, style=final_style)
 
-    return single_chart_div, container_class
+    return single_chart_div
 
 
 @app.callback(
@@ -4299,36 +4333,69 @@ def toggle_quad_mode(single_click, quad_click, quad_data):
     if not callback_context.triggered:
         return dash.no_update
     
+    # Ensure quad_data is initialized
+    if quad_data is None:
+        quad_data = {'enabled': False, 'selected_tabs': []}
+    
     trigger_id = callback_context.triggered[0]['prop_id'].split('.')[0]
     
-    if trigger_id == "layout-single":
+    # Only update if a layout button was actually clicked (n_clicks > 0)
+    # This prevents resetting quad mode when buttons are rendered in fullscreen mode
+    if trigger_id == "layout-single" and single_click and single_click > 0:
         quad_data['enabled'] = False
-    elif trigger_id == "layout-quad":
+    elif trigger_id == "layout-quad" and quad_click and quad_click > 0:
         quad_data['enabled'] = True
+    else:
+        # Don't change state if button wasn't actually clicked
+        return dash.no_update
     
     return quad_data
 
 
 @app.callback(
-    [Output("chart-fullscreen-state", "data"),
-     Output("toggle-fullscreen-btn", "children"),
-     Output("toggle-fullscreen-btn", "color")],
-    Input("toggle-fullscreen-btn", "n_clicks"),
+    Output("chart-fullscreen-state", "data"),
+    [Input("toggle-fullscreen-btn", "n_clicks"),
+     Input("exit-fullscreen-btn", "n_clicks"),
+     Input("esc-key-listener", "value")],
     State("chart-fullscreen-state", "data"),
     prevent_initial_call=True
 )
-def toggle_chart_fullscreen(n_clicks, fullscreen_data):
-    """Toggle fullscreen mode for charts"""
-    if not n_clicks:
-        return dash.no_update, dash.no_update, dash.no_update
+def set_fullscreen_state(toggle_clicks, exit_clicks, esc_value, current_state):
+    """Centralized fullscreen state management."""
+    from dash import callback_context
     
-    is_fullscreen = fullscreen_data.get('fullscreen', False)
-    fullscreen_data['fullscreen'] = not is_fullscreen
+    if not callback_context.triggered:
+        return dash.no_update
     
-    if fullscreen_data['fullscreen']:
-        return fullscreen_data, "⬇ Exit", "danger"
-    else:
-        return fullscreen_data, "⛶", "info"
+    trigger = callback_context.triggered[0]['prop_id']
+    
+    # Handle toggle button
+    if 'toggle-fullscreen-btn' in trigger and toggle_clicks:
+        return toggle_fullscreen_state(current_state)
+    
+    # Handle exit button or ESC key
+    if (('exit-fullscreen-btn' in trigger and exit_clicks) or 
+        ('esc-key-listener' in trigger and esc_value)):
+        if get_fullscreen_state(current_state):
+            return create_fullscreen_state(False)
+    
+    return dash.no_update
+
+
+@app.callback(
+    [Output("toggle-fullscreen-btn", "children"),
+     Output("toggle-fullscreen-btn", "color"),
+     Output("exit-fullscreen-btn", "style")],
+    Input("chart-fullscreen-state", "data"),
+    prevent_initial_call='initial_duplicate'
+)
+def update_fullscreen_ui(fullscreen_data):
+    """Update UI elements based on fullscreen state."""
+    is_fullscreen = get_fullscreen_state(fullscreen_data)
+    btn_text, btn_color = get_toggle_button_config(is_fullscreen)
+    exit_style = get_exit_button_style(is_fullscreen)
+    
+    return btn_text, btn_color, exit_style
 
 
 @app.callback(
@@ -4426,19 +4493,7 @@ def apply_panel_settings(n_clicks, tab_id, timeframe, chart_type, options, tabs_
     return tabs_data
 
 
-@app.callback(
-    Output("chart-fullscreen-state", "data", allow_duplicate=True),
-    Input("esc-key-listener", "value"),
-    State("chart-fullscreen-state", "data"),
-    prevent_initial_call=True
-)
-def close_fullscreen_on_esc(key_value, fullscreen_data):
-    """Close fullscreen mode when ESC key is pressed"""
-    # ESC key detection via clientside callback would be better, but this works as fallback
-    if fullscreen_data.get('fullscreen', False):
-        fullscreen_data['fullscreen'] = False
-        return fullscreen_data
-    return dash.no_update
+# ESC handler removed - now handled by clicking exit-fullscreen-btn directly
 
 
 @app.callback(
@@ -4513,7 +4568,8 @@ def update_chart_config(layout_single, layout_h, layout_v, layout_quad,
     
     trigger_id = callback_context.triggered[0]['prop_id']
     
-    # Handle layout changes
+    # Handle layout changes - only update if explicitly triggered by layout button
+    # Don't reset layout when refresh-all-panels or other non-layout triggers fire
     if 'layout-single' in trigger_id:
         current_config['layout'] = 'single'
     elif 'layout-split-h' in trigger_id:
@@ -4544,14 +4600,25 @@ def update_chart_config(layout_single, layout_h, layout_v, layout_quad,
     return current_config
 
 
+# Separate callback for multi-panel className to avoid re-rendering when only fullscreen changes
 @app.callback(
-    [Output("multi-panel-chart-area", "children"),
-     Output("multi-panel-chart-area", "className")],
+    Output("multi-panel-chart-area", "className"),
+    Input("chart-fullscreen-state", "data"),
+    prevent_initial_call=False
+)
+def update_multi_panel_classname(fullscreen_state):
+    """Update multi-panel chart area className based on fullscreen state"""
+    is_fullscreen = get_fullscreen_state(fullscreen_state)
+    return get_container_classname(is_fullscreen)
+
+
+@app.callback(
+    Output("multi-panel-chart-area", "children"),
     [Input("chart-panels-config", "data"),
      Input("chart-update-interval", "n_intervals"),
      Input("refresh-all-panels", "n_clicks"),
      Input("chart-overlays-store", "data"),
-     Input("chart-fullscreen-state", "data"),
+     Input("chart-fullscreen-state", "data"),  # Keep for height calculation
      Input("chart-interaction-modes", "data"),
      Input("chart-view-state", "data"),
      Input("chart-loaded-data-store", "data")],  # NEW: Listen to loaded data changes
@@ -4562,8 +4629,6 @@ def render_chart_panels(config, n_intervals, refresh_clicks, overlays_data, full
     # Handle None values
     if not config:
         config = {'layout': 'single', 'panels': {}}
-    if not fullscreen_state:
-        fullscreen_state = {'fullscreen': False}
     if not interaction_modes:
         interaction_modes = {'tabs': {}}
     if not view_state_data:
@@ -4571,7 +4636,7 @@ def render_chart_panels(config, n_intervals, refresh_clicks, overlays_data, full
     
     layout = config.get('layout', 'single')
     panels = config.get('panels', {})
-    is_fullscreen = fullscreen_state.get('fullscreen', False)
+    is_fullscreen = get_fullscreen_state(fullscreen_state)
     
     # Merge interaction modes into panel configs (create copy to avoid modifying original)
     import copy
@@ -4586,15 +4651,12 @@ def render_chart_panels(config, n_intervals, refresh_clicks, overlays_data, full
             panel_config['dragmode'] = 'zoom'
             panel_config['auto_scroll'] = panel_config.get('timeframe', '1mo') in ['1d_1m', '5d_5m']
     
-    # Set container class based on fullscreen state
-    container_class = 'chart-container-fullscreen' if is_fullscreen else 'chart-container-normal'
-    
     try:
         chart_layout = charts.render_multi_panel_layout(layout, panels, is_fullscreen, overlays_data, view_state_data, loaded_data_store)
-        return chart_layout, container_class
+        return chart_layout
     except Exception as e:
         logger.error(f"Error rendering chart panels: {e}", exc_info=True)
-        return html.Div(f"Error rendering charts: {str(e)}", className="text-danger"), container_class
+        return html.Div(f"Error rendering charts: {str(e)}", className="text-danger")
 
 
 @app.callback(
