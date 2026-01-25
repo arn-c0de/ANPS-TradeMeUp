@@ -12,7 +12,7 @@ import threading
 import pandas as pd
 import hashlib
 
-from src.gui.charts.market_data import MarketDataProvider
+from src.services.market_data import MarketDataProvider
 
 logger = logging.getLogger(__name__)
 

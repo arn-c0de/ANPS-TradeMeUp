@@ -2,11 +2,13 @@
 News Feed Tab - Browse and Filter News Articles
 """
 
-from dash import dcc, html
+from dash import dcc, html, Input, Output
 import dash_bootstrap_components as dbc
-from sqlalchemy import desc, cast, Float, func
+from sqlalchemy import desc, distinct
 from sqlalchemy.orm import Session
 
+from src.gui.utils.callbacks import safe_callback
+from src.models.database import SessionLocal, engine
 from src.models.raw_news import RawNews
 from src.models.processed_news import ProcessedNews
 from src.models.analysis import ImpactScore
@@ -225,5 +227,35 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
             ], className="mb-2 news-card-compact")
             
             cards.append(card)
-        
+
         return html.Div(cards)
+
+
+def register_callbacks(app):
+    """Register news tab callbacks."""
+
+    @app.callback(
+        Output("news-source-filter", "options"),
+        Input("interval-component", "n_intervals"),
+    )
+    def update_news_source_options(n):
+        try:
+            with SessionLocal() as db:
+                sources = db.query(distinct(RawNews.source)).order_by(RawNews.source).all()
+                return [{"label": src[0], "value": src[0]} for src in sources if src[0]]
+        except Exception:
+            return []
+
+    @app.callback(
+        Output("news-feed", "children"),
+        [
+            Input("interval-component", "n_intervals"),
+            Input("news-source-filter", "value"),
+            Input("news-event-filter", "value"),
+            Input("news-sentiment-filter", "value"),
+            Input("news-search-input", "value"),
+        ],
+    )
+    @safe_callback(default_return=html.Div("⚠️ Unable to load news feed", className="text-warning p-3"))
+    def update_news_feed(n, sources, events, sentiment, search):
+        return get_news_feed(engine, sources, events, sentiment, search)

@@ -20,7 +20,6 @@ except ImportError:
 
 from src.models.predictions import Prediction, PredictionOutcome
 from src.models.entities import Entity
-from src.gui.charts.market_data import MarketDataProvider
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -30,6 +29,7 @@ class PredictionPerformanceService:
     """Service to track prediction performance against actual market data"""
 
     def __init__(self):
+        from src.services.market_data import MarketDataProvider
         self.market_data = MarketDataProvider()
 
     def get_prediction_performance(

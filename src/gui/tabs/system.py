@@ -2,11 +2,13 @@
 System Health Tab - Monitor Agent Status and Performance
 """
 
-from dash import html
 import dash_bootstrap_components as dbc
+from dash import Input, Output, html
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from src.models.database import engine as _engine
+from src.gui.utils.callbacks import safe_callback
 from src.models.raw_news import RawNews
 from src.models.processed_news import ProcessedNews
 from src.models.entities import Entity
@@ -142,3 +144,30 @@ def get_pipeline_stats(engine):
             html.P("⚠️ Unable to load pipeline stats", className="text-warning mb-2"),
             html.Small("Database may be empty. Run the pipeline to generate data.", className="text-muted")
         ])
+
+
+def register_callbacks(app):
+    """Register system tab callbacks."""
+
+    @app.callback(
+        Output("agent-status", "children"),
+        Input("interval-component", "n_intervals"),
+    )
+    def _update_agent_status(n):
+        return get_agent_status()
+
+    @app.callback(
+        Output("db-statistics", "children"),
+        Input("interval-component", "n_intervals"),
+    )
+    @safe_callback(default_return=html.Div("Unable to load database statistics", className="text-warning"))
+    def _update_db_statistics(n):
+        return get_db_statistics(_engine)
+
+    @app.callback(
+        Output("pipeline-stats", "children"),
+        Input("interval-component", "n_intervals"),
+    )
+    @safe_callback(default_return=html.Div("Unable to load pipeline statistics", className="text-warning"))
+    def _update_pipeline_stats(n):
+        return get_pipeline_stats(_engine)
