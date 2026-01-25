@@ -1,19 +1,20 @@
 """
-Statistics Tab - Analytics and Metrics
+Statistics Tab - Data Retrieval Functions
+All data retrieval functions for statistics tab
 """
 
 import json
 import logging
-from datetime import date, datetime, timedelta
+import os
+from datetime import datetime, timedelta
+from pathlib import Path
 
-import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import ALL, Input, Output, State, dcc, html
-from dash.exceptions import PreventUpdate
-from sqlalchemy import func
+from dash import html
+from sqlalchemy import func, desc, and_, or_
 from sqlalchemy.orm import Session
 
 from src.models.raw_news import RawNews
@@ -22,392 +23,12 @@ from src.models.processed_news import ProcessedNews
 from src.models.predictions import Prediction, PredictionOutcome
 from src.models.entities import Entity, NewsEntityMapping
 from src.models.analysis import ImpactScore, SurpriseScore, SignalDecayModel, FactVerification, MarketRegime
-from src.models.database import engine as _engine
-from src.gui.error_handling import handle_db_errors, create_empty_state
-from src.gui.utils.callbacks import safe_callback
+from src.models.trading_simulation import TradingSimulation
+from src.gui.error_handling import handle_db_errors
+
+from .utils import _parse_date_range
 
 logger = logging.getLogger(__name__)
-
-
-def _coerce_datetime(value, is_end=False):
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, date):
-        return datetime.combine(value, datetime.max.time() if is_end else datetime.min.time())
-    if isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value)
-        except ValueError:
-            return None
-        if "T" in value or ":" in value:
-            return parsed
-        return datetime.combine(parsed.date(), datetime.max.time() if is_end else datetime.min.time())
-    return None
-
-
-def _parse_date_range(date_range):
-    if not date_range or len(date_range) != 2:
-        return None, None
-    return _coerce_datetime(date_range[0], is_end=False), _coerce_datetime(date_range[1], is_end=True)
-
-
-def _resolve_stats_date_range(start_date, end_date, active_filter):
-    """Resolve (start, end) from quick-select active_filter or explicit start/end dates."""
-    if active_filter and active_filter != "all":
-        if active_filter.endswith("h"):
-            hours = None
-            if active_filter.startswith("custom-"):
-                try:
-                    hours = int(active_filter.split("-", 1)[1].rstrip("h"))
-                except ValueError:
-                    hours = None
-            else:
-                try:
-                    hours = int(active_filter.rstrip("h"))
-                except ValueError:
-                    hours = None
-            if hours:
-                end = datetime.utcnow()
-                start = end - timedelta(hours=hours)
-                return (start, end)
-    if start_date or end_date:
-        return (start_date, end_date)
-    return None
-
-
-def create_layout():
-    """Create statistics tab layout"""
-    return dbc.Container([
-        # Time Period Filter (compact control section)
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        dbc.Row([
-                            dbc.Col([
-                                html.Small("Granularity:", className="text-muted mb-1 d-block", style={"fontSize": "0.7em"}),
-                                dcc.Dropdown(
-                                    id="stats-granularity",
-                                    options=[
-                                        {"label": "Minutes", "value": "minutes"},
-                                        {"label": "Days", "value": "days"},
-                                        {"label": "Weeks", "value": "weeks"},
-                                        {"label": "Months", "value": "months"},
-                                        {"label": "Years", "value": "years"},
-                                        {"label": "All Time", "value": "all"}
-                                    ],
-                                    value="all",
-                                    clearable=False,
-                                    style={"fontSize": "0.75em"}
-                                )
-                            ], width=2),
-                            dbc.Col([
-                                html.Small("Date Range:", className="text-muted mb-1 d-block", style={"fontSize": "0.7em"}),
-                                dcc.DatePickerRange(
-                                    id="stats-date-range",
-                                    start_date=None,
-                                    end_date=None,
-                                    display_format="YYYY-MM-DD",
-                                    style={"fontSize": "0.75em"}
-                                )
-                            ], width=2),
-                            dbc.Col([
-                                html.Small("Quick Select:", className="text-muted mb-1 d-block", style={"fontSize": "0.7em"}),
-                                dbc.ButtonGroup([
-                                    dbc.Button("1h", id="quick-1h", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
-                                    dbc.Button("12h", id="quick-12h", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
-                                    dbc.Button("24h", id="quick-24h", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
-                                    dbc.Button("7d", id="quick-7d", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
-                                    dbc.Button("30d", id="quick-30d", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
-                                    dbc.Button("90d", id="quick-90d", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
-                                    dbc.Button("1y", id="quick-1y", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"}),
-                                    dbc.Button("All", id="quick-all", size="sm", outline=True, color="primary", style={"fontSize": "0.7em"})
-                                ], size="sm")
-                            ], width=5),
-                            dbc.Col([
-                                html.Small("Custom (h):", className="text-muted mb-1 d-block", style={"fontSize": "0.7em"}),
-                                dbc.Input(
-                                    id="custom-hours-input",
-                                    type="number",
-                                    placeholder="e.g. 6",
-                                    min=1,
-                                    max=8760,
-                                    debounce=True,
-                                    size="sm",
-                                    style={"fontSize": "0.75em"}
-                                )
-                            ], width=2),
-                            dbc.Col([
-                                html.Small("\u00a0", className="mb-1 d-block", style={"fontSize": "0.7em"}),
-                                dbc.Button(
-                                    "Reset",
-                                    id="stats-reset-filter",
-                                    size="sm",
-                                    color="secondary",
-                                    outline=True,
-                                    className="w-100",
-                                    style={"fontSize": "0.75em"}
-                                )
-                            ], width=1)
-                        ], className="g-2")
-                    ], className="py-2 px-3")
-                ], className="border-primary", style={"borderWidth": "1px"})
-            ], width=12)
-        ], className="mb-2"),
-
-        # Overall Metrics (compact top bar)
-        dbc.Row([
-            dbc.Col([
-                html.Div(id="statistics-metrics")
-            ], width=12)
-        ], className="mb-2"),
-        
-        # Event & Quality Distribution
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("📈 Event Type Distribution")),
-                    dbc.CardBody([
-                        dcc.Graph(id="event-distribution-chart")
-                    ])
-                ])
-            ], width=6),
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("🎯 Quality Distribution")),
-                    dbc.CardBody([
-                        dcc.Graph(id="quality-distribution-chart")
-                    ])
-                ])
-            ], width=6)
-        ], className="mb-3"),
-        
-        # Sentiment, Impact & Top Entities
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("🎭 Sentiment Distribution")),
-                    dbc.CardBody([
-                        dcc.Graph(id="sentiment-distribution-chart", style={"height": "100%", "width": "100%"})
-                    ], style={"overflow": "hidden"})
-                ])
-            ], width=4),
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("💥 Impact Score Distribution")),
-                    dbc.CardBody([
-                        dcc.Graph(id="impact-distribution-chart", style={"height": "100%", "width": "100%"})
-                    ], style={"overflow": "hidden"})
-                ])
-            ], width=4),
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("🏢 Top Entities")),
-                    dbc.CardBody([
-                        html.Div(id="top-entities-list")
-                    ])
-                ])
-            ], width=4)
-        ], className="mb-3"),
-        
-        # Index Trends & Stock Performance
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("📈 Market Index Trends & Tracked Stocks")),
-                    dbc.CardBody([
-                        html.Div(id="index-trends-display")
-                    ])
-                ])
-            ], width=12)
-        ], className="mb-3"),
-        
-        # NEW: Entity Sentiment Analysis
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.Div([
-                            html.H5("📊 Entity Sentiment Analysis", className="mb-0 d-inline"),
-                            dbc.Select(
-                                id="sentiment-timeframe-selector",
-                                options=[
-                                    {"label": "Last 7 Days", "value": "7d"},
-                                    {"label": "Last 30 Days", "value": "30d"},
-                                    {"label": "Last 90 Days", "value": "90d"},
-                                    {"label": "All Time", "value": "all"}
-                                ],
-                                value="30d",
-                                className="w-auto d-inline-block ms-3",
-                                style={"width": "150px"}
-                            )
-                        ], className="d-flex align-items-center justify-content-between")
-                    ]),
-                    dbc.CardBody([
-                        dcc.Graph(id="entity-sentiment-chart")
-                    ])
-                ])
-            ], width=12)
-        ], className="mb-3"),
-        
-        # NEW: Top Positive & Negative Entities
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.Div([
-                            html.H5("📈 Positive Entities (Selected Range)", className="mb-0 d-inline"),
-                            dbc.Input(
-                                id="positive-entity-search-input",
-                                type="text",
-                                placeholder="Search entities...",
-                                className="d-inline-block ms-3",
-                                style={"width": "200px"},
-                                debounce=True
-                            )
-                        ], className="d-flex align-items-center justify-content-between")
-                    ]),
-                    dbc.CardBody([
-                        html.Div(
-                            id="top-positive-entities",
-                            style={
-                                "maxHeight": "650px",
-                                "overflowY": "auto",
-                                "overflowX": "hidden"
-                            }
-                        ),
-                        dcc.Input(id="positive-entities-scroll-trigger", type="hidden", value="0"),
-                        html.Small("💡 Showing entities sorted by average sentiment score", className="text-muted d-block mt-2")
-                    ])
-                ])
-            ], width=6),
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.Div([
-                            html.H5("📉 Negative Entities (Selected Range)", className="mb-0 d-inline"),
-                            dbc.Input(
-                                id="negative-entity-search-input",
-                                type="text",
-                                placeholder="Search entities...",
-                                className="d-inline-block ms-3",
-                                style={"width": "200px"},
-                                debounce=True
-                            )
-                        ], className="d-flex align-items-center justify-content-between")
-                    ]),
-                    dbc.CardBody([
-                        html.Div(
-                            id="top-negative-entities",
-                            style={
-                                "maxHeight": "650px",
-                                "overflowY": "auto",
-                                "overflowX": "hidden"
-                            }
-                        ),
-                        dcc.Input(id="negative-entities-scroll-trigger", type="hidden", value="0"),
-                        html.Small("💡 Showing entities sorted by average sentiment score", className="text-muted d-block mt-2")
-                    ])
-                ])
-            ], width=6)
-        ], className="mb-3"),
-        
-        # NEW: Entity Details Table
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.Div([
-                            html.H5("🏢 Entity Details", className="mb-0 d-inline"),
-                            dbc.Input(
-                                id="entity-search-input",
-                                type="text",
-                                placeholder="Search entities...",
-                                className="d-inline-block ms-3",
-                                style={"width": "300px"}
-                            )
-                        ], className="d-flex align-items-center")
-                    ]),
-                    dbc.CardBody([
-                        html.Div(
-                            id="entity-details-table",
-                            style={
-                                "maxHeight": "500px",
-                                "overflowY": "auto",
-                                "overflowX": "auto"
-                            }
-                        )
-                    ])
-                ])
-            ], width=12)
-        ], className="mb-3"),
-        
-        # News Volume Over Time
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("📰 News Volume Over Time")),
-                    dbc.CardBody([
-                        dcc.Graph(id="news-volume-chart")
-                    ])
-                ])
-            ], width=12)
-        ]),
-        
-        # Entity Details Modal
-        dbc.Modal([
-            dbc.ModalHeader(dbc.ModalTitle(id="entity-modal-title")),
-            dbc.ModalBody(id="entity-modal-body"),
-            dbc.ModalFooter([
-                dbc.Button("Close", id="close-entity-modal", className="ms-auto")
-            ])
-        ], id="entity-details-modal", size="xl", scrollable=True),
-        
-        # Stock Predictions Modal
-        dbc.Modal([
-            dbc.ModalHeader(dbc.ModalTitle(id="stock-modal-title")),
-            dbc.ModalBody(id="stock-modal-body"),
-            dbc.ModalFooter([
-                dbc.Button("Close", id="close-stock-modal", className="ms-auto")
-            ])
-        ], id="stock-predictions-modal", size="xl", scrollable=True),
-        
-        # Toast notification for missing predictions
-        dbc.Toast(
-            "No prediction found for this news article. The prediction may not have been created yet.",
-            id="no-prediction-toast",
-            header="⚠️ No Prediction Found",
-            is_open=False,
-            dismissable=True,
-            icon="warning",
-            duration=4000,
-            style={
-                "position": "fixed",
-                "top": 66,
-                "right": 10,
-                "width": 350,
-                "zIndex": 9999,
-                "backgroundColor": "#1e1e1e",
-                "border": "1px solid #ffc107",
-                "boxShadow": "0 4px 8px rgba(0,0,0,0.3)"
-            }
-        ),
-        
-        # Store for selected entity
-        dcc.Store(id="selected-entity-store", data=None),
-
-        # Store for active time filter
-        dcc.Store(id="active-filter-store", data="all"),
-        
-        # Store for table sorting state
-        dcc.Store(id="entity-table-sort-store", data={"column": None, "direction": None}),
-        
-        # Stores for infinite scroll limits
-        dcc.Store(id="positive-entities-limit", data=50),
-        dcc.Store(id="negative-entities-limit", data=50)
-    ], fluid=True)
 
 
 @handle_db_errors(default_message="Unable to load statistics", show_details=False)
@@ -562,26 +183,26 @@ def get_statistics_metrics(engine, date_range=None, granularity="all"):
                 className="h-100"
             )
 
-        quality_meta_1h = f"{avg_quality_1h:.2f} 1h" if avg_quality_1h is not None else "— 1h"
-        quality_meta_24h = f"{avg_quality_24h:.2f} 24h" if avg_quality_24h is not None else "— 24h"
+        quality_meta_1h = f"{avg_quality_1h:.2f} 1h" if avg_quality_1h is not None else "â€” 1h"
+        quality_meta_24h = f"{avg_quality_24h:.2f} 24h" if avg_quality_24h is not None else "â€” 24h"
 
         return html.Div([
             dbc.Row([
-                dbc.Col(metric_card("📰", "Articles", f"{total_news:,}", "text-primary",
+                dbc.Col(metric_card("ðŸ“°", "Articles", f"{total_news:,}", "text-primary",
                                     f"+{news_1h} 1h", f"+{news_24h} 24h"), xs=6, sm=4, md=2),
-                dbc.Col(metric_card("🧠", "Processed", f"{total_processed:,}", "text-success",
+                dbc.Col(metric_card("ðŸ§ ", "Processed", f"{total_processed:,}", "text-success",
                                     f"+{processed_1h} 1h", f"+{processed_24h} 24h"), xs=6, sm=4, md=2),
-                dbc.Col(metric_card("🏢", "Entities", f"{total_entities:,}", "text-info",
+                dbc.Col(metric_card("ðŸ¢", "Entities", f"{total_entities:,}", "text-info",
                                     f"+{entities_1h} 1h", f"+{entities_24h} 24h"), xs=6, sm=4, md=2),
-                dbc.Col(metric_card("🔮", "Predictions", f"{total_predictions:,}", "text-warning",
+                dbc.Col(metric_card("ðŸ”®", "Predictions", f"{total_predictions:,}", "text-warning",
                                     f"+{predictions_1h} 1h", f"+{predictions_24h} 24h"), xs=6, sm=4, md=2),
-                dbc.Col(metric_card("💥", "Impacts", f"{total_impacts:,}", "text-danger",
+                dbc.Col(metric_card("ðŸ’¥", "Impacts", f"{total_impacts:,}", "text-danger",
                                     f"+{impacts_1h} 1h", f"+{impacts_24h} 24h"), xs=6, sm=4, md=2),
-                dbc.Col(metric_card("🎯", "Surprises", f"{total_surprises:,}", "text-warning",
+                dbc.Col(metric_card("ðŸŽ¯", "Surprises", f"{total_surprises:,}", "text-warning",
                                     f"+{surprises_1h} 1h", f"+{surprises_24h} 24h"), xs=6, sm=4, md=2),
-                dbc.Col(metric_card("✅", "Fact Checks", f"{total_fact_checks:,}", "text-success",
+                dbc.Col(metric_card("âœ…", "Fact Checks", f"{total_fact_checks:,}", "text-success",
                                     f"+{fact_checks_1h} 1h", f"+{fact_checks_24h} 24h"), xs=6, sm=4, md=2),
-                dbc.Col(metric_card("⭐", "Avg Quality", f"{avg_quality:.2f}", "text-primary",
+                dbc.Col(metric_card("â­", "Avg Quality", f"{avg_quality:.2f}", "text-primary",
                                     quality_meta_1h, quality_meta_24h), xs=6, sm=4, md=2),
             ], className="g-2 mb-2")
         ])
@@ -591,7 +212,7 @@ def get_statistics_metrics(engine, date_range=None, granularity="all"):
         return dbc.Row([
             dbc.Col([
                 html.Div([
-                    html.P("⚠️ Unable to load statistics", className="text-warning mb-2"),
+                    html.P("âš ï¸ Unable to load statistics", className="text-warning mb-2"),
                     html.Small(f"Error: {str(e)}", className="text-muted")
                 ], className="text-center")
             ], width=12)
@@ -834,7 +455,7 @@ def get_impact_distribution_chart(engine, date_range=None):
         low = sum(1 for s in scores if s < 0.4)
         
         fig = px.bar(
-            x=['Low (<0.4)', 'Medium (0.4-0.7)', 'High (≥0.7)'],
+            x=['Low (<0.4)', 'Medium (0.4-0.7)', 'High (â‰¥0.7)'],
             y=[low, medium, high],
             color=['Low', 'Medium', 'High'],
             color_discrete_sequence=['#6c757d', '#ffc107', '#dc3545'],
@@ -1465,9 +1086,9 @@ def get_entity_details_table(engine, search_term="", sort_column=None, sort_dire
         def get_sort_icon(column_name):
             if sort_column == column_name:
                 if sort_direction == "asc":
-                    return " ▲"
+                    return " â–²"
                 elif sort_direction == "desc":
-                    return " ▼"
+                    return " â–¼"
             return ""
         
         # Build table with clickable headers
@@ -1534,7 +1155,7 @@ def get_entity_details_table(engine, search_term="", sort_column=None, sort_dire
         table_rows = []
         for name, entity_id, entity_type, metadata_json, mentions, impact_count, avg_impact in entities:
             # Parse metadata
-            metadata_display = "—"
+            metadata_display = "â€”"
             if metadata_json:
                 try:
                     meta = metadata_json if isinstance(metadata_json, dict) else json.loads(metadata_json)
@@ -1543,7 +1164,7 @@ def get_entity_details_table(engine, search_term="", sort_column=None, sort_dire
                     pass
             
             # Format average impact
-            impact_display = "—"
+            impact_display = "â€”"
             impact_color = "secondary"
             if avg_impact is not None:
                 impact_display = f"{avg_impact:.2f}"
@@ -1799,7 +1420,7 @@ def get_entity_full_details(engine, entity_name):
             # Sentiment Breakdown & Event Types
             dbc.Row([
                 dbc.Col([
-                    html.H5("📊 Sentiment Breakdown"),
+                    html.H5("ðŸ“Š Sentiment Breakdown"),
                     html.Div([
                         dbc.Progress([
                             dbc.Progress(value=sentiment_stats['positive'], color="success", bar=True),
@@ -1814,7 +1435,7 @@ def get_entity_full_details(engine, entity_name):
                     ])
                 ], width=6),
                 dbc.Col([
-                    html.H5("📈 Event Types"),
+                    html.H5("ðŸ“ˆ Event Types"),
                     html.Div([
                         dbc.Badge(f"{event_type}: {count}", color="info", className="me-1 mb-1") 
                         for event_type, count in sorted(event_types.items(), key=lambda x: x[1], reverse=True)[:10]
@@ -1824,12 +1445,12 @@ def get_entity_full_details(engine, entity_name):
             
             # Metadata
             html.Div([
-                html.H5("ℹ️ Metadata"),
+                html.H5("â„¹ï¸ Metadata"),
                 html.Ul(metadata_display, className="text-muted") if metadata_display else html.P("No metadata available", className="text-muted")
             ], className="mb-4") if metadata_display or entity.metadata_ else None,
             
             # News Articles List
-            html.H5(f"📰 Recent News Articles (Last {len(news_mappings)})"),
+            html.H5(f"ðŸ“° Recent News Articles (Last {len(news_mappings)})"),
             html.Div([
                 dbc.Card([
                     dbc.CardBody([
@@ -1842,7 +1463,7 @@ def get_entity_full_details(engine, entity_name):
                                     className="text-decoration-none"
                                 ),
                                 dbc.Button(
-                                    ["📊 Prediction"],
+                                    ["ðŸ“Š Prediction"],
                                     id={"type": "news-pred-detail-btn", "index": str(mapping.news_id)},
                                     size="sm",
                                     color="primary",
@@ -1898,11 +1519,13 @@ def get_index_trends(engine):
     import json
     import os
     from datetime import datetime, timedelta
-    from src.gui.charts.market_data import MarketDataProvider
+    from src.gui.tabs.charts.market_data import MarketDataProvider
     
     try:
         # Load index constituents
-        config_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "index_constituents.json")
+        # Path from src/gui/tabs/statistics/data.py to project root/config/index_constituents.json
+        project_root = Path(__file__).resolve().parents[4]  # Go up 4 levels: statistics -> tabs -> gui -> src -> root
+        config_path = project_root / "config" / "index_constituents.json"
         with open(config_path, 'r') as f:
             indices = json.load(f)
         
@@ -1927,15 +1550,15 @@ def get_index_trends(engine):
                     change_pct = ((current_price - start_price) / start_price) * 100
                     
                     trend_color = "success" if change_pct > 0 else "danger"
-                    trend_icon = "📈" if change_pct > 0 else "📉"
+                    trend_icon = "ðŸ“ˆ" if change_pct > 0 else "ðŸ“‰"
                 else:
                     change_pct = 0
                     trend_color = "secondary"
-                    trend_icon = "➡️"
+                    trend_icon = "âž¡ï¸"
             except:
                 change_pct = 0
                 trend_color = "secondary"
-                trend_icon = "➡️"
+                trend_icon = "âž¡ï¸"
             
             # Find tracked stocks from this index
             tracked_stocks = []
@@ -2145,390 +1768,3 @@ def get_stock_predictions_detail(engine, stock_symbol):
         import logging
         logging.error(f"Error loading stock predictions for {stock_symbol}: {e}", exc_info=True)
         return "Error", html.P(f"Error: {str(e)[:100]}", className="text-danger")
-
-
-def register_callbacks(app):
-    """Register statistics tab callbacks."""
-
-    @app.callback(
-        Output("statistics-metrics", "children"),
-        [Input("interval-component", "n_intervals"),
-         Input("stats-date-range", "start_date"),
-         Input("stats-date-range", "end_date"),
-         Input("stats-granularity", "value"),
-         Input("active-filter-store", "data")]
-    )
-    @safe_callback(default_return=html.Div("Unable to load statistics", className="text-warning p-3"))
-    def update_statistics_metrics(n, start_date, end_date, granularity, active_filter):
-        date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-        return get_statistics_metrics(_engine, date_range=date_range, granularity=granularity)
-
-    @app.callback(
-        [Output("stats-date-range", "start_date"),
-         Output("stats-date-range", "end_date"),
-         Output("active-filter-store", "data")],
-        [Input("quick-1h", "n_clicks"),
-         Input("quick-12h", "n_clicks"),
-         Input("quick-24h", "n_clicks"),
-         Input("quick-7d", "n_clicks"),
-         Input("quick-30d", "n_clicks"),
-         Input("quick-90d", "n_clicks"),
-         Input("quick-1y", "n_clicks"),
-         Input("quick-all", "n_clicks"),
-         Input("custom-hours-input", "value"),
-         Input("stats-reset-filter", "n_clicks")],
-        prevent_initial_call=True
-    )
-    def update_stats_date_range(btn_1h, btn_12h, btn_24h, btn_7d, btn_30d, btn_90d, btn_1y, btn_all, custom_hours, btn_reset):
-        from dash import callback_context
-        if not callback_context.triggered:
-            raise PreventUpdate
-        trigger_id = callback_context.triggered[0]["prop_id"].split(".")[0]
-        now = datetime.now().date()
-        now_dt = datetime.now()
-        if trigger_id == "quick-1h":
-            return (now_dt - timedelta(hours=1)).date(), now, "1h"
-        elif trigger_id == "quick-12h":
-            return (now_dt - timedelta(hours=12)).date(), now, "12h"
-        elif trigger_id == "quick-24h":
-            return (now - timedelta(days=1)), now, "24h"
-        elif trigger_id == "quick-7d":
-            return (now - timedelta(days=7)), now, "7d"
-        elif trigger_id == "quick-30d":
-            return (now - timedelta(days=30)), now, "30d"
-        elif trigger_id == "quick-90d":
-            return (now - timedelta(days=90)), now, "90d"
-        elif trigger_id == "quick-1y":
-            return (now - timedelta(days=365)), now, "1y"
-        elif trigger_id == "custom-hours-input" and custom_hours:
-            try:
-                h = int(custom_hours)
-                if 0 < h <= 8760:
-                    return (now_dt - timedelta(hours=h)).date(), now, f"custom-{h}h"
-            except Exception:
-                pass
-        elif trigger_id in ("quick-all", "stats-reset-filter"):
-            return None, None, "all"
-        raise PreventUpdate
-
-    @app.callback(
-        [Output("quick-1h", "outline"),
-         Output("quick-12h", "outline"),
-         Output("quick-24h", "outline"),
-         Output("quick-7d", "outline"),
-         Output("quick-30d", "outline"),
-         Output("quick-90d", "outline"),
-         Output("quick-1y", "outline"),
-         Output("quick-all", "outline")],
-        Input("active-filter-store", "data")
-    )
-    def update_button_styles(active_filter):
-        styles = [True, True, True, True, True, True, True, True]
-        if active_filter == "1h":
-            styles[0] = False
-        elif active_filter == "12h":
-            styles[1] = False
-        elif active_filter == "24h":
-            styles[2] = False
-        elif active_filter == "7d":
-            styles[3] = False
-        elif active_filter == "30d":
-            styles[4] = False
-        elif active_filter == "90d":
-            styles[5] = False
-        elif active_filter == "1y":
-            styles[6] = False
-        elif active_filter == "all":
-            styles[7] = False
-        return styles
-
-    @app.callback(
-        [Output("event-distribution-chart", "figure"),
-         Output("quality-distribution-chart", "figure")],
-        [Input("interval-component", "n_intervals"),
-         Input("stats-date-range", "start_date"),
-         Input("stats-date-range", "end_date"),
-         Input("active-filter-store", "data")]
-    )
-    @safe_callback(default_return=(go.Figure(), go.Figure()))
-    def update_statistics_charts(n, start_date, end_date, active_filter):
-        date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-        return (
-            get_event_distribution_chart(_engine, date_range=date_range),
-            get_quality_distribution_chart(_engine, date_range=date_range),
-        )
-
-    @app.callback(
-        Output("sentiment-distribution-chart", "figure"),
-        [Input("interval-component", "n_intervals"),
-         Input("stats-date-range", "start_date"),
-         Input("stats-date-range", "end_date"),
-         Input("active-filter-store", "data")]
-    )
-    def update_sentiment_chart(n, start_date, end_date, active_filter):
-        date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-        return get_sentiment_distribution_chart(_engine, date_range=date_range)
-
-    @app.callback(
-        Output("impact-distribution-chart", "figure"),
-        [Input("interval-component", "n_intervals"),
-         Input("stats-date-range", "start_date"),
-         Input("stats-date-range", "end_date"),
-         Input("active-filter-store", "data")]
-    )
-    def update_impact_chart(n, start_date, end_date, active_filter):
-        date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-        return get_impact_distribution_chart(_engine, date_range=date_range)
-
-    @app.callback(
-        Output("top-entities-list", "children"),
-        [Input("interval-component", "n_intervals"),
-         Input("stats-date-range", "start_date"),
-         Input("stats-date-range", "end_date"),
-         Input("active-filter-store", "data")]
-    )
-    def update_top_entities(n, start_date, end_date, active_filter):
-        date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-        return get_top_entities_list(_engine, date_range=date_range)
-
-    @app.callback(
-        Output("news-volume-chart", "figure"),
-        [Input("interval-component", "n_intervals"),
-         Input("stats-date-range", "start_date"),
-         Input("stats-date-range", "end_date"),
-         Input("active-filter-store", "data")]
-    )
-    def update_news_volume(n, start_date, end_date, active_filter):
-        date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-        return get_news_volume_chart(_engine, date_range=date_range)
-
-    @app.callback(
-        Output("entity-sentiment-chart", "figure"),
-        [Input("interval-component", "n_intervals"),
-         Input("stats-date-range", "start_date"),
-         Input("stats-date-range", "end_date"),
-         Input("active-filter-store", "data"),
-         Input("sentiment-timeframe-selector", "value")]
-    )
-    def update_entity_sentiment_chart(n, start_date, end_date, active_filter, timeframe):
-        date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-        return get_entity_sentiment_chart(_engine, date_range=date_range, timeframe=timeframe)
-
-    @app.callback(
-        [Output("top-positive-entities", "children"),
-         Output("positive-entities-limit", "data")],
-        [Input("interval-component", "n_intervals"),
-         Input("stats-date-range", "start_date"),
-         Input("stats-date-range", "end_date"),
-         Input("active-filter-store", "data"),
-         Input("positive-entity-search-input", "value"),
-         Input("positive-entities-scroll-trigger", "value")],
-        [State("positive-entities-limit", "data")]
-    )
-    def update_top_positive_entities(n, start_date, end_date, active_filter, search_term, scroll_trigger_value, current_limit):
-        from dash import callback_context
-        current_limit = current_limit or 50
-        if callback_context.triggered:
-            trigger_id = callback_context.triggered[0]["prop_id"]
-            if "scroll-trigger" in trigger_id and scroll_trigger_value:
-                try:
-                    scroll_count = int(scroll_trigger_value) if scroll_trigger_value else 0
-                    if scroll_count > (current_limit // 50):
-                        current_limit = current_limit + 50
-                except Exception:
-                    pass
-            if "search-input" in trigger_id or "date-range" in trigger_id or "active-filter" in trigger_id:
-                current_limit = 50
-        date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-        result = get_top_positive_entities(_engine, search_term or "", show_all=True, date_range=date_range, limit=current_limit)
-        if isinstance(result, tuple):
-            entities, _ = result
-        else:
-            entities = result
-        return entities, current_limit
-
-    @app.callback(
-        [Output("top-negative-entities", "children"),
-         Output("negative-entities-limit", "data")],
-        [Input("interval-component", "n_intervals"),
-         Input("stats-date-range", "start_date"),
-         Input("stats-date-range", "end_date"),
-         Input("active-filter-store", "data"),
-         Input("negative-entity-search-input", "value"),
-         Input("negative-entities-scroll-trigger", "value")],
-        [State("negative-entities-limit", "data")]
-    )
-    def update_top_negative_entities(n, start_date, end_date, active_filter, search_term, scroll_trigger_value, current_limit):
-        from dash import callback_context
-        current_limit = current_limit or 50
-        if callback_context.triggered:
-            trigger_id = callback_context.triggered[0]["prop_id"]
-            if "scroll-trigger" in trigger_id and scroll_trigger_value:
-                try:
-                    scroll_count = int(scroll_trigger_value) if scroll_trigger_value else 0
-                    if scroll_count > (current_limit // 50):
-                        current_limit = current_limit + 50
-                except Exception:
-                    pass
-            if "search-input" in trigger_id or "date-range" in trigger_id or "active-filter" in trigger_id:
-                current_limit = 50
-        date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-        result = get_top_negative_entities(_engine, search_term or "", show_all=True, date_range=date_range, limit=current_limit)
-        if isinstance(result, tuple):
-            entities, _ = result
-        else:
-            entities = result
-        return entities, current_limit
-
-    @app.callback(
-        [Output("entity-details-table", "children"),
-         Output("entity-table-sort-store", "data")],
-        [Input("interval-component", "n_intervals"),
-         Input("stats-date-range", "start_date"),
-         Input("stats-date-range", "end_date"),
-         Input("active-filter-store", "data"),
-         Input("entity-search-input", "value"),
-         Input({"type": "sort-column-btn", "column": ALL}, "n_clicks")],
-        [State("entity-table-sort-store", "data"),
-         State({"type": "sort-column-btn", "column": ALL}, "id")],
-        prevent_initial_call=False
-    )
-    def update_entity_details_table(n, start_date, end_date, active_filter, search_term, sort_clicks, sort_state, button_ids):
-        from dash import callback_context
-        if sort_state is None:
-            sort_state = {"column": None, "direction": None}
-        current_column = sort_state.get("column")
-        current_direction = sort_state.get("direction")
-        if callback_context.triggered:
-            trigger_id = callback_context.triggered[0]["prop_id"]
-            if "sort-column-btn" in trigger_id and sort_clicks and any(c for c in sort_clicks if c):
-                for i, clicks in enumerate(sort_clicks):
-                    if clicks and clicks > 0:
-                        clicked_column = button_ids[i]["column"]
-                        if current_column == clicked_column:
-                            if current_direction == "asc":
-                                current_direction = "desc"
-                            elif current_direction == "desc":
-                                current_column = None
-                                current_direction = None
-                            else:
-                                current_direction = "asc"
-                        else:
-                            current_column = clicked_column
-                            current_direction = "asc"
-                        break
-        date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
-        table = get_entity_details_table(
-            _engine, search_term or "", current_column, current_direction, date_range=date_range
-        )
-        return table, {"column": current_column, "direction": current_direction}
-
-    @app.callback(
-        [Output("entity-details-modal", "is_open"),
-         Output("selected-entity-store", "data")],
-        [Input({"type": "entity-detail-btn", "index": ALL}, "n_clicks"),
-         Input("close-entity-modal", "n_clicks")],
-        [State("entity-details-modal", "is_open"),
-         State({"type": "entity-detail-btn", "index": ALL}, "id")],
-        prevent_initial_call=True
-    )
-    def toggle_entity_modal(detail_clicks, close_click, is_open, button_ids):
-        from dash import callback_context
-        if not callback_context.triggered:
-            return dash.no_update, dash.no_update
-        trigger_id = callback_context.triggered[0]["prop_id"]
-        if "close-entity-modal" in trigger_id:
-            return False, None
-        if "entity-detail-btn" in trigger_id and detail_clicks and any(c for c in detail_clicks if c):
-            for i, click_count in enumerate(detail_clicks):
-                if click_count and click_count > 0:
-                    return True, {"entity_name": button_ids[i]["index"]}
-        return dash.no_update, dash.no_update
-
-    @app.callback(
-        [Output("entity-modal-title", "children"),
-         Output("entity-modal-body", "children")],
-        Input("selected-entity-store", "data"),
-        State("entity-details-modal", "is_open"),
-        prevent_initial_call=True
-    )
-    def update_entity_modal_content(entity_data, is_open):
-        if not is_open or not entity_data or "entity_name" not in entity_data:
-            return dash.no_update, dash.no_update
-        title, body = get_entity_full_details(_engine, entity_data["entity_name"])
-        return title, body
-
-    @app.callback(
-        Output("index-trends-display", "children"),
-        Input("interval-component", "n_intervals")
-    )
-    def update_index_trends(n_intervals):
-        return get_index_trends(_engine)
-
-    @app.callback(
-        [Output("stock-predictions-modal", "is_open"),
-         Output("stock-modal-title", "children"),
-         Output("stock-modal-body", "children")],
-        [Input({"type": "stock-pred-btn", "index": ALL}, "n_clicks"),
-         Input("close-stock-modal", "n_clicks")],
-        [State({"type": "stock-pred-btn", "index": ALL}, "id"),
-         State("stock-predictions-modal", "is_open")],
-        prevent_initial_call=True
-    )
-    def toggle_stock_predictions_modal(stock_clicks, close_click, button_ids, is_open):
-        from dash import callback_context
-        if not callback_context.triggered:
-            return dash.no_update, dash.no_update, dash.no_update
-        trigger_id = callback_context.triggered[0]["prop_id"]
-        if "close-stock-modal" in trigger_id:
-            return False, dash.no_update, dash.no_update
-        if "stock-pred-btn" in trigger_id and stock_clicks and any(c for c in stock_clicks if c):
-            triggered_id = callback_context.triggered[0]["prop_id"].split(".")[0]
-            button_id = json.loads(triggered_id)
-            stock_symbol = button_id["index"]
-            title, body = get_stock_predictions_detail(_engine, stock_symbol)
-            return True, title, body
-        return dash.no_update, dash.no_update, dash.no_update
-
-    @app.callback(
-        [Output("prediction-modal", "is_open", allow_duplicate=True),
-         Output("prediction-detail-cache", "data", allow_duplicate=True),
-         Output("current-prediction-id", "data", allow_duplicate=True),
-         Output("entity-details-modal", "is_open", allow_duplicate=True),
-         Output("no-prediction-toast", "is_open", allow_duplicate=True)],
-        Input({"type": "news-pred-detail-btn", "index": ALL}, "n_clicks"),
-        [State({"type": "news-pred-detail-btn", "index": ALL}, "id"),
-         State("prediction-modal", "is_open"),
-         State("entity-details-modal", "is_open")],
-        prevent_initial_call=True
-    )
-    def open_news_prediction_detail(n_clicks_list, button_ids, pred_modal_open, entity_modal_open):
-        if not n_clicks_list or not any(n_clicks_list):
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
-        ctx = dash.callback_context
-        if not ctx.triggered:
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
-        triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
-        button_id = json.loads(triggered_id)
-        news_id = button_id["index"]
-        try:
-            with Session(_engine) as db:
-                predictions = db.query(Prediction).all()
-                matching_prediction = None
-                for pred in predictions:
-                    if hasattr(pred, "related_news_ids") and pred.related_news_ids:
-                        try:
-                            news_ids = pred.related_news_ids if isinstance(pred.related_news_ids, list) else []
-                            news_ids_str = [str(nid) for nid in news_ids]
-                            if str(news_id) in news_ids_str:
-                                matching_prediction = pred
-                                break
-                        except (TypeError, ValueError):
-                            continue
-                if not matching_prediction:
-                    return dash.no_update, dash.no_update, dash.no_update, dash.no_update, True
-                prediction_id = str(matching_prediction.prediction_id)
-                return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id, False, False
-        except Exception as e:
-            logger.error("Error loading prediction for news_id %s: %s", news_id, e, exc_info=True)
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update

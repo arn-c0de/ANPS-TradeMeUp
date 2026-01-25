@@ -10,7 +10,7 @@ import uuid
 import dash
 from dash import ALL, Input, Output, State
 
-from src.gui.charts.fullscreen_manager import (
+from src.gui.tabs.charts.fullscreen_manager import (
     create_fullscreen_state,
     get_container_classname,
     get_exit_button_style,
@@ -18,7 +18,7 @@ from src.gui.charts.fullscreen_manager import (
     get_toggle_button_config,
     toggle_fullscreen_state,
 )
-from src.gui.charts.overlay_utils import (
+from src.gui.tabs.charts.overlay_utils import (
     load_overlays_from_db,
     normalize_overlay_store,
 )
