@@ -2,15 +2,24 @@
 Simulations Tab - View trading simulation outcomes
 """
 
-from dash import dcc, html
-import dash_bootstrap_components as dbc
+import json
+import logging
 from datetime import datetime, timedelta
-from sqlalchemy import desc, func
+
+import dash
+from dash import ALL, MATCH, Input, Output, State, dcc, html
+from dash.exceptions import PreventUpdate
+import dash_bootstrap_components as dbc
+from sqlalchemy import delete, desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from src.models.trading_simulation import TradingSimulation
 from src.models.entities import Entity
 from src.models.predictions import Prediction
+from src.models.database import engine as _engine, get_scoped_session
+from src.utils.activity_logger import activity_logger
+
+logger = logging.getLogger(__name__)
 
 
 def create_layout():
@@ -477,3 +486,223 @@ def get_entity_options(engine, date_range=None):
                 ]
         except Exception:
             return []
+
+
+def register_callbacks(app):
+    """Register simulations tab callbacks."""
+
+    @app.callback(
+        Output("sim-entity-filter", "options"),
+        [Input("interval-component", "n_intervals"),
+         Input("sim-date-filter", "start_date"),
+         Input("sim-date-filter", "end_date")]
+    )
+    def update_simulation_entity_options(n, start_date, end_date):
+        date_range = (start_date, end_date) if start_date or end_date else None
+        return get_entity_options(_engine, date_range=date_range)
+
+    @app.callback(
+        Output("simulation-table", "children"),
+        [Input("sim-entity-filter", "value"),
+         Input("sim-date-filter", "start_date"),
+         Input("sim-date-filter", "end_date"),
+         Input("sim-horizon-filter", "value"),
+         Input("sim-decision-filter", "value"),
+         Input("create-sim-status", "children"),
+         Input("sim-delete-status", "data")]
+    )
+    def update_simulation_table(entities, start_date, end_date, horizon, decision, _, __):
+        date_range = (start_date, end_date) if start_date or end_date else None
+        return get_simulation_table(
+            _engine,
+            entity_filter=entities,
+            date_range=date_range,
+            decision_filter=decision or "all",
+            horizon_filter=horizon or "all"
+        )
+
+    @app.callback(
+        Output("create-sim-entity-filter", "options"),
+        [Input("interval-component", "n_intervals"),
+         Input("create-sim-date-range", "start_date"),
+         Input("create-sim-date-range", "end_date")]
+    )
+    def update_create_simulation_entity_options(n, start_date, end_date):
+        date_range = (start_date, end_date) if start_date or end_date else None
+        return get_prediction_entity_options(_engine, date_range=date_range)
+
+    @app.callback(
+        [Output("create-sim-status", "children"),
+         Output("sim-filter-sync-store", "data")],
+        Input("btn-create-simulations", "n_clicks"),
+        [State("create-sim-entity-filter", "value"),
+         State("create-sim-date-range", "start_date"),
+         State("create-sim-date-range", "end_date"),
+         State("create-sim-horizon-filter", "value"),
+         State("create-sim-limit", "value")],
+        prevent_initial_call=True
+    )
+    def create_simulations_from_predictions(n_clicks, entities, start_date, end_date, horizon, limit):
+        if not n_clicks:
+            return "", dash.no_update
+        try:
+            from src.simulations.trading_simulator import TradingSimulationEngine
+            engine_sim = TradingSimulationEngine()
+            date_range = None
+            if start_date and end_date:
+                try:
+                    start = datetime.fromisoformat(start_date) if isinstance(start_date, str) else start_date
+                    end = datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
+                    if hasattr(start, "date") and not isinstance(start, datetime):
+                        start = datetime.combine(start, datetime.min.time())
+                    if hasattr(end, "date") and not isinstance(end, datetime):
+                        end = datetime.combine(end, datetime.max.time())
+                    date_range = (start, end)
+                except Exception as e:
+                    logger.warning("Error parsing date range: %s", e)
+            stats = engine_sim.create_simulations_from_predictions(
+                entity_filter=entities if entities and len(entities) > 0 else None,
+                horizon_filter=horizon if horizon != "all" else None,
+                date_range=date_range,
+                limit=limit or 50
+            )
+            filter_sync_data = {
+                "entities": entities if entities and len(entities) > 0 else None,
+                "horizon": horizon if horizon != "all" else None,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            return dbc.Alert(
+                f"Created {stats['created']} simulations, updated {stats['updated']}, skipped {stats['skipped']}, errors {stats['errors']}",
+                color="success" if stats["errors"] == 0 else "warning",
+                dismissable=True,
+                duration=5000
+            ), filter_sync_data
+        except Exception as e:
+            logger.error("Error creating simulations: %s", e, exc_info=True)
+            return dbc.Alert(f"Error creating simulations: {str(e)}", color="danger", dismissable=True, duration=5000), dash.no_update
+
+    @app.callback(
+        [Output("sim-entity-filter", "value"),
+         Output("sim-horizon-filter", "value")],
+        Input("sim-filter-sync-store", "data"),
+        [State("sim-entity-filter", "value"),
+         State("sim-horizon-filter", "value")],
+        prevent_initial_call=True
+    )
+    def sync_simulation_filters(sync_data, current_entities, current_horizon):
+        if not sync_data or not sync_data.get("timestamp"):
+            raise PreventUpdate
+        new_entities = sync_data.get("entities")
+        new_horizon = sync_data.get("horizon")
+        if new_entities:
+            return new_entities, new_horizon if new_horizon else current_horizon
+        if new_horizon:
+            return current_entities, new_horizon
+        raise PreventUpdate
+
+    @app.callback(
+        [Output({"type": "delete-sim", "index": ALL}, "disabled"),
+         Output("sim-delete-status", "data")],
+        [Input({"type": "delete-sim", "index": ALL}, "n_clicks"),
+         Input("btn-confirm-clear-simulations", "n_clicks")],
+        [State({"type": "delete-sim", "index": ALL}, "id")],
+        prevent_initial_call=True
+    )
+    def delete_simulation(n_clicks, clear_all_clicks, button_ids):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            raise PreventUpdate
+        triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        if triggered_id == "btn-confirm-clear-simulations":
+            if not clear_all_clicks:
+                raise PreventUpdate
+            try:
+                with get_scoped_session() as db:
+                    count = db.query(TradingSimulation).count()
+                    db.execute(delete(TradingSimulation))
+                    db.commit()
+                    remaining = db.query(TradingSimulation).count()
+                    activity_logger.log_activity(f"Deleted all {count} simulations (remaining: {remaining})", "WARNING")
+                disabled_states = [False] * (len(button_ids) if button_ids else 0)
+                return disabled_states, {
+                    "action": "clear_all",
+                    "count": count,
+                    "remaining": remaining,
+                    "deleted": True,
+                    "ts": datetime.utcnow().isoformat()
+                }
+            except Exception as e:
+                logger.error("Error clearing all simulations: %s", e)
+                activity_logger.log_activity(f"Error clearing all simulations: {e}", "ERROR")
+                disabled_states = [False] * (len(button_ids) if button_ids else 0)
+                return disabled_states, {
+                    "action": "clear_all",
+                    "error": str(e),
+                    "deleted": False,
+                    "ts": datetime.utcnow().isoformat()
+                }
+        if not n_clicks or not any(n_clicks):
+            raise PreventUpdate
+        try:
+            button_id = json.loads(triggered_id)
+        except Exception:
+            return dash.no_update, dash.no_update
+        if not button_ids:
+            return dash.no_update, dash.no_update
+        target_index = None
+        for i, item in enumerate(button_ids):
+            if item == button_id:
+                target_index = i
+                break
+        if target_index is None:
+            return dash.no_update, dash.no_update
+        try:
+            from src.simulations.trading_simulator import TradingSimulationEngine
+            simulation_id = button_id["index"]
+            engine_sim = TradingSimulationEngine()
+            success = engine_sim.delete_simulation(simulation_id)
+            if success:
+                disabled_states = [False] * len(button_ids)
+                disabled_states[target_index] = True
+                return disabled_states, {"simulation_id": simulation_id, "deleted": True, "ts": datetime.utcnow().isoformat()}
+            return [False] * len(button_ids), dash.no_update
+        except Exception as e:
+            logger.error("Error deleting simulation: %s", e)
+            return [False] * len(button_ids), dash.no_update
+
+    @app.callback(
+        Output({"type": "refresh-sim", "index": MATCH}, "disabled"),
+        Input({"type": "refresh-sim", "index": MATCH}, "n_clicks"),
+        State({"type": "refresh-sim", "index": MATCH}, "id"),
+        prevent_initial_call=True
+    )
+    def refresh_simulation(n_clicks, button_id):
+        if not n_clicks:
+            return False
+        try:
+            from src.simulations.trading_simulator import TradingSimulationEngine
+            simulation_id = button_id["index"]
+            engine_sim = TradingSimulationEngine()
+            engine_sim.refresh_simulation(simulation_id)
+        except Exception as e:
+            logger.error("Error refreshing simulation: %s", e)
+        return False
+
+    @app.callback(
+        Output("modal-clear-all-simulations", "is_open"),
+        [Input("btn-clear-all-simulations", "n_clicks"),
+         Input("btn-cancel-clear-simulations", "n_clicks"),
+         Input("btn-confirm-clear-simulations", "n_clicks")],
+        State("modal-clear-all-simulations", "is_open"),
+        prevent_initial_call=True
+    )
+    def toggle_clear_all_simulations_modal(open_clicks, cancel_clicks, confirm_clicks, is_open):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            raise PreventUpdate
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        if button_id == "btn-clear-all-simulations":
+            return True
+        if button_id in ("btn-cancel-clear-simulations", "btn-confirm-clear-simulations"):
+            return False
+        return is_open

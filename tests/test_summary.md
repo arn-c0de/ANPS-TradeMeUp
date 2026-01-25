@@ -5,7 +5,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/test_update_logic.py`
-*   **Purpose:** Test the logic for updating prediction performance records in the database. It verifies that recalculating and saving performance data correctly updates existing entries, specifically checking for timestamp changes.
+*   **Purpose:** [NOT USED BY GUI TABS] Test the logic for updating prediction performance records in the database. It verifies that recalculating and saving performance data correctly updates existing entries, specifically checking for timestamp changes.
 *   **Key Functions/Classes Tested:**
     *   `src.models.predictions.Prediction`
     *   `src.models.predictions.PredictionOutcome`
@@ -16,7 +16,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/test_statistics_filter.py`
-*   **Purpose:** This script tests the time period filtering functionality within the Statistics tab of the GUI. It verifies that statistics metrics can be retrieved without filters and with different date range filters (30-day, 7-day). It also checks for the presence of filter controls in the generated layout.
+*   **Purpose:** [NOT USED BY GUI TABS] This script tests the time period filtering functionality within the Statistics tab of the GUI. It verifies that statistics metrics can be retrieved without filters and with different date range filters (30-day, 7-day). It also checks for the presence of filter controls in the generated layout.
 *   **Key Functions/Classes Tested:**
     *   `src.gui.tabs.statistics.get_statistics_metrics`
     *   `src.gui.tabs.statistics.create_layout`
@@ -128,7 +128,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/test_modal_performance.py`
-*   **Purpose:** This script verifies that the prediction details modal in the GUI displays previously saved performance data without needing to refetch it. It finds a prediction with existing outcome data, then calls `get_prediction_details` with `load_performance=False` and checks if the performance metrics are present in the returned body content.
+*   **Purpose:** [NOT USED BY GUI TABS] This script verifies that the prediction details modal in the GUI displays previously saved performance data without needing to refetch it. It finds a prediction with existing outcome data, then calls `get_prediction_details` with `load_performance=False` and checks if the performance metrics are present in the returned body content.
 *   **Key Functions/Classes Tested:**
     *   `src.models.database.SessionLocal`
     *   `src.models.predictions.Prediction`
@@ -138,7 +138,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/test_live_logging.py`
-*   **Purpose:** This script demonstrates and tests the live logging functionality of the system. It simulates a pipeline run with various stages, agent activities (start, processing, success, error), and LLM usage, logging these events in real-time. The user is instructed to open the dashboard to observe the live updates.
+*   **Purpose:** [NOT USED BY GUI TABS] This script demonstrates and tests the live logging functionality of the system. It simulates a pipeline run with various stages, agent activities (start, processing, success, error), and LLM usage, logging these events in real-time. The user is instructed to open the dashboard to observe the live updates.
 *   **Key Functions/Classes Tested:**
     *   `src.utils.activity_logger.activity_logger` (all its methods)
     *   `test_live_logging`
@@ -146,7 +146,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/test_continuous_pipeline.py`
-*   **Purpose:** This script thoroughly tests the enhanced continuous pipeline, focusing on performance monitoring features (memory checking, iteration time calculation, batch size adjustment), error recovery mechanisms (error counting, exponential backoff), and graceful shutdown procedures.
+*   **Purpose:** [NOT USED BY GUI TABS] This script thoroughly tests the enhanced continuous pipeline, focusing on performance monitoring features (memory checking, iteration time calculation, batch size adjustment), error recovery mechanisms (error counting, exponential backoff), and graceful shutdown procedures.
 *   **Key Functions/Classes Tested:**
     *   `scripts.run_continuous_pipeline.ContinuousPipeline`
     *   `ContinuousPipeline._check_memory`
@@ -160,7 +160,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/test_compact_modal.py`
-*   **Purpose:** This script specifically tests the compact styling of the prediction details modal in the GUI. It retrieves prediction details and then asserts that the returned body content applies specific CSS classes or inline styles for smaller fonts, compact padding, and smaller margins, ensuring a more condensed display.
+*   **Purpose:** [NOT USED BY GUI TABS] This script specifically tests the compact styling of the prediction details modal in the GUI. It retrieves prediction details and then asserts that the returned body content applies specific CSS classes or inline styles for smaller fonts, compact padding, and smaller margins, ensuring a more condensed display.
 *   **Key Functions/Classes Tested:**
     *   `src.gui.tabs.predictions.get_prediction_details`
     *   `src.models.database.get_scoped_session`
@@ -172,7 +172,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/test_callbacks.py`
-*   **Purpose:** This script serves as a quick test to verify if callbacks (specifically implied by the refresh button functionality in the GUI) are working by testing the `prediction_performance_service`. It retrieves an existing prediction and its associated entity, then attempts to calculate its performance.
+*   **Purpose:** [NOT USED BY GUI TABS] This script serves as a quick test to verify if callbacks (specifically implied by the refresh button functionality in the GUI) are working by testing the `prediction_performance_service`. It retrieves an existing prediction and its associated entity, then attempts to calculate its performance.
 *   **Key Functions/Classes Tested:**
     *   `src.models.predictions.Prediction`
     *   `src.models.entities.Entity`
@@ -203,7 +203,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/checks/check_unmapped_articles.py`
-*   **Purpose:** This script checks the coverage of entity mappings for processed news articles. It calculates the total number of processed articles, the number of articles that have associated entity mappings, and the number of articles without mappings. This helps to identify how effectively entities are being extracted and linked to news.
+*   **Purpose:** [NOT USED BY GUI TABS] This script checks the coverage of entity mappings for processed news articles. It calculates the total number of processed articles, the number of articles that have associated entity mappings, and the number of articles without mappings. This helps to identify how effectively entities are being extracted and linked to news.
 *   **Key Functions/Classes Tested:**
     *   `src.models.database.SessionLocal`
     *   `src.models.raw_news.RawNews`
@@ -214,7 +214,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/checks/check_tables.py`
-*   **Purpose:** This simple script lists all tables present in the `trademeup.db` SQLite database. It's a basic sanity check to see if the database schema has been created or if specific tables exist.
+*   **Purpose:** [NOT USED BY GUI TABS] This simple script lists all tables present in the `trademeup.db` SQLite database. It's a basic sanity check to see if the database schema has been created or if specific tables exist.
 *   **Key Functions/Classes Tested:**
     *   `sqlite3.connect`
     *   `sqlite3.Cursor.execute`
@@ -222,7 +222,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/checks/check_stats.py`
-*   **Purpose:** This script provides a quick overview of the database's state by counting records in various tables. It also helps diagnose pipeline bottlenecks by identifying articles awaiting NLP processing, those without entity mappings, and those without fact verification.
+*   **Purpose:** [NOT USED BY GUI TABS] This script provides a quick overview of the database's state by counting records in various tables. It also helps diagnose pipeline bottlenecks by identifying articles awaiting NLP processing, those without entity mappings, and those without fact verification.
 *   **Key Functions/Classes Tested:**
     *   `src.models.database.SessionLocal`
     *   `src.models.raw_news.RawNews`
@@ -238,7 +238,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/checks/check_predictions.py`
-*   **Purpose:** This script provides a quick check of the predictions stored in the database. It counts the total number of predictions and displays a sample of up to 5 predictions, including their ID, associated entity name (if found), prediction horizon, and creation timestamp.
+*   **Purpose:** [NOT USED BY GUI TABS] This script provides a quick check of the predictions stored in the database. It counts the total number of predictions and displays a sample of up to 5 predictions, including their ID, associated entity name (if found), prediction horizon, and creation timestamp.
 *   **Key Functions/Classes Tested:**
     *   `src.models.predictions.Prediction`
     *   `src.models.entities.Entity`
@@ -248,7 +248,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/checks/check_prediction_gap.py`
-*   **Purpose:** This script analyzes why some processed news articles might not be generating predictions. It calculates conversion rates, identifies processed articles without predictions, and attempts to categorize reasons for this 'prediction gap'. It also provides statistics on confidence scores and entity distribution.
+*   **Purpose:** [NOT USED BY GUI TABS] This script analyzes why some processed news articles might not be generating predictions. It calculates conversion rates, identifies processed articles without predictions, and attempts to categorize reasons for this 'prediction gap'. It also provides statistics on confidence scores and entity distribution.
 *   **Key Functions/Classes Tested:**
     *   `src.config.settings.settings`
     *   `src.models.raw_news.RawNews`
@@ -261,7 +261,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/checks/check_failing_articles.py`
-*   **Purpose:** This script is designed to inspect specific news articles identified as 'persistently failing' (likely in previous processing steps). It retrieves and prints the title, source, and a snippet of the full text for a predefined list of `news_id`s, helping in debugging why these articles might be causing issues.
+*   **Purpose:** [NOT USED BY GUI TABS] This script is designed to inspect specific news articles identified as 'persistently failing' (likely in previous processing steps). It retrieves and prints the title, source, and a snippet of the full text for a predefined list of `news_id`s, helping in debugging why these articles might be causing issues.
 *   **Key Functions/Classes Tested:**
     *   `src.models.database.SessionLocal`
     *   `src.models.raw_news.RawNews`
@@ -270,7 +270,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/checks/check_entity_mappings.py`
-*   **Purpose:** This script assesses the effectiveness of the `EntityMappingAgent` by checking the status of `NewsEntityMapping` entries in the database. It reports the total processed news, how many have mappings, how many don't, and the total number of mappings. It also displays sample mappings and provides diagnostic advice if a significant number of processed news articles lack entity mappings.
+*   **Purpose:** [NOT USED BY GUI TABS] This script assesses the effectiveness of the `EntityMappingAgent` by checking the status of `NewsEntityMapping` entries in the database. It reports the total processed news, how many have mappings, how many don't, and the total number of mappings. It also displays sample mappings and provides diagnostic advice if a significant number of processed news articles lack entity mappings.
 *   **Key Functions/Classes Tested:**
     *   `src.config.settings.settings`
     *   `src.models.entities.NewsEntityMapping`
@@ -283,7 +283,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/checks/check_article_quality.py`
-*   **Purpose:** This script assesses the quality and relevance of news articles by sampling those that have been processed but lack entity mappings. It attempts to identify 'non-financial' articles (e.g., crosswords, podcasts) based on keywords in their titles, providing an estimate of how many potentially irrelevant articles are being processed.
+*   **Purpose:** [NOT USED BY GUI TABS] This script assesses the quality and relevance of news articles by sampling those that have been processed but lack entity mappings. It attempts to identify 'non-financial' articles (e.g., crosswords, podcasts) based on keywords in their titles, providing an estimate of how many potentially irrelevant articles are being processed.
 *   **Key Functions/Classes Tested:**
     *   `src.config.settings.settings`
     *   `sqlalchemy.create_engine`, `sqlalchemy.text`, `sqlalchemy.connect`, `sqlalchemy.execute`, `sqlalchemy.fetchall`
@@ -291,7 +291,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/checks/check_analysis_scores.py`
-*   **Purpose:** This script is designed to diagnose issues with the creation of `ImpactScore` and `SurpriseScore` entries, which are crucial prerequisites for generating predictions. It counts the total entries in both tables, displays sample scores, and provides a diagnostic message if a significant number of scores are missing, pointing towards potential problems in the `impact_analysis_agent` or `surprise_evaluation_agent`Alongside the `test_summary.md` file, I also created `TestFileSummary.md` while trying to figure out why `test_summary.md` was not found. I will remove `TestFileSummary.md` first.
+*   **Purpose:** [NOT USED BY GUI TABS] This script is designed to diagnose issues with the creation of `ImpactScore` and `SurpriseScore` entries, which are crucial prerequisites for generating predictions. It counts the total entries in both tables, displays sample scores, and provides a diagnostic message if a significant number of scores are missing, pointing towards potential problems in the `impact_analysis_agent` or `surprise_evaluation_agent`Alongside the `test_summary.md` file, I also created `TestFileSummary.md` while trying to figure out why `test_summary.md` was not found. I will remove `TestFileSummary.md` first.
 *   **Key Functions/Classes Tested:**
     *   `src.config.settings.settings`
     *   `src.models.analysis.ImpactScore`
@@ -303,7 +303,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/backfills/backfill_scores.py`
-*   **Purpose:** This script is designed to perform a backfill operation for `ImpactScore` and `SurpriseScore` entries in the database, typically after entity mappings are complete. It iteratively processes batches of articles through the `ImpactScoringAgent` and `SurpriseQuantificationAgent` until no more articles need processing.
+*   **Purpose:** [NOT USED BY GUI TABS] This script is designed to perform a backfill operation for `ImpactScore` and `SurpriseScore` entries in the database, typically after entity mappings are complete. It iteratively processes batches of articles through the `ImpactScoringAgent` and `SurpriseQuantificationAgent` until no more articles need processing.
 *   **Key Functions/Classes Tested:**
     *   `src.agents.impact_scoring_agent.ImpactScoringAgent`
     *   `src.agents.surprise_quantification_agent.SurpriseQuantificationAgent`
@@ -314,7 +314,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/backfills/backfill_entity_mappings_with_themes.py`
-*   **Purpose:** This script performs a backfill of entity mappings, specifically designed to support theme-based ETF (Exchange Traded Fund) mapping for macro and sector news. It iteratively processes articles in batches using the `EntityMappingAgent`, logging progress and cumulative statistics.
+*   **Purpose:** [NOT USED BY GUI TABS] This script performs a backfill of entity mappings, specifically designed to support theme-based ETF (Exchange Traded Fund) mapping for macro and sector news. It iteratively processes articles in batches using the `EntityMappingAgent`, logging progress and cumulative statistics.
 *   **Key Functions/Classes Tested:**
     *   `src.agents.entity_mapping_agent.EntityMappingAgent`
     *   `backfill_entity_mappings`
@@ -322,7 +322,7 @@ This document provides a summary of the Python test files found in the `tests` d
 ---
 
 ## `tests/backfills/backfill_entity_mappings.py`
-*   **Purpose:** This script backfills entity mappings for all processed news articles that currently lack them. It uses the `EntityMappingAgent` to process articles in batches until no more unmapped articles are found. This ensures that the entity mapping step of the pipeline is fully caught up.
+*   **Purpose:** [NOT USED BY GUI TABS] This script backfills entity mappings for all processed news articles that currently lack them. It uses the `EntityMappingAgent` to process articles in batches until no more unmapped articles are found. This ensures that the entity mapping step of the pipeline is fully caught up.
 *   **Key Functions/Classes Tested:**
     *   `src.agents.entity_mapping_agent.EntityMappingAgent`
     *   `src.utils.activity_logger.activity_logger`

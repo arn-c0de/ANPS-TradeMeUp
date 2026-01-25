@@ -11,7 +11,7 @@ from src.models.entities import Entity
 from src.models.analysis import MarketRegime
 from src.models.trading_simulation import TradingSimulation
 from src.services.prediction_performance_service import PredictionPerformanceService
-from src.gui.charts.market_data import MarketDataProvider
+from src.services.market_data import MarketDataProvider
 from src.simulations.risk_calculations import RiskCalculator, RiskInputs
 
 logger = logging.getLogger(__name__)

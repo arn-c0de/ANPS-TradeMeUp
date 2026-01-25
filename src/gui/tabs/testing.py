@@ -3,12 +3,14 @@ Testing Tab - Individual Agent Testing and Health Checks
 Modular design for easy expansion as new agents are added
 """
 
-from dash import dcc, html, Input, Output, State
-import dash_bootstrap_components as dbc
 from datetime import datetime
 import traceback
-from sqlalchemy.orm import Session
+
+import dash
+import dash_bootstrap_components as dbc
+from dash import Input, Output, State, dcc, html
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from src.config.settings import settings
 
@@ -603,3 +605,139 @@ def format_test_result(success, message, details):
             html.Br(),
             html.Small("Click 'View Details' for full error", className="text-muted") if details.get("traceback") else None
         ], color="danger", className="mb-0 mt-2")
+
+
+def register_callbacks(app):
+    """Register testing tab callbacks."""
+
+    for agent_key in AGENT_TESTS.keys():
+        @app.callback(
+            [
+                Output(f"result-{agent_key}", "children"),
+                Output(f"badge-{agent_key}", "children"),
+                Output(f"badge-{agent_key}", "color"),
+                Output(f"btn-details-{agent_key}", "disabled"),
+                Output("store-test-results", "data", allow_duplicate=True),
+            ],
+            Input(f"btn-test-{agent_key}", "n_clicks"),
+            State("store-test-results", "data"),
+            prevent_initial_call=True,
+        )
+        def _test_single_agent(n_clicks, test_results, _key=agent_key):
+            if not n_clicks:
+                return dash.no_update
+            success, message, details = test_agent(_key)
+            test_results = test_results or {}
+            test_results[_key] = {
+                "success": success,
+                "message": message,
+                "details": details,
+                "timestamp": datetime.now().isoformat(),
+            }
+            result_display = format_test_result(success, message, details)
+            badge_text = "✅ Pass" if success else "❌ Fail"
+            badge_color = "success" if success else "danger"
+            details_disabled = not bool(details.get("traceback"))
+            return result_display, badge_text, badge_color, details_disabled, test_results
+
+    @app.callback(
+        [
+            Output("store-test-results", "data", allow_duplicate=True),
+            Output("test-summary", "children"),
+        ],
+        Input("btn-test-all", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def _test_all_agents(n_clicks):
+        if not n_clicks:
+            return dash.no_update
+        test_results = {}
+        for k in AGENT_TESTS.keys():
+            success, message, details = test_agent(k)
+            test_results[k] = {
+                "success": success,
+                "message": message,
+                "details": details,
+                "timestamp": datetime.now().isoformat(),
+            }
+        return test_results, get_test_summary(test_results)
+
+    @app.callback(
+        Output("test-summary", "children", allow_duplicate=True),
+        Input("store-test-results", "data"),
+        prevent_initial_call=True,
+    )
+    def _update_test_summary(test_results):
+        return get_test_summary(test_results)
+
+    @app.callback(
+        Output("store-test-results", "data", allow_duplicate=True),
+        Input("btn-reset-tests", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def _reset_tests(n_clicks):
+        if not n_clicks:
+            return dash.no_update
+        return {}
+
+    for agent_key in AGENT_TESTS.keys():
+        @app.callback(
+            [
+                Output(f"badge-{agent_key}", "children", allow_duplicate=True),
+                Output(f"badge-{agent_key}", "color", allow_duplicate=True),
+                Output(f"result-{agent_key}", "children", allow_duplicate=True),
+                Output(f"btn-details-{agent_key}", "disabled", allow_duplicate=True),
+            ],
+            Input("store-test-results", "data"),
+            prevent_initial_call=True,
+        )
+        def _update_agent_status_from_store(test_results, _key=agent_key):
+            if not test_results or _key not in test_results:
+                return "", "secondary", "", True
+            r = test_results[_key]
+            success = r.get("success", False)
+            message = r.get("message", "")
+            details = r.get("details", {})
+            badge_text = "✅ Pass" if success else "❌ Fail"
+            badge_color = "success" if success else "danger"
+            result_display = format_test_result(success, message, details)
+            details_disabled = not bool(details.get("traceback"))
+            return badge_text, badge_color, result_display, details_disabled
+
+    for agent_key in AGENT_TESTS.keys():
+        @app.callback(
+            [
+                Output("error-modal", "is_open", allow_duplicate=True),
+                Output("error-detail-content", "children", allow_duplicate=True),
+            ],
+            Input(f"btn-details-{agent_key}", "n_clicks"),
+            State("store-test-results", "data"),
+            prevent_initial_call=True,
+        )
+        def _show_error_details(n_clicks, test_results, _key=agent_key):
+            if not n_clicks or not test_results or _key not in test_results:
+                return False, ""
+            r = test_results[_key]
+            details = r.get("details", {})
+            meta = AGENT_TESTS[_key]
+            parts = [
+                html.H5(f"Agent {meta['id']}: {meta['name']}"),
+                html.Hr(),
+                html.H6("Error Message:"),
+                html.Pre(r.get("message", "No message"), className="bg-dark p-3 text-light"),
+                html.H6("Details:", className="mt-3"),
+                html.Pre(details.get("error", "No details"), className="bg-dark p-3 text-light"),
+            ]
+            if details.get("traceback"):
+                parts.append(html.H6("Traceback:", className="mt-3"))
+                parts.append(html.Pre(details.get("traceback", ""), className="bg-dark p-3 text-light", style={"fontSize": "11px"}))
+            content = html.Div(parts)
+            return True, content
+
+    @app.callback(
+        Output("error-modal", "is_open", allow_duplicate=True),
+        Input("close-error-modal", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def _close_error_modal(n_clicks):
+        return False
