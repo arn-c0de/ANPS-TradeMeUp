@@ -17,11 +17,19 @@ from dash.exceptions import PreventUpdate
 from sqlalchemy.orm import Session
 
 from src.models.database import engine as _engine
-from src.gui.tabs import charts as charts_tab
-from src.gui.charts.fullscreen_manager import get_fullscreen_state, get_container_classname
-from src.gui.charts.overlay_utils import normalize_overlay_store, save_overlays_to_db, ensure_overlay_tab
-from src.gui.charts.chart_utils import find_index_binary
-from src.gui.charts.chart_data_manager import get_chart_data_manager
+from src.gui.tabs.charts.components import (
+    get_stock_chart_components,
+    create_trading_overlay,
+    render_multi_panel_layout
+)
+from src.gui.tabs.charts.market_data import MarketDataProvider
+from src.gui.tabs.charts.fullscreen_manager import get_fullscreen_state, get_container_classname
+from src.gui.tabs.charts.overlay_utils import normalize_overlay_store, save_overlays_to_db, ensure_overlay_tab
+from src.gui.tabs.charts.chart_utils import find_index_binary
+from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager
+
+# Initialize market data provider
+market_data = MarketDataProvider()
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +45,6 @@ def register_charts_extended(app):
     def update_price_cache(n_intervals, tabs_data):
         """Update price cache in background (non-blocking for UI)"""
         import concurrent.futures
-        from src.gui.charts.market_data import market_data
 
         tabs = tabs_data.get('tabs', [])
         if not tabs:
@@ -250,7 +257,7 @@ def register_charts_extended(app):
                 # Get current price for this symbol
                 current_price = None
                 try:
-                    df = charts_tab.market_data.get_historical_data(symbol, period='1d')
+                    df = market_data.get_historical_data(symbol, period='1d')
                     if df is not None and not df.empty:
                         current_price = df['Close'].iloc[-1]
                 except:
@@ -1202,7 +1209,7 @@ def register_charts_extended(app):
             tabs_data["active_tab"] = tab_id
             return tabs_data
 
-        from src.gui.charts.market_data import market_data
+        from src.gui.tabs.charts.market_data import market_data
 
         def fetch_df(symbol, timeframe):
             if timeframe == "1d_1m":
@@ -1475,7 +1482,7 @@ def register_charts_extended(app):
                 tab_loaded = loaded_data_store.get('tabs', {}).get(tab['id'])
                 if tab_loaded:
                     # Get cached data from ChartDataManager
-                    from src.gui.charts.chart_data_manager import get_chart_data_manager
+                    from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager
                     data_manager = get_chart_data_manager()
                     loaded_data = data_manager.get_cached_data(tab['symbol'], tab['timeframe'])
 
@@ -1501,7 +1508,7 @@ def register_charts_extended(app):
                         else:
                             logger.debug(f"[Infinite Scroll] Offset too old ({time_since_offset:.2f}s), skipping adjustment")
 
-            chart_component, stats_data = charts_tab.get_stock_chart_components(
+            chart_component, stats_data = get_stock_chart_components(
                 tab['symbol'],
                 tab['timeframe'],
                 tab['chart_type'],
@@ -1519,7 +1526,7 @@ def register_charts_extended(app):
                 [chart_component],
                 style={'height': '100%', 'display': 'flex', 'flexDirection': 'column'}
             )
-            trading_overlay = charts_tab.create_trading_overlay(stats_data, show_overlay, panel_id=tab['id']) if show_overlay else None
+            trading_overlay = create_trading_overlay(stats_data, show_overlay, panel_id=tab['id']) if show_overlay else None
 
             panel_content = html.Div(
                 ([trading_overlay] if trading_overlay else []) + [chart_div],
@@ -1913,7 +1920,7 @@ def register_charts_extended(app):
                 panel_config['auto_scroll'] = panel_config.get('timeframe', '1mo') in ['1d_1m', '5d_5m']
 
         try:
-            chart_layout = charts_tab.render_multi_panel_layout(layout, panels, is_fullscreen, overlays_data, view_state_data, loaded_data_store)
+            chart_layout = render_multi_panel_layout(layout, panels, is_fullscreen, overlays_data, view_state_data, loaded_data_store)
             return chart_layout
         except Exception as e:
             logger.error(f"Error rendering chart panels: {e}", exc_info=True)
@@ -2160,7 +2167,7 @@ def register_charts_extended(app):
             ]), []
 
         try:
-            from src.gui.charts.market_data import market_data
+            from src.gui.tabs.charts.market_data import market_data
             results = market_data.search_symbols(query, limit=8)
 
             if not results:
@@ -2318,4 +2325,6 @@ def register_charts_extended(app):
         timeframe = panel_config.get('timeframe', '1mo')
         chart_type = panel_config.get('chart_type', 'candlestick')
 
-        return charts_tab.get_stock_chart(symbol, timeframe, chart_type)
+        # Use get_stock_chart_with_stats instead (get_stock_chart doesn't exist)
+        from src.gui.tabs.charts.components import get_stock_chart_with_stats
+        return get_stock_chart_with_stats(symbol, timeframe, chart_type)
