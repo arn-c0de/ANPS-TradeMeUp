@@ -1,0 +1,417 @@
+/* TradeMeUp Dashboard - Dark theme (from index_string) */
+
+/* Dark theme for Dash dropdowns */
+.Select-control, .Select-menu-outer, .Select-menu {
+    background-color: #060606 !important;
+    border-color: #444 !important;
+}
+.Select-control:hover {
+    border-color: #888 !important;
+}
+.Select-value-label, .Select-placeholder, .Select-input > input {
+    color: #fff !important;
+}
+.Select-option {
+    background-color: #060606 !important;
+    color: #fff !important;
+}
+.Select-option:hover, .Select-option.is-focused {
+    background-color: #2a2a2a !important;
+}
+.Select-option.is-selected {
+    background-color: #0d6efd !important;
+}
+.Select-multi-value-wrapper {
+    color: #fff !important;
+}
+
+/* Dark theme for date pickers */
+.DateInput_input, .DateRangePickerInput {
+    background-color: #060606 !important;
+    color: #fff !important;
+    border-color: #444 !important;
+}
+.DateInput_input::placeholder {
+    color: #888 !important;
+}
+.CalendarDay__default {
+    background-color: #1a1a1a !important;
+    color: #fff !important;
+    border-color: #333 !important;
+}
+.CalendarDay__default:hover {
+    background-color: #2a2a2a !important;
+}
+.CalendarDay__selected {
+    background-color: #0d6efd !important;
+    color: #fff !important;
+}
+.DayPicker, .DayPickerNavigation_button {
+    background-color: #0a0a0a !important;
+}
+.CalendarMonth_caption {
+    color: #fff !important;
+}
+
+/* Dark theme for Bootstrap cards and card bodies */
+.card {
+    background-color: #0a0a0a !important;
+    border-color: #222 !important;
+}
+.card-body {
+    background-color: #0a0a0a !important;
+    color: #e0e0e0 !important;
+}
+.card-header {
+    background-color: #060606 !important;
+    border-bottom-color: #222 !important;
+    color: #fff !important;
+}
+
+/* Force dark background on Bootstrap containers, rows, cols */
+.container, .container-fluid, .row, .col, [class*="col-"] {
+    background-color: transparent !important;
+}
+
+/* Force dark on all divs */
+div {
+    background-color: transparent !important;
+}
+
+/* Override any white/light backgrounds */
+* {
+    background-color: inherit !important;
+}
+
+/* But enforce dark on main containers */
+body, html, #react-entry-point, #_dash-app-content {
+    background-color: #060606 !important;
+    color: #e0e0e0 !important;
+}
+
+/* Main layout – root uses bg-dark + min-vh-100 */
+.bg-dark {
+    background-color: #060606 !important;
+}
+.min-vh-100 {
+    background-color: #060606 !important;
+}
+
+/* Dark theme for news cards */
+.news-card-compact .card-body {
+    background-color: #0a0a0a !important;
+    border: 1px solid #222 !important;
+}
+.news-card-compact:hover .card-body {
+    background-color: #1a1a1a !important;
+    border-color: #444 !important;
+}
+.news-title {
+    color: #e0e0e0 !important;
+    font-weight: 500;
+}
+.news-title:hover {
+    color: #0d6efd !important;
+}
+
+/* Dark theme for tables */
+.table-dark {
+    background-color: #0a0a0a !important;
+    color: #e0e0e0 !important;
+}
+.table-dark thead th {
+    background-color: #060606 !important;
+    border-color: #222 !important;
+    color: #fff !important;
+}
+.table-dark tbody tr {
+    background-color: #0a0a0a !important;
+    border-color: #222 !important;
+}
+.table-dark tbody tr:hover {
+    background-color: #1a1a1a !important;
+}
+.table-dark td, .table-dark th {
+    border-color: #222 !important;
+    color: #e0e0e0 !important;
+}
+.table-dark a {
+    color: #6ea8fe !important;
+}
+.table-dark a:hover {
+    color: #0d6efd !important;
+}
+
+/* Override striped tables - force dark on ALL rows */
+.table-striped tbody tr,
+.table-striped tbody tr:nth-of-type(odd),
+.table-striped tbody tr:nth-of-type(even),
+.table-striped.table-dark tbody tr,
+.table-striped.table-dark tbody tr:nth-of-type(odd),
+.table-striped.table-dark tbody tr:nth-of-type(even) {
+    background-color: #0a0a0a !important;
+}
+
+/* COMPLETELY DISABLE hover effect on predictions table */
+.predictions-table-no-hover tbody tr:hover,
+.predictions-table-no-hover.table-striped tbody tr:hover,
+.predictions-table-no-hover.table-dark tbody tr:hover,
+.predictions-table-no-hover.table-striped.table-dark tbody tr:hover {
+    background-color: #0a0a0a !important;
+    cursor: default !important;
+}
+
+/* Keep hover for other tables */
+.table-striped tbody tr:hover:not(.predictions-table-no-hover tbody tr),
+.table-striped.table-dark tbody tr:hover:not(.predictions-table-no-hover tbody tr) {
+    background-color: #0a0a0a !important;
+}
+
+/* Force all table cells dark - ULTRA AGGRESSIVE */
+table tbody tr td,
+table tbody tr th,
+.table tbody tr td,
+.table tbody tr th,
+.table-dark tbody tr td,
+.table-dark tbody tr th,
+.table.table-striped tbody tr td,
+.table.table-striped tbody tr th,
+.table-dark.table-striped tbody tr td,
+.table-dark.table-striped tbody tr th,
+.table.table-striped.table-dark tbody tr td,
+.table.table-striped.table-dark tbody tr th {
+    background-color: #0a0a0a !important;
+    color: #e0e0e0 !important;
+}
+
+/* Remove any rgba backgrounds */
+.table-striped > tbody > tr:nth-of-type(2n+1) > *,
+.table-striped tbody tr:nth-of-type(2n+1) td,
+.table-striped tbody tr:nth-of-type(2n+1) th {
+    background-color: #0a0a0a !important;
+    --bs-table-striped-bg: #0a0a0a !important;
+    --bs-table-bg: #0a0a0a !important;
+}
+
+/* Force dark background on all divs inside cards */
+.card-body > div {
+    background-color: transparent !important;
+}
+
+/* Dark theme for alerts */
+.alert {
+    background-color: #1a1a1a !important;
+    border-color: #333 !important;
+    color: #e0e0e0 !important;
+}
+.alert-info {
+    background-color: #0c3c56 !important;
+    border-color: #0a5a7a !important;
+}
+.alert-warning {
+    background-color: #665200 !important;
+    border-color: #997a00 !important;
+}
+.alert-danger {
+    background-color: #661a1a !important;
+    border-color: #992626 !important;
+}
+
+/* Dark theme for input fields */
+input[type="text"], textarea {
+    background-color: #060606 !important;
+    color: #fff !important;
+    border-color: #444 !important;
+}
+input[type="text"]::placeholder, textarea::placeholder {
+    color: #888 !important;
+}
+input[type="text"]:focus, textarea:focus {
+    background-color: #0a0a0a !important;
+    border-color: #0d6efd !important;
+    color: #fff !important;
+}
+
+/* Ensure all text is light colored */
+body, .container, .container-fluid, div, p, span, small {
+    color: #e0e0e0 !important;
+}
+
+/* Dark scrollbar */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+::-webkit-scrollbar-track {
+    background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Mobile-friendly touch buttons */
+.touch-button {
+    -webkit-tap-highlight-color: rgba(102, 126, 234, 0.3) !important;
+    tap-highlight-color: rgba(102, 126, 234, 0.3) !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+    cursor: pointer !important;
+    position: relative !important;
+    z-index: 100 !important;
+    touch-action: manipulation !important;
+}
+.touch-button:active {
+    transform: scale(0.95);
+    background-color: rgba(102, 126, 234, 0.3) !important;
+    transition: transform 0.1s ease, background-color 0.1s ease;
+}
+
+.predictions-table-no-hover tbody tr td button {
+    isolation: isolate;
+}
+
+@media (max-width: 768px) {
+    .touch-button {
+        min-width: 48px !important;
+        min-height: 48px !important;
+        padding: 10px 14px !important;
+        font-size: 14px !important;
+    }
+}
+@media (min-width: 769px) and (max-width: 1024px) {
+    .touch-button {
+        min-width: 52px !important;
+        min-height: 52px !important;
+        padding: 12px 16px !important;
+        font-size: 15px !important;
+    }
+}
+
+/* Quad panel styling */
+.quad-panel-hover {
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.quad-panel-hover:hover {
+    box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5) !important;
+    border-color: rgba(102, 126, 234, 0.9) !important;
+}
+.quad-panel-hover:hover .position-absolute {
+    opacity: 1 !important;
+    transform: scale(1.05);
+    background-color: rgba(40,40,40,0.95) !important;
+}
+.panel-focused {
+    border: 3px solid rgba(102, 126, 234, 0.9) !important;
+    box-shadow: 0 0 20px rgba(102, 126, 234, 0.6) !important;
+}
+
+.panel-settings-modal {
+    z-index: 3003 !important;
+}
+.panel-settings-modal .modal-dialog {
+    z-index: 3004 !important;
+}
+.modal-backdrop.show {
+    z-index: 3002 !important;
+}
+
+/* Resizable chart splitters */
+.chart-splitter-horizontal {
+    height: 8px;
+    background: linear-gradient(to bottom, rgba(102, 126, 234, 0.2), rgba(102, 126, 234, 0.4), rgba(102, 126, 234, 0.2));
+    cursor: ns-resize;
+    position: relative;
+    z-index: 100;
+    transition: background 0.2s ease;
+}
+.chart-splitter-horizontal:hover {
+    background: linear-gradient(to bottom, rgba(102, 126, 234, 0.4), rgba(102, 126, 234, 0.7), rgba(102, 126, 234, 0.4));
+}
+.chart-splitter-horizontal:active {
+    background: rgba(102, 126, 234, 0.8);
+}
+.chart-splitter-vertical {
+    width: 8px;
+    background: linear-gradient(to right, rgba(102, 126, 234, 0.2), rgba(102, 126, 234, 0.4), rgba(102, 126, 234, 0.2));
+    cursor: ew-resize;
+    position: relative;
+    z-index: 100;
+    transition: background 0.2s ease;
+    display: inline-block;
+    height: 100%;
+}
+.chart-splitter-vertical:hover {
+    background: linear-gradient(to right, rgba(102, 126, 234, 0.4), rgba(102, 126, 234, 0.7), rgba(102, 126, 234, 0.4));
+}
+.chart-splitter-vertical:active {
+    background: rgba(102, 126, 234, 0.8);
+}
+.resizable-panel {
+    position: relative;
+    overflow: hidden;
+}
+
+.chart-container-normal {
+    position: relative;
+    width: 100%;
+}
+.chart-container-fullscreen {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 3000 !important;
+    background-color: #060606 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 5px 10px !important;
+    box-sizing: border-box !important;
+}
+.chart-container-fullscreen .card {
+    margin-bottom: 5px !important;
+    overflow: hidden !important;
+}
+.chart-container-fullscreen .card-body {
+    overflow: hidden !important;
+}
+.chart-container-fullscreen .h-100 {
+    height: 100% !important;
+    max-height: 100% !important;
+}
+.chart-container-fullscreen .js-plotly-plot,
+.chart-container-fullscreen .plotly,
+.chart-container-fullscreen .plotly .main-svg {
+    height: 100% !important;
+    max-height: 100% !important;
+    width: 100% !important;
+}
+.chart-container-fullscreen .dash-graph,
+._dash-loading-callback {
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+.chart-container-fullscreen [id^="chart-content"] > div {
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+.chart-container-fullscreen .mb-3 {
+    margin-bottom: 10px !important;
+}
+.chart-container-fullscreen .mb-2 {
+    margin-bottom: 10px !important;
+}
+.chart-container-fullscreen .row:last-child {
+    margin-bottom: 0 !important;
+}
+.chart-container-fullscreen .row:last-child .col {
+    margin-bottom: 0 !important;
+}

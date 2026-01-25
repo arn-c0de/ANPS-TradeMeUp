@@ -2,9 +2,44 @@
 Settings Tab - System Configuration and Database Management
 """
 
-from dash import dcc, html
-import dash_bootstrap_components as dbc
 from datetime import datetime, timedelta
+from pathlib import Path
+
+import dash
+import dash_bootstrap_components as dbc
+from dash import Input, Output, State, dcc, html
+from sqlalchemy.orm import Session
+
+from src.config.settings import settings as _settings
+from src.models.database import engine as _engine
+from src.models.raw_news import RawNews
+from src.models.processed_news import ProcessedNews
+from src.models.predictions import Prediction
+from src.models.entities import Entity, NewsEntityMapping
+from src.models.analysis import ImpactScore
+from src.models.data_quality import DataQualityScore
+from src.utils.activity_logger import activity_logger
+
+LLM_MODELS = {
+    "ollama": [
+        {"label": "Qwen 3 (8B) - Fast", "value": "qwen3:8b"},
+        {"label": "Llama 3.1 (8B)", "value": "llama3.1:8b"},
+        {"label": "Mistral (7B)", "value": "mistral:7b"},
+        {"label": "Gemma 2 (9B)", "value": "gemma2:9b"},
+        {"label": "Phi-3 (3.8B) - Lightweight", "value": "phi3"},
+    ],
+    "openai": [
+        {"label": "GPT-4o-mini (Recommended)", "value": "gpt-4o-mini"},
+        {"label": "GPT-3.5-turbo", "value": "gpt-3.5-turbo"},
+        {"label": "GPT-4o", "value": "gpt-4o"},
+        {"label": "GPT-4-turbo", "value": "gpt-4-turbo"},
+    ],
+    "anthropic": [
+        {"label": "Claude 3.5 Sonnet (Best)", "value": "claude-3-5-sonnet-20241022"},
+        {"label": "Claude 3 Haiku (Fast)", "value": "claude-3-haiku-20240307"},
+        {"label": "Claude 3 Opus (Powerful)", "value": "claude-3-opus-20240229"},
+    ],
+}
 
 
 def _section_header(title: str, icon: str):
@@ -237,3 +272,346 @@ def create_layout():
             ])
         ], id="confirm-modal", is_open=False, backdrop="static", className="rounded-3"),
     ], fluid=True)
+
+
+def _env_local_path():
+    return Path(__file__).resolve().parents[3] / ".env.local"
+
+
+def register_callbacks(app):
+    """Register settings tab callbacks."""
+
+    @app.callback(
+        Output("settings-llm-provider", "value"),
+        Input("tabs", "active_tab"),
+        prevent_initial_call=False,
+    )
+    def _load_current_llm_provider(active_tab):
+        try:
+            return _settings.llm_provider
+        except Exception:
+            return "ollama"
+
+    @app.callback(
+        [
+            Output("settings-llm-model", "options"),
+            Output("settings-llm-model", "value"),
+            Output("llm-provider-settings", "children"),
+            Output("llm-cost-info", "children"),
+        ],
+        Input("settings-llm-provider", "value"),
+        prevent_initial_call=False,
+    )
+    def _update_llm_model_options(provider):
+        if not provider:
+            return [], None, html.Div(), ""
+        try:
+            if provider == "ollama" and hasattr(_settings, "ollama_model"):
+                current_model = _settings.ollama_model
+            elif provider == "openai" and hasattr(_settings, "openai_model"):
+                current_model = _settings.openai_model
+            elif provider == "anthropic" and hasattr(_settings, "anthropic_model"):
+                current_model = _settings.anthropic_model
+            else:
+                current_model = None
+        except Exception:
+            current_model = None
+        models = LLM_MODELS.get(provider, [])
+        default_model = current_model or (models[0]["value"] if models else None)
+        if provider == "ollama":
+            provider_settings = html.Div([html.Small("API URL is configured in .env file", className="text-muted")])
+            cost_info = html.Div([
+                html.Strong("Local Ollama:"),
+                html.Ul([
+                    html.Li("Free (no API costs)"),
+                    html.Li("~30-60s per article"),
+                    html.Li("Requires local GPU (8GB+ VRAM recommended)"),
+                ]),
+            ])
+        elif provider == "openai":
+            provider_settings = html.Div([html.Small("API key in .env (OPENAI_API_KEY)", className="text-muted")])
+            cost_info = html.Div([
+                html.Strong("OpenAI Costs (GPT-4o-mini):"),
+                html.Ul([
+                    html.Li("~$0.0005 per article"),
+                    html.Li("~5-10s per article"),
+                    html.Li("No hardware required"),
+                ]),
+            ])
+        elif provider == "anthropic":
+            provider_settings = html.Div([html.Small("API key in .env (ANTHROPIC_API_KEY)", className="text-muted")])
+            cost_info = html.Div([
+                html.Strong("Anthropic Costs (Claude 3.5 Sonnet):"),
+                html.Ul([
+                    html.Li("~$0.003 per article"),
+                    html.Li("~5-10s per article"),
+                    html.Li("Best at complex reasoning"),
+                ]),
+            ])
+        else:
+            provider_settings = html.Div()
+            cost_info = ""
+        return models, default_model, provider_settings, cost_info
+
+    @app.callback(
+        Output("llm-settings-save-status", "children"),
+        Input("btn-save-llm-settings", "n_clicks"),
+        [State("settings-llm-provider", "value"), State("settings-llm-model", "value")],
+        prevent_initial_call=True,
+    )
+    def _save_llm_settings(n_clicks, provider, model):
+        if not n_clicks:
+            return ""
+        env_path = _env_local_path()
+        try:
+            lines = env_path.read_text().splitlines(keepends=True) if env_path.exists() else []
+            new_lines = []
+            updated_provider = updated_model = False
+            for line in lines:
+                if line.startswith("LLM_PROVIDER="):
+                    new_lines.append(f"LLM_PROVIDER={provider}\n")
+                    updated_provider = True
+                elif provider == "ollama" and line.startswith("OLLAMA_MODEL="):
+                    new_lines.append(f"OLLAMA_MODEL={model}\n")
+                    updated_model = True
+                elif provider == "openai" and line.startswith("OPENAI_MODEL="):
+                    new_lines.append(f"OPENAI_MODEL={model}\n")
+                    updated_model = True
+                elif provider == "anthropic" and line.startswith("ANTHROPIC_MODEL="):
+                    new_lines.append(f"ANTHROPIC_MODEL={model}\n")
+                    updated_model = True
+                else:
+                    new_lines.append(line)
+            if not updated_provider:
+                new_lines.append(f"LLM_PROVIDER={provider}\n")
+            if not updated_model:
+                key = {"ollama": "OLLAMA_MODEL", "openai": "OPENAI_MODEL", "anthropic": "ANTHROPIC_MODEL"}.get(provider)
+                if key:
+                    new_lines.append(f"{key}={model}\n")
+            env_path.write_text("".join(new_lines))
+            return dbc.Alert([
+                html.Strong("Settings saved!"),
+                html.Br(),
+                html.Small(f"Provider: {provider} | Model: {model}. Restart pipeline for changes."),
+            ], color="success", dismissable=True)
+        except Exception as e:
+            return dbc.Alert(f"Error saving settings: {str(e)}", color="danger", dismissable=True)
+
+    @app.callback(
+        [
+            Output("settings-enable-fact-checking", "value"),
+            Output("settings-enable-calibration", "value"),
+            Output("settings-enable-meta-strategy", "value"),
+            Output("settings-enable-scenarios", "value"),
+        ],
+        Input("tabs", "active_tab"),
+        prevent_initial_call=False,
+    )
+    def _load_pipeline_phase_settings(active_tab):
+        if active_tab != "settings":
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        try:
+            return (
+                _settings.enable_fact_checking,
+                _settings.enable_calibration,
+                _settings.enable_meta_strategy,
+                _settings.enable_scenarios,
+            )
+        except Exception:
+            return True, True, True, True
+
+    @app.callback(
+        Output("settings-save-status", "children"),
+        Input("btn-save-settings", "n_clicks"),
+        [
+            State("settings-interval", "value"),
+            State("settings-batch-size", "value"),
+            State("settings-enable-fact-checking", "value"),
+            State("settings-enable-calibration", "value"),
+            State("settings-enable-meta-strategy", "value"),
+            State("settings-enable-scenarios", "value"),
+        ],
+        prevent_initial_call=True,
+    )
+    def _save_pipeline_settings(n_clicks, interval, batch_size, enable_fact_checking, enable_calibration, enable_meta_strategy, enable_scenarios):
+        if not n_clicks:
+            return ""
+        env_path = _env_local_path()
+        try:
+            lines = env_path.read_text().splitlines(keepends=True) if env_path.exists() else []
+            new_lines = []
+            updated = {"ENABLE_FACT_CHECKING": False, "ENABLE_CALIBRATION": False, "ENABLE_META_STRATEGY": False, "ENABLE_SCENARIOS": False}
+            for line in lines:
+                if line.startswith("ENABLE_FACT_CHECKING="):
+                    new_lines.append(f"ENABLE_FACT_CHECKING={str(enable_fact_checking).lower()}\n")
+                    updated["ENABLE_FACT_CHECKING"] = True
+                elif line.startswith("ENABLE_CALIBRATION="):
+                    new_lines.append(f"ENABLE_CALIBRATION={str(enable_calibration).lower()}\n")
+                    updated["ENABLE_CALIBRATION"] = True
+                elif line.startswith("ENABLE_META_STRATEGY="):
+                    new_lines.append(f"ENABLE_META_STRATEGY={str(enable_meta_strategy).lower()}\n")
+                    updated["ENABLE_META_STRATEGY"] = True
+                elif line.startswith("ENABLE_SCENARIOS="):
+                    new_lines.append(f"ENABLE_SCENARIOS={str(enable_scenarios).lower()}\n")
+                    updated["ENABLE_SCENARIOS"] = True
+                else:
+                    new_lines.append(line)
+            if not updated["ENABLE_FACT_CHECKING"]:
+                new_lines.append(f"ENABLE_FACT_CHECKING={str(enable_fact_checking).lower()}\n")
+            if not updated["ENABLE_CALIBRATION"]:
+                new_lines.append(f"ENABLE_CALIBRATION={str(enable_calibration).lower()}\n")
+            if not updated["ENABLE_META_STRATEGY"]:
+                new_lines.append(f"ENABLE_META_STRATEGY={str(enable_meta_strategy).lower()}\n")
+            if not updated["ENABLE_SCENARIOS"]:
+                new_lines.append(f"ENABLE_SCENARIOS={str(enable_scenarios).lower()}\n")
+            env_path.write_text("".join(new_lines))
+            return dbc.Alert([html.Strong("Settings saved!"), html.Br(), html.Small("Restart pipeline for changes.")], color="success", dismissable=True)
+        except Exception as e:
+            return dbc.Alert(f"Error saving settings: {str(e)}", color="danger", dismissable=True)
+
+    @app.callback(
+        Output("tabs", "active_tab", allow_duplicate=True),
+        Input("btn-open-settings", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def _open_settings(n_clicks):
+        if n_clicks:
+            return "settings"
+        return dash.no_update
+
+    @app.callback(
+        Output("settings-news-custom-dates", "disabled"),
+        Input("settings-news-timerange", "value"),
+    )
+    def _toggle_custom_dates(timerange):
+        return timerange != "custom"
+
+    @app.callback(
+        [Output("confirm-modal", "is_open"), Output("confirm-modal-body", "children"), Output("delete-action-store", "data")],
+        [
+            Input("btn-clear-news", "n_clicks"),
+            Input("btn-clear-predictions", "n_clicks"),
+            Input("btn-clear-all", "n_clicks"),
+            Input("btn-confirm-cancel", "n_clicks"),
+            Input("btn-confirm-delete", "n_clicks"),
+        ],
+        [
+            State("settings-news-timerange", "value"),
+            State("settings-news-custom-dates", "start_date"),
+            State("settings-news-custom-dates", "end_date"),
+            State("settings-pred-timerange", "value"),
+            State("delete-action-store", "data"),
+            State("confirm-modal", "is_open"),
+        ],
+        prevent_initial_call=True,
+    )
+    def _handle_delete_confirmation(clear_news, clear_pred, clear_all, cancel, confirm, news_range, custom_start, custom_end, pred_range, action_store, modal_open):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return dash.no_update
+        bid = ctx.triggered[0]["prop_id"].split(".")[0]
+        if bid == "btn-clear-news":
+            timerange_text = {"all": "ALL NEWS ARTICLES", "1d": "news from last 24 hours", "7d": "last 7 days", "30d": "last 30 days", "90d": "last 90 days", "custom": f"news from {custom_start} to {custom_end}"}.get(news_range, "selected news")
+            return True, html.Div([
+                html.H5("Delete News Articles", className="text-danger mb-3"),
+                html.P(f"You are about to delete: {timerange_text}"),
+                html.P("This action cannot be undone!", className="fw-bold text-warning"),
+            ]), {"action": "clear_news", "params": {"range": news_range, "start": custom_start, "end": custom_end}}
+        if bid == "btn-clear-predictions":
+            timerange_text = {"all": "ALL PREDICTIONS", "1d": "last 24 hours", "7d": "last 7 days", "30d": "last 30 days"}.get(pred_range, "selected")
+            return True, html.Div([
+                html.H5("Delete Predictions", className="text-danger mb-3"),
+                html.P(f"You are about to delete: {timerange_text}"),
+                html.P("This action cannot be undone!", className="fw-bold text-warning"),
+            ]), {"action": "clear_predictions", "params": {"range": pred_range}}
+        if bid == "btn-clear-all":
+            return True, html.Div([
+                html.H5("NUCLEAR OPTION", className="text-danger mb-3"),
+                html.P("Delete EVERYTHING from the database.", className="fw-bold"),
+                html.Ul([html.Li("All news"), html.Li("All predictions"), html.Li("All entities/mappings"), html.Li("All impact/quality data")]),
+                html.P("THIS ACTION CANNOT BE UNDONE!", className="fw-bold text-danger fs-5"),
+            ]), {"action": "clear_all", "params": {}}
+        if bid == "btn-confirm-cancel":
+            return False, "", {"action": None, "params": None}
+        if bid == "btn-confirm-delete":
+            return False, "", action_store
+        return dash.no_update
+
+    @app.callback(
+        [Output("news-clear-status", "children"), Output("pred-clear-status", "children"), Output("all-clear-status", "children")],
+        Input("btn-confirm-delete", "n_clicks"),
+        State("delete-action-store", "data"),
+        prevent_initial_call=True,
+    )
+    def _execute_delete_action(n_clicks, action_data):
+        if not n_clicks or not action_data or not action_data.get("action"):
+            return dash.no_update
+        action = action_data["action"]
+        params = action_data.get("params", {})
+        news_msg = pred_msg = all_msg = dash.no_update
+        try:
+            with Session(_engine) as db:
+                if action == "clear_news":
+                    time_range = params.get("range")
+                    cutoff_date = None
+                    if time_range == "1d":
+                        cutoff_date = datetime.now() - timedelta(days=1)
+                    elif time_range == "7d":
+                        cutoff_date = datetime.now() - timedelta(days=7)
+                    elif time_range == "30d":
+                        cutoff_date = datetime.now() - timedelta(days=30)
+                    elif time_range == "90d":
+                        cutoff_date = datetime.now() - timedelta(days=90)
+                    elif time_range == "custom" and params.get("start"):
+                        cutoff_date = datetime.fromisoformat(params["start"])
+                    if time_range == "all":
+                        count_raw = db.query(RawNews).delete()
+                        count_processed = db.query(ProcessedNews).delete()
+                    elif cutoff_date:
+                        count_raw = db.query(RawNews).filter(RawNews.created_at >= cutoff_date).delete()
+                        count_processed = db.query(ProcessedNews).filter(ProcessedNews.created_at >= cutoff_date).delete()
+                    else:
+                        count_raw = count_processed = 0
+                    db.commit()
+                    activity_logger.log_activity(f"Deleted {count_raw + count_processed} news articles", "INFO")
+                    news_msg = dbc.Alert(f"Successfully deleted {count_raw + count_processed} news articles", color="success", dismissable=True)
+                elif action == "clear_predictions":
+                    time_range = params.get("range")
+                    cutoff_date = None
+                    if time_range == "1d":
+                        cutoff_date = datetime.now() - timedelta(days=1)
+                    elif time_range == "7d":
+                        cutoff_date = datetime.now() - timedelta(days=7)
+                    elif time_range == "30d":
+                        cutoff_date = datetime.now() - timedelta(days=30)
+                    if time_range == "all":
+                        count = db.query(Prediction).delete()
+                    elif cutoff_date:
+                        count = db.query(Prediction).filter(Prediction.created_at >= cutoff_date).delete()
+                    else:
+                        count = 0
+                    db.commit()
+                    activity_logger.log_activity(f"Deleted {count} predictions", "INFO")
+                    pred_msg = dbc.Alert(f"Successfully deleted {count} predictions", color="success", dismissable=True)
+                elif action == "clear_all":
+                    db.query(Prediction).delete()
+                    db.query(ImpactScore).delete()
+                    db.query(NewsEntityMapping).delete()
+                    db.query(Entity).delete()
+                    db.query(DataQualityScore).delete()
+                    db.query(ProcessedNews).delete()
+                    db.query(RawNews).delete()
+                    db.commit()
+                    activity_logger.log_activity("DATABASE CLEARED - All data deleted", "WARNING")
+                    all_msg = dbc.Alert("Database cleared! All data has been deleted.", color="danger", dismissable=True)
+            return news_msg, pred_msg, all_msg
+        except Exception as e:
+            import traceback
+            activity_logger.log_activity(f"Error deleting data ({action}): {str(e)}", "ERROR")
+            activity_logger.log_activity(traceback.format_exc(), "ERROR")
+            err = dbc.Alert([html.H5("Delete failed"), html.P(str(e)), html.Small("Check logs for details.")], color="danger", dismissable=True)
+            if action == "clear_news":
+                return err, dash.no_update, dash.no_update
+            if action == "clear_predictions":
+                return dash.no_update, err, dash.no_update
+            return dash.no_update, dash.no_update, err

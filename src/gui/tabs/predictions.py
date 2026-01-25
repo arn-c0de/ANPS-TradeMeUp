@@ -2,13 +2,17 @@
 Predictions Tab - View and Filter Predictions
 """
 
-from dash import dcc, html, dash_table
-import dash_bootstrap_components as dbc
-from datetime import datetime, timedelta
-from sqlalchemy import desc
-from sqlalchemy.orm import Session, joinedload
 import json
 import logging
+import uuid
+from datetime import datetime, timedelta
+
+import dash
+from dash import ALL, Input, Output, State, dcc, html, dash_table
+from dash.exceptions import PreventUpdate
+import dash_bootstrap_components as dbc
+from sqlalchemy import desc
+from sqlalchemy.orm import Session, joinedload
 
 from src.models.predictions import Prediction, PredictionOutcome
 from src.models.trading_simulation import TradingSimulation
@@ -16,7 +20,10 @@ from src.models.entities import Entity
 from src.models.raw_news import RawNews
 from src.models.processed_news import ProcessedNews
 from src.models.analysis import ImpactScore, SurpriseScore, FactVerification
+from src.models.database import engine as _engine
 from src.services.prediction_performance_service import prediction_performance_service
+from src.gui.utils.callbacks import safe_callback
+from src.gui.utils.task_queue import get_task_queue, add_gui_task
 
 logger = logging.getLogger(__name__)
 
@@ -1062,3 +1069,248 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
 
     except Exception as e:
         return "Error", dbc.Alert(f"Error loading prediction details: {str(e)}", color="danger")
+
+
+def register_callbacks(app):
+    """Register predictions tab callbacks."""
+
+    @app.callback(
+        Output("pred-entity-filter", "options"),
+        Input("interval-component", "n_intervals")
+    )
+    @safe_callback(default_return=[])
+    def update_entity_filter_options(n):
+        """Update entity filter dropdown options"""
+        return get_entity_options(_engine)
+
+    @app.callback(
+        Output("predictions-table", "children"),
+        [Input("pred-entity-filter", "value"),
+         Input("pred-date-filter", "start_date"),
+         Input("pred-date-filter", "end_date"),
+         Input("pred-horizon-filter", "value"),
+         Input("pred-surprise-filter", "value"),
+         Input("pred-confidence-filter", "value"),
+         Input("refresh-loading-state", "data")]
+    )
+    def update_predictions_table(entities, start_date, end_date, horizon, surprise_filter, min_conf, loading_state):
+        """Update predictions table with filters (removed interval for performance)"""
+        date_range = (start_date, end_date) if start_date or end_date else None
+        refreshing_id = loading_state.get("prediction_id") if loading_state else None
+        return get_predictions_table(
+            _engine,
+            entity_filter=entities,
+            date_range=date_range,
+            min_confidence=min_conf or 0,
+            horizon=horizon or '5d',
+            surprise_filter=surprise_filter or 'all',
+            refreshing_prediction_id=refreshing_id
+        )
+
+    @app.callback(
+        [Output("prediction-modal", "is_open"),
+         Output("prediction-detail-cache", "data"),
+         Output("current-prediction-id", "data")],
+        [Input({"type": "pred-detail-btn", "index": ALL}, "n_clicks"),
+         Input({"type": "sim-detail-btn", "index": ALL}, "n_clicks"),
+         Input("close-prediction-modal", "n_clicks"),
+         Input("refresh-prediction-detail", "n_clicks")],
+        [State("prediction-modal", "is_open"),
+         State({"type": "pred-detail-btn", "index": ALL}, "id"),
+         State({"type": "sim-detail-btn", "index": ALL}, "id"),
+         State("prediction-detail-cache", "data"),
+         State("current-prediction-id", "data")],
+        prevent_initial_call=True
+    )
+    def toggle_prediction_modal(detail_clicks, sim_detail_clicks, close_click, refresh_click, is_open, button_ids, sim_button_ids, cached_data, current_pred_id):
+        """Open/close prediction detail modal and cache prediction_id"""
+        from dash import callback_context
+        if not callback_context.triggered:
+            return dash.no_update, dash.no_update, dash.no_update
+        trigger_id = callback_context.triggered[0]["prop_id"]
+        trigger_value = callback_context.triggered[0].get("value")
+        if trigger_value is None or trigger_value == 0:
+            return dash.no_update, dash.no_update, dash.no_update
+        if "close-prediction-modal" in trigger_id:
+            return False, dash.no_update, dash.no_update
+        if "refresh-prediction-detail" in trigger_id and current_pred_id:
+            return True, {"prediction_id": current_pred_id, "load_performance": True}, current_pred_id
+        if "pred-detail-btn" in trigger_id and ".n_clicks" in trigger_id:
+            id_str = trigger_id.split('.')[0]
+            id_dict = json.loads(id_str)
+            prediction_id = id_dict.get("index")
+            if prediction_id:
+                return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id
+        if "sim-detail-btn" in trigger_id and ".n_clicks" in trigger_id:
+            id_str = trigger_id.split('.')[0]
+            id_dict = json.loads(id_str)
+            prediction_id = id_dict.get("index")
+            if prediction_id:
+                return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id
+        return dash.no_update, dash.no_update, dash.no_update
+
+    @app.callback(
+        [Output("refresh-loading-state", "data"),
+         Output("predictions-table", "children", allow_duplicate=True),
+         Output("refresh-toast", "is_open", allow_duplicate=True),
+         Output("refresh-toast", "children", allow_duplicate=True),
+         Output("refresh-toast", "icon", allow_duplicate=True)],
+        [Input({"type": "pred-refresh-btn", "index": ALL}, "n_clicks")],
+        [State({"type": "pred-refresh-btn", "index": ALL}, "id"),
+         State("pred-horizon-filter", "value"),
+         State("pred-entity-filter", "value"),
+         State("pred-date-filter", "start_date"),
+         State("pred-date-filter", "end_date"),
+         State("pred-surprise-filter", "value"),
+         State("pred-confidence-filter", "value")],
+        prevent_initial_call=True
+    )
+    def set_refresh_loading_state(refresh_clicks, button_ids, horizon, entities, start_date, end_date, surprise_filter, min_conf):
+        """Add refresh task to queue and show loading UI immediately"""
+        from dash import callback_context
+        if not callback_context.triggered:
+            return {}, dash.no_update, False, "", "info"
+        trigger_id = callback_context.triggered[0]["prop_id"]
+        trigger_value = callback_context.triggered[0].get("value")
+        if trigger_value is None:
+            return {}, dash.no_update, False, "", "info"
+        if "pred-refresh-btn" in trigger_id and ".n_clicks" in trigger_id:
+            id_str = trigger_id.split('.')[0]
+            id_dict = json.loads(id_str)
+            prediction_id = id_dict.get("index")
+            if prediction_id:
+                def refresh_task():
+                    try:
+                        with Session(_engine) as db:
+                            pred = db.query(Prediction).filter(Prediction.prediction_id == prediction_id).first()
+                            if not pred:
+                                return {"status": "error", "error": "Prediction not found"}
+                            entity = db.query(Entity).filter(Entity.entity_id == pred.entity_id).first()
+                            if not entity:
+                                return {"status": "error", "error": "Entity not found"}
+                            outcome = db.query(PredictionOutcome).filter(
+                                PredictionOutcome.prediction_id == prediction_id
+                            ).first()
+                            if not outcome:
+                                outcome = PredictionOutcome(
+                                    outcome_id=uuid.uuid4(),
+                                    prediction_id=prediction_id,
+                                    actual_return=0,
+                                    error=0,
+                                    direction_correct=False,
+                                    within_confidence_interval=True,
+                                    sharpe_contribution=0,
+                                    evaluation_timestamp=datetime.now(),
+                                    created_at=datetime.now()
+                                )
+                                db.add(outcome)
+                                db.flush()
+                            performance = _format_saved_performance(pred, entity, outcome, load_live_prices=True)
+                            if not performance:
+                                return {"status": "error", "error": "Could not calculate performance"}
+                            outcome.actual_return = performance.get('total_return_pct', 0)
+                            outcome.error = abs(performance.get('total_return_pct', 0))
+                            outcome.direction_correct = performance.get('is_correct', False)
+                            outcome.evaluation_timestamp = datetime.now()
+                            db.commit()
+                            return {
+                                "status": "success",
+                                "total_return_pct": performance.get('total_return_pct', 0),
+                                "is_correct": performance.get('is_correct', False)
+                            }
+                    except Exception as e:
+                        logger.error(f"Error in refresh_task for {prediction_id}: {e}", exc_info=True)
+                        return {"status": "error", "error": str(e)}
+
+                queue_mgr = get_task_queue()
+                queue_stats = queue_mgr.get_queue_stats()
+                queue_size = queue_stats.get('queue_sizes', {}).get('refresh_prediction', 0)
+                task_id = add_gui_task(task_type="refresh_prediction", function=refresh_task, priority=1)
+                toast_msg = f"Refreshing... (queue position: {queue_size + 1})" if queue_size > 0 else "Refreshing performance..."
+                return {"prediction_id": prediction_id, "task_id": task_id}, dash.no_update, True, toast_msg, "info"
+        return {}, dash.no_update, False, "", "info"
+
+    @app.callback(
+        [Output("predictions-table", "children", allow_duplicate=True),
+         Output("refresh-toast", "is_open", allow_duplicate=True),
+         Output("refresh-toast", "children", allow_duplicate=True),
+         Output("refresh-toast", "icon", allow_duplicate=True),
+         Output("refresh-loading-state", "data", allow_duplicate=True)],
+        [Input("interval-component", "n_intervals")],
+        [State("refresh-loading-state", "data"),
+         State("pred-horizon-filter", "value"),
+         State("pred-entity-filter", "value"),
+         State("pred-date-filter", "start_date"),
+         State("pred-date-filter", "end_date"),
+         State("pred-surprise-filter", "value"),
+         State("pred-confidence-filter", "value")],
+        prevent_initial_call=True
+    )
+    def refresh_prediction_performance(n_intervals, loading_state, horizon, entities, start_date, end_date, surprise_filter, min_conf):
+        """Check task queue and update UI when tasks complete"""
+        from src.gui.utils.task_queue import TaskStatus
+        try:
+            if not loading_state or "task_id" not in loading_state:
+                raise PreventUpdate
+            task_id = loading_state.get("task_id")
+            prediction_id = loading_state.get("prediction_id")
+            if not task_id or not prediction_id:
+                raise PreventUpdate
+            queue_mgr = get_task_queue()
+            status = queue_mgr.get_task_status(task_id)
+        except PreventUpdate:
+            raise
+        except Exception as e:
+            logger.error(f"Error in refresh_prediction_performance: {e}", exc_info=True)
+            raise PreventUpdate
+        if status is None or status in [TaskStatus.PENDING, TaskStatus.RUNNING]:
+            raise PreventUpdate
+        try:
+            import time
+            time.sleep(0.5)
+            date_range = (start_date, end_date) if start_date or end_date else None
+            table = get_predictions_table(
+                _engine,
+                entity_filter=entities,
+                date_range=date_range,
+                min_confidence=min_conf or 0,
+                horizon=horizon or '5d',
+                surprise_filter=surprise_filter or 'all',
+                refreshing_prediction_id=None
+            )
+            toast_msg = ""
+            toast_icon = "info"
+            if status == TaskStatus.COMPLETED:
+                result = queue_mgr.get_task_result(task_id)
+                if result and isinstance(result, dict):
+                    toast_msg = f"Performance updated: {result.get('total_return_pct', 0):+.2f}%"
+                    toast_icon = "success"
+                else:
+                    toast_msg = "Performance updated"
+                    toast_icon = "success"
+            elif status == TaskStatus.FAILED:
+                toast_msg = "Error updating performance"
+                toast_icon = "danger"
+            elif status == TaskStatus.CANCELLED:
+                toast_msg = "Task cancelled"
+                toast_icon = "warning"
+            return table, True, toast_msg, toast_icon, {}
+        except Exception as e:
+            logger.error(f"Error updating UI after task completion: {e}", exc_info=True)
+            return dash.no_update, True, "Error displaying results", "danger", {}
+
+    @app.callback(
+        [Output("prediction-modal-title", "children"),
+         Output("prediction-modal-body", "children")],
+        [Input("prediction-detail-cache", "data")],
+        [State("prediction-modal", "is_open")],
+        prevent_initial_call=True
+    )
+    def update_modal_content(cached_data, is_open):
+        """Update modal content from cached prediction_id"""
+        if not is_open or not cached_data or "prediction_id" not in cached_data:
+            return dash.no_update, dash.no_update
+        prediction_id = cached_data["prediction_id"]
+        load_performance = cached_data.get("load_performance", False)
+        title, body = get_prediction_details(_engine, prediction_id, load_performance=load_performance)
+        return title, body
