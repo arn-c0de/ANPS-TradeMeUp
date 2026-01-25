@@ -409,13 +409,16 @@ class TradingSimulationEngine:
         expected_return_bps = abs(expected_return_pct) * 100.0
         cost_ratio = total_cost_bps / expected_return_bps if expected_return_bps > 0 else 1.0
 
-        # Calculate position metrics BEFORE risk calculation
-        position_value = price * self.DEFAULT_SHARES
-        # Assume a standard portfolio value (in production, this would come from portfolio manager)
-        assumed_portfolio_value = 100000  # $100k default
-        position_size_pct = (position_value / assumed_portfolio_value) * 100
+        # Calculate risk-adjusted position size
+        # Start with a FIXED DOLLAR AMOUNT baseline (not fixed shares!)
+        assumed_portfolio_value = 100000  # $100k default portfolio
+        baseline_dollar_position = 5000  # $5k baseline position (5% of portfolio)
+        baseline_position_size_pct = (baseline_dollar_position / assumed_portfolio_value) * 100
+        
+        # Calculate daily volume and initial metrics for risk calculation
         daily_volume_usd = (daily_volume * price) if daily_volume and price > 0 else 0
 
+        # First, calculate risk WITHOUT position adjustment
         risk_inputs = RiskInputs(
             model_uncertainty=1.0 - min(max(confidence, 0.0), 1.0),
             divergence_pct=divergence_pct,
@@ -425,10 +428,27 @@ class TradingSimulationEngine:
             transaction_cost_ratio=min(max(cost_ratio, 0.0), 1.0),
             market_impact_bps=cost_breakdown.get("market_impact_bps", 0.0),
             correlation_breakdown=None,
-            position_size_pct=position_size_pct,
+            position_size_pct=baseline_position_size_pct,
             daily_volume_usd=daily_volume_usd,
         )
         risk_result = self.risk_calculator.calculate(risk_inputs)
+        
+        # Now adjust position size based on risk score (INVERSE relationship)
+        # Higher risk = smaller position
+        # risk_result is a Dict with keys: risk_score, component_scores, weights
+        risk_score = risk_result["risk_score"]
+        max_position_pct = self.config.get("position_constraints", {}).get("max_position_size_pct", 10.0)
+        
+        # Risk-adjusted position sizing: reduce position as risk increases
+        # Formula: baseline * (1 - risk_score) with floor at 20% of baseline
+        risk_adjustment_factor = max(0.2, 1.0 - risk_score)
+        position_size_pct = baseline_position_size_pct * risk_adjustment_factor
+        
+        # Cap at max_position_pct
+        position_size_pct = min(position_size_pct, max_position_pct)
+        
+        # Calculate actual position value based on adjusted size
+        position_value = (assumed_portfolio_value * position_size_pct) / 100
 
         position_constraints = {
             "position_size_pct": position_size_pct,
