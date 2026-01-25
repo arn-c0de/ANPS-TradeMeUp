@@ -773,6 +773,17 @@ def get_stock_chart_components(
         if stats_data is None:
             return dbc.Alert(f"Error calculating stats for {symbol}", color="warning"), None
 
+        # Get last update time from cache metadata
+        last_update_time = None
+        try:
+            data_manager = get_chart_data_manager()
+            cache_metadata = data_manager.get_cache_metadata(symbol, timeframe)
+            if cache_metadata and cache_metadata.get('loaded_at'):
+                last_update_time = cache_metadata['loaded_at']
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Could not get last update time: {e}")
+
         # Build figure
         fig = _build_chart_figure(
             df, symbol, chart_type, show_volume, show_ma,
@@ -799,6 +810,25 @@ def get_stock_chart_components(
             graph_props["id"] = graph_id
 
         chart_graph = dcc.Graph(**graph_props)
+        
+        # Wrap in div with data-last-update attribute for JavaScript access
+        # JavaScript will check both the graph element and its parent for this attribute
+        if last_update_time is not None:
+            # Convert datetime to ISO format string
+            if hasattr(last_update_time, 'isoformat'):
+                last_update_str = last_update_time.isoformat()
+            elif isinstance(last_update_time, str):
+                last_update_str = last_update_time
+            else:
+                from datetime import datetime
+                last_update_str = datetime.fromtimestamp(last_update_time).isoformat() if isinstance(last_update_time, (int, float)) else str(last_update_time)
+            
+            # Wrap graph in div with data attribute
+            # The Graph component will still have its ID, and JavaScript can access the data attribute from parent
+            chart_graph = html.Div(
+                chart_graph,
+                **{'data-last-update': last_update_str}
+            )
 
         return chart_graph, stats_data
 

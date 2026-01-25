@@ -155,16 +155,16 @@ def create_layout():
                 dbc.Card([
                     dbc.CardHeader(html.H5("🎭 Sentiment Distribution")),
                     dbc.CardBody([
-                        dcc.Graph(id="sentiment-distribution-chart")
-                    ])
+                        dcc.Graph(id="sentiment-distribution-chart", style={"height": "100%", "width": "100%"})
+                    ], style={"overflow": "hidden"})
                 ])
             ], width=4),
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader(html.H5("💥 Impact Score Distribution")),
                     dbc.CardBody([
-                        dcc.Graph(id="impact-distribution-chart")
-                    ])
+                        dcc.Graph(id="impact-distribution-chart", style={"height": "100%", "width": "100%"})
+                    ], style={"overflow": "hidden"})
                 ])
             ], width=4),
             dbc.Col([
@@ -739,7 +739,9 @@ def get_sentiment_distribution_chart(engine, date_range=None):
         fig.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=20, r=20, t=20, b=20)
+            margin=dict(l=20, r=20, t=20, b=20),
+            autosize=True,
+            height=None
         )
         return fig
     except Exception as e:
@@ -809,8 +811,12 @@ def get_impact_distribution_chart(engine, date_range=None):
             showlegend=False,
             xaxis_title="Impact Level",
             yaxis_title="Count",
-            margin=dict(l=40, r=20, t=20, b=40)
+            margin=dict(l=40, r=20, t=20, b=40),
+            autosize=True,
+            height=None
         )
+        fig.update_xaxes(automargin=True)
+        fig.update_yaxes(automargin=True)
         return fig
     except Exception as e:
         import plotly.graph_objects as go
