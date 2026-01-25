@@ -7,6 +7,9 @@ import dash_bootstrap_components as dbc
 
 from src.gui.charts import MarketDataProvider, create_empty_chart, create_price_indicator_card
 from src.gui.charts.live_charts import create_candlestick_chart, create_line_chart, create_multi_line_chart
+from src.gui.charts.chart_data_manager import get_chart_data_manager
+from typing import Optional, Tuple, Dict
+import pandas as pd
 
 
 # Initialize market data provider
@@ -48,6 +51,19 @@ def create_layout():
             'tabs': {}  # {tab_id: {'xaxis_range': [min, max], 'yaxis_range': [min, max], ...}}
         }),
         
+        # Store for loaded chart data metadata (for infinite scroll)
+        dcc.Store(id='chart-loaded-data-store', storage_type='memory', data={
+            'tabs': {}  # {tab_id: {'symbol': str, 'timeframe': str, 'earliest_date': str, 'latest_date': str, 'data_points': int}}
+        }),
+        
+        # Store for scroll state (prevents race conditions)
+        dcc.Store(id='chart-scroll-state-store', storage_type='memory', data={
+            'tabs': {}  # {tab_id: {'loading': bool, 'last_load_time': float, 'last_threshold_check': float}}
+        }),
+        
+        # Hidden inputs for scroll triggers (one per chart, created dynamically in JS)
+        # These will be created by JavaScript and referenced in callbacks
+        
         # Store for panel-based chart configuration (for multi-panel layouts)
         dcc.Store(id='chart-panels-config', storage_type='session', data={
             'layout': 'single',
@@ -61,7 +77,7 @@ def create_layout():
         }),
         
         # Store for fullscreen state
-        dcc.Store(id='chart-fullscreen-state', storage_type='session', data={'fullscreen': False}),
+        dcc.Store(id='chart-fullscreen-state', storage_type='memory', data={'fullscreen': False}),
         
         # Store for panel sizes (for resizable layouts)
         dcc.Store(id='panel-sizes-store', storage_type='session', data={'sizes': [50, 50]}),  # percentage widths
@@ -71,6 +87,9 @@ def create_layout():
         
         # ESC key listener for fullscreen
         dcc.Input(id='esc-key-listener', type='text', style={'display': 'none'}),
+        
+        # Hidden button for ESC key triggering (clicked programmatically)
+        html.Button(id='esc-trigger-btn', style={'display': 'none'}),
         
         # Browser-style Tab Bar
         dbc.Row([
@@ -137,7 +156,9 @@ def create_layout():
                             ], md=10),
                             dbc.Col([
                                 dbc.Button("🔄", id="refresh-all-panels", color="success", size="sm", className="me-2", title="Refresh Charts (Ctrl+R)"),
-                                dbc.Button("⛶", id="toggle-fullscreen-btn", color="info", size="sm", outline=True, title="Toggle Fullscreen (ESC to exit)")
+                                dbc.Button("⛶", id="toggle-fullscreen-btn", color="info", size="sm", outline=True, title="Toggle Fullscreen (ESC to exit)"),
+                                # Exit fullscreen button (hidden by default, shown in fullscreen mode via callback)
+                                dbc.Button("⬇ Exit Fullscreen", id="exit-fullscreen-btn", color="danger", size="sm", style={'display': 'none'})
                             ], md=2, className="text-end")
                         ], className="align-items-center")
                     ], className="py-2 px-3")
@@ -493,30 +514,52 @@ def _build_overlay_shapes(overlays: dict):
     return shapes
 
 
-def get_stock_chart_components(
-    symbol: str,
-    timeframe: str = '1mo',
-    chart_type: str = 'candlestick',
-    show_volume: bool = True,
-    show_ma: bool = False,
-    overlays: dict = None,
-    graph_id=None,
-    dragmode: str = 'zoom',
-    auto_scroll: bool = False,
-    view_state: dict = None
-):
-    """Get chart graph component and stats data."""
-    try:
+def _fetch_chart_data(symbol: str, timeframe: str, loaded_data: Optional[pd.DataFrame] = None) -> Optional[pd.DataFrame]:
+    """
+    Fetch chart data, using loaded_data if provided (for infinite scroll).
+    
+    Args:
+        symbol: Stock ticker symbol
+        timeframe: Chart timeframe
+        loaded_data: Optional pre-loaded DataFrame
+        
+    Returns:
+        DataFrame with OHLCV data or None if error
+    """
+    if loaded_data is not None and not loaded_data.empty:
+        return loaded_data
+    
+    # Use ChartDataManager for initial load
+    data_manager = get_chart_data_manager()
+    df = data_manager.get_initial_data(symbol, timeframe)
+    
+    if df is None or df.empty:
+        # Fallback to direct market_data call
         if timeframe == '1d_1m':
             df = market_data.get_intraday_data(symbol, days=1)
         elif timeframe == '5d_5m':
             df = market_data.get_historical_data(symbol, period='5d', interval='5m')
         else:
             df = market_data.get_historical_data(symbol, period=timeframe)
+    
+    return df
 
-        if df is None or df.empty:
-            return dbc.Alert(f"No data available for {symbol}", color="warning"), None
 
+def _calculate_stats(df: pd.DataFrame, symbol: str) -> Optional[Dict]:
+    """
+    Calculate statistics from DataFrame.
+    
+    Args:
+        df: DataFrame with OHLCV data
+        symbol: Stock ticker symbol
+        
+    Returns:
+        Dictionary with stats or None if error
+    """
+    if df is None or df.empty:
+        return None
+    
+    try:
         current_price = df['Close'].iloc[-1]
         first_price = df['Close'].iloc[0]
         price_change = current_price - first_price
@@ -528,7 +571,7 @@ def get_stock_chart_components(
         color = "success" if price_change >= 0 else "danger"
         arrow = "🔼" if price_change >= 0 else "🔽"
 
-        stats_data = {
+        return {
             'symbol': symbol,
             'current_price': current_price,
             'price_change': price_change,
@@ -539,54 +582,213 @@ def get_stock_chart_components(
             'color': color,
             'arrow': arrow
         }
+    except Exception as e:
+        return None
 
-        if chart_type == 'candlestick':
-            fig = create_candlestick_chart(df, symbol, "", show_volume=show_volume, show_ma=show_ma)
-        else:
-            fig = create_line_chart(df, symbol)
 
-        overlay_shapes = _build_overlay_shapes(overlays)
-        if overlay_shapes:
-            fig.update_layout(shapes=overlay_shapes)
+def _build_chart_figure(
+    df: pd.DataFrame,
+    symbol: str,
+    chart_type: str,
+    show_volume: bool,
+    show_ma: bool,
+    overlays: Optional[dict],
+    dragmode: str,
+    auto_scroll: bool,
+    view_state: Optional[dict]
+) -> 'go.Figure':
+    """
+    Build Plotly figure from DataFrame.
+    
+    Args:
+        df: DataFrame with OHLCV data
+        symbol: Stock ticker symbol
+        chart_type: Type of chart ('candlestick' or 'line')
+        show_volume: Show volume subplot
+        show_ma: Show moving averages
+        overlays: Overlay shapes dict
+        dragmode: Drag mode ('zoom' or 'pan')
+        auto_scroll: Auto-scroll to latest data
+        view_state: Saved view state dict
         
-        # Set dragmode (zoom or pan)
-        fig.update_layout(dragmode=dragmode)
+    Returns:
+        Plotly Figure object
+    """
+    if chart_type == 'candlestick':
+        fig = create_candlestick_chart(df, symbol, "", show_volume=show_volume, show_ma=show_ma)
+    else:
+        fig = create_line_chart(df, symbol)
+
+    overlay_shapes = _build_overlay_shapes(overlays)
+    if overlay_shapes:
+        fig.update_layout(shapes=overlay_shapes)
+    
+    # Set dragmode (zoom or pan)
+    # Note: 'pan' mode allows easier horizontal scrolling with mouse wheel
+    fig.update_layout(dragmode=dragmode)
+    
+    # Enable horizontal scrolling: ensure x-axis is not fixed
+    if show_volume:
+        fig.update_xaxes(fixedrange=False, row=1)
+        fig.update_xaxes(fixedrange=False, row=2)  # Volume subplot
+    else:
+        fig.update_xaxes(fixedrange=False)
+    
+    # Apply saved view state (zoom/pan position) if available
+    # Only apply if auto_scroll is False (user wants to keep their view)
+    if view_state and not auto_scroll:
+        # Apply x-axis range if saved
+        if 'xaxis_range' in view_state and view_state['xaxis_range']:
+            fig.update_xaxes(range=view_state['xaxis_range'], row=1 if show_volume else None)
         
-        # Apply saved view state (zoom/pan position) if available
-        # Only apply if auto_scroll is False (user wants to keep their view)
-        if view_state and not auto_scroll:
-            # Apply x-axis range if saved
-            if 'xaxis_range' in view_state and view_state['xaxis_range']:
-                fig.update_xaxes(range=view_state['xaxis_range'], row=1 if show_volume else None)
-            
-            # Apply y-axis range if saved (for price chart)
-            if 'yaxis_range' in view_state and view_state['yaxis_range']:
-                fig.update_yaxes(range=view_state['yaxis_range'], row=1 if show_volume else None)
-            
-            # Apply y-axis2 range if saved (for volume chart)
-            if show_volume and 'yaxis2_range' in view_state and view_state['yaxis2_range']:
-                fig.update_yaxes(range=view_state['yaxis2_range'], row=2)
+        # Apply y-axis range if saved (for price chart)
+        if 'yaxis_range' in view_state and view_state['yaxis_range']:
+            fig.update_yaxes(range=view_state['yaxis_range'], row=1 if show_volume else None)
         
-        # Auto-scroll: Set x-axis range to show latest candles, with newest candle visible on the right
-        elif auto_scroll and len(df) > 0:
-            # Show last 50-100 candles (adjust based on data density)
-            visible_candles = min(80, len(df))
-            start_idx = max(0, len(df) - visible_candles)
+        # Apply y-axis2 range if saved (for volume chart)
+        if show_volume and 'yaxis2_range' in view_state and view_state['yaxis2_range']:
+            fig.update_yaxes(range=view_state['yaxis2_range'], row=2)
+    
+    # Auto-scroll: Set x-axis range to show latest candles, with newest candle visible on the right
+    elif auto_scroll and len(df) > 0:
+        # Show last 50-100 candles (adjust based on data density)
+        visible_candles = min(80, len(df))
+        start_idx = max(0, len(df) - visible_candles)
+        
+        # For category type axes, we need to use the index positions
+        # Since we're using category type, we'll set the range using index values
+        if hasattr(df.index, '__len__'):
+            # Convert to list if needed
+            indices = list(df.index) if not isinstance(df.index, list) else df.index
+            if start_idx < len(indices):
+                # Set range to show last N candles
+                # For category axes, range is set using the category values
+                start_val = indices[start_idx] if start_idx < len(indices) else indices[0]
+                end_val = indices[-1] if len(indices) > 0 else None
+                
+                if end_val is not None:
+                    # Update xaxis range - for category type, use the actual index values
+                    fig.update_xaxes(range=[start_val, end_val], row=1 if show_volume else None)
+    
+    return fig
+
+
+def update_chart_with_prepended_data(
+    existing_fig: 'go.Figure',
+    new_df: pd.DataFrame,
+    old_df: pd.DataFrame,
+    old_range: Optional[list],
+    show_volume: bool
+) -> Tuple['go.Figure', list]:
+    """
+    Update chart figure with prepended data while maintaining view position.
+    
+    Args:
+        existing_fig: Existing Plotly figure
+        new_df: New DataFrame to prepend
+        old_df: Old DataFrame
+        old_range: Old x-axis range [left_val, right_val]
+        show_volume: Whether volume subplot is shown
+        
+    Returns:
+        Tuple of (updated_figure, new_range)
+    """
+    from plotly.graph_objects import Figure
+    
+    # Calculate offset (how many new data points were added)
+    offset = len(new_df)
+    
+    # If we have old range, calculate new range
+    new_range = old_range
+    if old_range and len(old_df) > 0:
+        # Find indices of old range values in old DataFrame
+        old_indices = list(old_df.index)
+        try:
+            left_idx = old_indices.index(old_range[0]) if old_range[0] in old_indices else 0
+            right_idx = old_indices.index(old_range[1]) if old_range[1] in old_indices else len(old_indices) - 1
             
-            # For category type axes, we need to use the index positions
-            # Since we're using category type, we'll set the range using index values
-            if hasattr(df.index, '__len__'):
-                # Convert to list if needed
-                indices = list(df.index) if not isinstance(df.index, list) else df.index
-                if start_idx < len(indices):
-                    # Set range to show last N candles
-                    # For category axes, range is set using the category values
-                    start_val = indices[start_idx] if start_idx < len(indices) else indices[0]
-                    end_val = indices[-1] if len(indices) > 0 else None
-                    
-                    if end_val is not None:
-                        # Update xaxis range - for category type, use the actual index values
-                        fig.update_xaxes(range=[start_val, end_val], row=1 if show_volume else None)
+            # Calculate new indices with offset
+            new_left_idx = left_idx + offset
+            new_right_idx = right_idx + offset
+            
+            # Get new DataFrame with prepended data
+            combined_df = pd.concat([new_df, old_df])
+            combined_df = combined_df[~combined_df.index.duplicated(keep='last')]
+            combined_df = combined_df.sort_index()
+            
+            # Get new range values
+            new_indices = list(combined_df.index)
+            if new_left_idx < len(new_indices) and new_right_idx < len(new_indices):
+                new_range = [new_indices[new_left_idx], new_indices[new_right_idx]]
+        except (ValueError, IndexError):
+            # Fallback: use original range if calculation fails
+            pass
+    
+    # Update figure with new data (this will be done by recreating traces)
+    # For now, return the existing figure - actual update happens in callback
+    return existing_fig, new_range or []
+
+
+def get_stock_chart_components(
+    symbol: str,
+    timeframe: str = '1mo',
+    chart_type: str = 'candlestick',
+    show_volume: bool = True,
+    show_ma: bool = False,
+    overlays: Optional[dict] = None,
+    graph_id: Optional[dict] = None,
+    dragmode: str = 'zoom',
+    auto_scroll: bool = False,
+    view_state: Optional[dict] = None,
+    loaded_data: Optional[pd.DataFrame] = None
+) -> Tuple[dcc.Graph, Optional[Dict]]:
+    """
+    Get chart graph component and stats data.
+    
+    Args:
+        symbol: Stock ticker symbol
+        timeframe: Chart timeframe
+        chart_type: Type of chart ('candlestick' or 'line')
+        show_volume: Show volume subplot
+        show_ma: Show moving averages
+        overlays: Overlay shapes dict
+        graph_id: Graph component ID
+        dragmode: Drag mode ('zoom' or 'pan')
+        auto_scroll: Auto-scroll to latest data
+        view_state: Saved view state dict
+        loaded_data: Optional pre-loaded DataFrame (for infinite scroll)
+        
+    Returns:
+        Tuple of (chart_graph_component, stats_data_dict)
+    """
+    try:
+        # Fetch data
+        df = _fetch_chart_data(symbol, timeframe, loaded_data)
+        
+        if df is None or df.empty:
+            return dbc.Alert(f"No data available for {symbol}", color="warning"), None
+
+        # Calculate stats
+        stats_data = _calculate_stats(df, symbol)
+        if stats_data is None:
+            return dbc.Alert(f"Error calculating stats for {symbol}", color="warning"), None
+
+        # Get last update time from cache metadata
+        last_update_time = None
+        try:
+            data_manager = get_chart_data_manager()
+            cache_metadata = data_manager.get_cache_metadata(symbol, timeframe)
+            if cache_metadata and cache_metadata.get('loaded_at'):
+                last_update_time = cache_metadata['loaded_at']
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Could not get last update time: {e}")
+
+        # Build figure
+        fig = _build_chart_figure(
+            df, symbol, chart_type, show_volume, show_ma,
+            overlays, dragmode, auto_scroll, view_state
+        )
 
         graph_props = dict(
             figure=fig,
@@ -598,7 +800,9 @@ def get_stock_chart_components(
                 'editable': True,
                 'edits': {'shapePosition': True},
                 'modeBarButtonsToRemove': ['lasso2d', 'select2d'],  # Keep pan2d enabled
-                'toImageButtonOptions': {'format': 'png', 'filename': f'{symbol}_chart'}
+                'toImageButtonOptions': {'format': 'png', 'filename': f'{symbol}_chart'},
+                'scrollZoom': True,  # Enable Ctrl+Wheel zoom, Shift+Wheel horizontal pan
+                'doubleClick': 'reset',  # Double click to reset zoom
             },
             className='flex-grow-1'
         )
@@ -606,10 +810,31 @@ def get_stock_chart_components(
             graph_props["id"] = graph_id
 
         chart_graph = dcc.Graph(**graph_props)
+        
+        # Wrap in div with data-last-update attribute for JavaScript access
+        # JavaScript will check both the graph element and its parent for this attribute
+        if last_update_time is not None:
+            # Convert datetime to ISO format string
+            if hasattr(last_update_time, 'isoformat'):
+                last_update_str = last_update_time.isoformat()
+            elif isinstance(last_update_time, str):
+                last_update_str = last_update_time
+            else:
+                from datetime import datetime
+                last_update_str = datetime.fromtimestamp(last_update_time).isoformat() if isinstance(last_update_time, (int, float)) else str(last_update_time)
+            
+            # Wrap graph in div with data attribute
+            # The Graph component will still have its ID, and JavaScript can access the data attribute from parent
+            chart_graph = html.Div(
+                chart_graph,
+                **{'data-last-update': last_update_str}
+            )
 
         return chart_graph, stats_data
 
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error creating chart: {e}", exc_info=True)
         return dbc.Alert(f"Error creating chart: {str(e)}", color="danger"), None
 
 
@@ -767,7 +992,7 @@ def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, pan
     })
 
 
-def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, overlays: dict = None, view_state: dict = None):
+def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, overlays: dict = None, view_state: dict = None, loaded_data: Optional[pd.DataFrame] = None):
     """Create a single chart panel with controls and a trading action overlay."""
     # Handle None config
     if not config:
@@ -823,7 +1048,8 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, 
         graph_id={"type": "chart-graph", "index": panel_id},
         dragmode=interaction_mode,
         auto_scroll=auto_scroll_enabled,
-        view_state=view_state
+        view_state=view_state,
+        loaded_data=loaded_data  # NEW: Pass loaded data for infinite scroll
     )
     chart_content = chart_component
     trading_overlay = create_trading_overlay(stats_data, show_stats, panel_id=panel_id) if show_stats else None
@@ -857,7 +1083,7 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, 
     ], className="h-100", style={'height': '100%', 'overflow': 'hidden'})
 
 
-def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool = False, overlays_data: dict = None, view_state_data: dict = None):
+def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool = False, overlays_data: dict = None, view_state_data: dict = None, loaded_data_store: dict = None):
     """Render the multi-panel layout based on selected mode"""
     
     def get_panel_overlays(panel_id: str):
@@ -865,6 +1091,25 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
     
     def get_panel_view_state(panel_id: str):
         return (view_state_data or {}).get('tabs', {}).get(panel_id) if view_state_data else None
+    
+    def get_panel_loaded_data(panel_id: str):
+        """Get loaded data for a panel from cache."""
+        if not loaded_data_store or not loaded_data_store.get('tabs'):
+            return None
+        
+        tab_loaded = loaded_data_store.get('tabs', {}).get(panel_id)
+        if not tab_loaded:
+            return None
+        
+        # Get cached data from ChartDataManager
+        data_manager = get_chart_data_manager()
+        symbol = tab_loaded.get('symbol')
+        timeframe = tab_loaded.get('timeframe')
+        
+        if symbol and timeframe:
+            return data_manager.get_cached_data(symbol, timeframe)
+        
+        return None
     
     # Handle empty panels_config
     if not panels_config:
@@ -913,8 +1158,8 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
                     ], md=6),
                     dbc.Col([
                         dbc.Button("🔄 Refresh All", id="refresh-all-panels", color="success", size="sm", className="me-2"),
-                        dbc.Button("⭐ Manage Favorites", id="show-favorites-modal", color="warning", size="sm", className="me-2"),
-                        dbc.Button("⬇ Exit Fullscreen", id="toggle-fullscreen-btn", color="danger", size="sm")
+                        dbc.Button("⭐ Manage Favorites", id="show-favorites-modal", color="warning", size="sm", className="me-2")
+                        # Exit button is now in main layout, controlled by visibility callback
                     ], md=6, className="text-end")
                 ])
             ], className="py-1 px-2", style={'padding': '3px 8px'})
@@ -931,7 +1176,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             layout_content = dbc.Row([
                 dbc.Col([
                     html.Div(
-                        create_chart_panel('panel-1', panel_config, overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1')),
+                        create_chart_panel('panel-1', panel_config, overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1')),
                         style=panel_style
                     )
                 ], width=12)
@@ -944,13 +1189,13 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
         layout_content = dbc.Row([
             dbc.Col([
                 html.Div(
-                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1')),
+                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1')),
                     style=panel_style
                 )
             ], md=6, className=margin_class),
             dbc.Col([
                 html.Div(
-                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2')),
+                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2'), loaded_data=get_panel_loaded_data('panel-2')),
                     style=panel_style
                 )
             ], md=6, className=margin_class)
@@ -963,7 +1208,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1')),
+                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1')),
                         style=panel_style
                     )
                 ], width=12, className=margin_class)
@@ -971,7 +1216,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2')),
+                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2'), loaded_data=get_panel_loaded_data('panel-2')),
                         style=panel_style
                     )
                 ], width=12)
@@ -986,13 +1231,13 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1')),
+                    create_chart_panel('panel-1', panels_config.get('panel-1', {}), overlays=get_panel_overlays('panel-1'), view_state=get_panel_view_state('panel-1'), loaded_data=get_panel_loaded_data('panel-1')),
                         style=panel_style
                     )
                 ], md=6, className=margin_class),
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2')),
+                    create_chart_panel('panel-2', panels_config.get('panel-2', {}), overlays=get_panel_overlays('panel-2'), view_state=get_panel_view_state('panel-2'), loaded_data=get_panel_loaded_data('panel-2')),
                         style=panel_style
                     )
                 ], md=6, className=margin_class)
@@ -1000,13 +1245,13 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             dbc.Row([
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-3', panels_config.get('panel-3', {}), overlays=get_panel_overlays('panel-3'), view_state=get_panel_view_state('panel-3')),
+                    create_chart_panel('panel-3', panels_config.get('panel-3', {}), overlays=get_panel_overlays('panel-3'), view_state=get_panel_view_state('panel-3'), loaded_data=get_panel_loaded_data('panel-3')),
                         style=panel_style
                     )
                 ], md=6),
                 dbc.Col([
                     html.Div(
-                    create_chart_panel('panel-4', panels_config.get('panel-4', {}), overlays=get_panel_overlays('panel-4'), view_state=get_panel_view_state('panel-4')),
+                    create_chart_panel('panel-4', panels_config.get('panel-4', {}), overlays=get_panel_overlays('panel-4'), view_state=get_panel_view_state('panel-4'), loaded_data=get_panel_loaded_data('panel-4')),
                         style=panel_style
                     )
                 ], md=6)

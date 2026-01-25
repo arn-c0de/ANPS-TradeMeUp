@@ -1,4 +1,3 @@
-
 """
 Statistics Tab - Analytics and Metrics
 """
@@ -156,16 +155,16 @@ def create_layout():
                 dbc.Card([
                     dbc.CardHeader(html.H5("🎭 Sentiment Distribution")),
                     dbc.CardBody([
-                        dcc.Graph(id="sentiment-distribution-chart")
-                    ])
+                        dcc.Graph(id="sentiment-distribution-chart", style={"height": "100%", "width": "100%"})
+                    ], style={"overflow": "hidden"})
                 ])
             ], width=4),
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader(html.H5("💥 Impact Score Distribution")),
                     dbc.CardBody([
-                        dcc.Graph(id="impact-distribution-chart")
-                    ])
+                        dcc.Graph(id="impact-distribution-chart", style={"height": "100%", "width": "100%"})
+                    ], style={"overflow": "hidden"})
                 ])
             ], width=4),
             dbc.Col([
@@ -236,14 +235,15 @@ def create_layout():
                         ], className="d-flex align-items-center justify-content-between")
                     ]),
                     dbc.CardBody([
-                        html.Div(id="top-positive-entities"),
-                        dbc.Button(
-                            "Show More",
-                            id="positive-entities-toggle",
-                            color="link",
-                            size="sm",
-                            className="mt-2"
+                        html.Div(
+                            id="top-positive-entities",
+                            style={
+                                "maxHeight": "650px",
+                                "overflowY": "auto",
+                                "overflowX": "hidden"
+                            }
                         ),
+                        dcc.Input(id="positive-entities-scroll-trigger", type="hidden", value="0"),
                         html.Small("💡 Showing entities sorted by average sentiment score", className="text-muted d-block mt-2")
                     ])
                 ])
@@ -264,14 +264,15 @@ def create_layout():
                         ], className="d-flex align-items-center justify-content-between")
                     ]),
                     dbc.CardBody([
-                        html.Div(id="top-negative-entities"),
-                        dbc.Button(
-                            "Show More",
-                            id="negative-entities-toggle",
-                            color="link",
-                            size="sm",
-                            className="mt-2"
+                        html.Div(
+                            id="top-negative-entities",
+                            style={
+                                "maxHeight": "650px",
+                                "overflowY": "auto",
+                                "overflowX": "hidden"
+                            }
                         ),
+                        dcc.Input(id="negative-entities-scroll-trigger", type="hidden", value="0"),
                         html.Small("💡 Showing entities sorted by average sentiment score", className="text-muted d-block mt-2")
                     ])
                 ])
@@ -295,7 +296,14 @@ def create_layout():
                         ], className="d-flex align-items-center")
                     ]),
                     dbc.CardBody([
-                        html.Div(id="entity-details-table")
+                        html.Div(
+                            id="entity-details-table",
+                            style={
+                                "maxHeight": "500px",
+                                "overflowY": "auto",
+                                "overflowX": "auto"
+                            }
+                        )
                     ])
                 ])
             ], width=12)
@@ -361,9 +369,9 @@ def create_layout():
         # Store for table sorting state
         dcc.Store(id="entity-table-sort-store", data={"column": None, "direction": None}),
         
-        # Store for expand state
-        dcc.Store(id="positive-entities-expanded", data=False),
-        dcc.Store(id="negative-entities-expanded", data=False)
+        # Stores for infinite scroll limits
+        dcc.Store(id="positive-entities-limit", data=50),
+        dcc.Store(id="negative-entities-limit", data=50)
     ], fluid=True)
 
 
@@ -731,7 +739,9 @@ def get_sentiment_distribution_chart(engine, date_range=None):
         fig.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=20, r=20, t=20, b=20)
+            margin=dict(l=20, r=20, t=20, b=20),
+            autosize=True,
+            height=None
         )
         return fig
     except Exception as e:
@@ -801,8 +811,12 @@ def get_impact_distribution_chart(engine, date_range=None):
             showlegend=False,
             xaxis_title="Impact Level",
             yaxis_title="Count",
-            margin=dict(l=40, r=20, t=20, b=40)
+            margin=dict(l=40, r=20, t=20, b=40),
+            autosize=True,
+            height=None
         )
+        fig.update_xaxes(automargin=True)
+        fig.update_yaxes(automargin=True)
         return fig
     except Exception as e:
         import plotly.graph_objects as go
@@ -1010,8 +1024,19 @@ def get_entity_sentiment_chart(engine, date_range=None, timeframe="30d"):
         return fig
 
 
-def get_top_positive_entities(engine, search_term="", show_all=False, date_range=None):
-    """Get entities with positive news in selected range, optionally filtered by search"""
+def get_top_positive_entities(engine, search_term="", show_all=False, date_range=None, limit=50):
+    """Get entities with positive news in selected range, optionally filtered by search
+    
+    Args:
+        engine: Database engine
+        search_term: Search filter string
+        show_all: Deprecated, kept for compatibility
+        date_range: Tuple of (start_date, end_date) or None
+        limit: Maximum number of entities to return
+    
+    Returns:
+        Tuple of (html.Div with entities, total_count)
+    """
     try:
         from datetime import datetime, timedelta
         from sqlalchemy import and_
@@ -1081,21 +1106,25 @@ def get_top_positive_entities(engine, search_term="", show_all=False, date_range
             reverse=True
         )
         
+        # Filter: Only show entities with at least 1 positive sentiment
+        sorted_entities = [(name, stats) for name, stats in sorted_entities if stats['positive'] > 0]
+        
         # Filter by search term if provided
         if search_term:
             search_lower = search_term.lower()
             sorted_entities = [(name, stats) for name, stats in sorted_entities 
                              if search_lower in name.lower()]
         
-        # Limit to top 50 to avoid overwhelming display
-        sorted_entities = sorted_entities[:50]
+        # Limit to specified number
+        total_count = len(sorted_entities)
+        sorted_entities = sorted_entities[:limit]
         
         # Show message if search yielded no results
         if search_term and not sorted_entities:
-            return html.P(f"No entities found matching '{search_term}'", className="text-muted")
+            return html.P(f"No entities found matching '{search_term}'", className="text-muted"), total_count
         
         if not sorted_entities:
-            return html.P(f"No positive sentiment entities in {range_label}", className="text-muted")
+            return html.P(f"No positive sentiment entities in {range_label}", className="text-muted"), total_count
         
         # Create display
         rows = []
@@ -1103,7 +1132,13 @@ def get_top_positive_entities(engine, search_term="", show_all=False, date_range
         if search_term:
             rows.append(
                 html.Div([
-                    html.Small(f"Showing {len(sorted_entities)} result(s) for '{search_term}'", className="text-info mb-2")
+                    html.Small(f"Showing {len(sorted_entities)} of {total_count} result(s) for '{search_term}'", className="text-info mb-2")
+                ])
+            )
+        elif len(sorted_entities) < total_count:
+            rows.append(
+                html.Div([
+                    html.Small(f"Showing {len(sorted_entities)} of {total_count} entities", className="text-info mb-2")
                 ])
             )
         
@@ -1130,15 +1165,35 @@ def get_top_positive_entities(engine, search_term="", show_all=False, date_range
                 ], className="mb-3 p-2 border-bottom border-secondary")
             )
         
-        return html.Div(rows)
+        # Add scroll trigger element at the end if there are more entities to load
+        if len(sorted_entities) < total_count:
+            rows.append(
+                html.Div(
+                    id="positive-entities-scroll-sentinel",
+                    style={"height": "1px", "visibility": "hidden"}
+                )
+            )
+        
+        return html.Div(rows), total_count
     except Exception as e:
         import logging
         logging.error(f"Error getting top positive entities: {e}", exc_info=True)
         return html.P(f"Error: {str(e)[:50]}", className="text-danger")
 
 
-def get_top_negative_entities(engine, search_term="", show_all=False, date_range=None):
-    """Get entities with negative news in selected range, optionally filtered by search"""
+def get_top_negative_entities(engine, search_term="", show_all=False, date_range=None, limit=50):
+    """Get entities with negative news in selected range, optionally filtered by search
+    
+    Args:
+        engine: Database engine
+        search_term: Search filter string
+        show_all: Deprecated, kept for compatibility
+        date_range: Tuple of (start_date, end_date) or None
+        limit: Maximum number of entities to return
+    
+    Returns:
+        Tuple of (html.Div with entities, total_count)
+    """
     try:
         from datetime import datetime, timedelta
         from sqlalchemy import and_
@@ -1207,27 +1262,25 @@ def get_top_negative_entities(engine, search_term="", show_all=False, date_range
             reverse=False
         )
         
+        # Filter: Only show entities with at least 1 negative sentiment
+        sorted_entities = [(name, stats) for name, stats in sorted_entities if stats['negative'] > 0]
+        
         # Filter by search term if provided
         if search_term:
             search_lower = search_term.lower()
             sorted_entities = [(name, stats) for name, stats in sorted_entities 
                              if search_lower in name.lower()]
         
-        # Limit display based on state
+        # Limit to specified number
         total_count = len(sorted_entities)
-        if not search_term and not show_all:
-            # Show only top 15 by default
-            sorted_entities = sorted_entities[:15]
-        else:
-            # Show up to 50 when searching or expanded
-            sorted_entities = sorted_entities[:50]
+        sorted_entities = sorted_entities[:limit]
         
         # Show message if search yielded no results
         if search_term and not sorted_entities:
-            return html.P(f"No entities found matching '{search_term}'", className="text-muted")
+            return html.P(f"No entities found matching '{search_term}'", className="text-muted"), total_count
         
         if not sorted_entities:
-            return html.P(f"No negative sentiment entities in {range_label}", className="text-muted")
+            return html.P(f"No negative sentiment entities in {range_label}", className="text-muted"), total_count
         
         # Create display
         rows = []
@@ -1235,13 +1288,13 @@ def get_top_negative_entities(engine, search_term="", show_all=False, date_range
         if search_term:
             rows.append(
                 html.Div([
-                    html.Small(f"Showing {len(sorted_entities)} result(s) for '{search_term}'", className="text-info mb-2")
+                    html.Small(f"Showing {len(sorted_entities)} of {total_count} result(s) for '{search_term}'", className="text-info mb-2")
                 ])
             )
-        elif not show_all and total_count > 15:
+        elif len(sorted_entities) < total_count:
             rows.append(
                 html.Div([
-                    html.Small(f"Showing top 15 of {total_count} entities", className="text-info mb-2")
+                    html.Small(f"Showing {len(sorted_entities)} of {total_count} entities", className="text-info mb-2")
                 ])
             )
         
@@ -1268,7 +1321,16 @@ def get_top_negative_entities(engine, search_term="", show_all=False, date_range
                 ], className="mb-3 p-2 border-bottom border-secondary")
             )
         
-        return html.Div(rows)
+        # Add scroll trigger element at the end if there are more entities to load
+        if len(sorted_entities) < total_count:
+            rows.append(
+                html.Div(
+                    id="negative-entities-scroll-sentinel",
+                    style={"height": "1px", "visibility": "hidden"}
+                )
+            )
+        
+        return html.Div(rows), total_count
     except Exception as e:
         import logging
         logging.error(f"Error getting top negative entities: {e}", exc_info=True)

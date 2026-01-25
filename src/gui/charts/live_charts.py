@@ -124,7 +124,8 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", sho
             size=12,
             color="#e0e0e0"
         ),
-        uirevision='constant'  # Maintain UI state on resize
+        uirevision='constant',  # Maintain UI state on resize
+        dragmode='pan'  # Default to pan mode for easier scrolling
     )
     
     # Update axes - hide x-axis labels, show only in hover
@@ -133,7 +134,9 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", sho
         showgrid=True,
         zeroline=False,
         type='category',  # Uniform spacing between all data points
-        showticklabels=False  # Hide timestamp labels on x-axis
+        showticklabels=False,  # Hide timestamp labels on x-axis
+        fixedrange=False,  # Allow panning/zooming on x-axis
+        rangeslider=dict(visible=False)  # Disable range slider but allow scrolling
     )
     
     fig.update_yaxes(
