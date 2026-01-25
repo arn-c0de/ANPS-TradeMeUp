@@ -74,6 +74,7 @@ app.layout = html.Div([
     dcc.Store(id="continuous-pipeline-state", data={"running": False, "pid": None}),
     dcc.Store(id="delete-action-store", data={"action": None, "params": None}),
     dcc.Store(id="rss-fetch-status-store", data=None),
+    html.Button(id='refresh-all-panels', style={'display': 'none'}),
     
     create_navbar(),
     dbc.Container([

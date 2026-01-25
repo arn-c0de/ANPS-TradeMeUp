@@ -706,7 +706,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
                         ], className="me-3")
                     ], md=6),
                     dbc.Col([
-                        dbc.Button("🔄 Refresh All", id="refresh-all-panels", color="success", size="sm", className="me-2"),
+                        dbc.Button("🔄 Refresh All", id="refresh-all-panels-btn", color="success", size="sm", className="me-2"),
                         dbc.Button("⭐ Manage Favorites", id="show-favorites-modal", color="warning", size="sm", className="me-2")
                         # Exit button is now in main layout, controlled by visibility callback
                     ], md=6, className="text-end")

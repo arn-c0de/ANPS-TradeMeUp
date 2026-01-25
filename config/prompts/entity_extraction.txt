@@ -35,21 +35,29 @@ Please identify and extract entities in JSON format:
 }}
 
 Entity Types:
-- company: Public companies (provide ticker if known)
+- company: Public companies that can be traded (provide ticker if known)
 - sector: Industry sectors (Technology, Finance, Healthcare, etc.)
 - person: Executives, analysts, officials
 - location: Countries, cities, regions (if relevant to markets)
 
 Exposure Types:
-- direct: Company explicitly discussed
+- direct: Company explicitly discussed as the main subject
 - indirect: Sector or related companies affected
 - supply_chain: Supply chain relationships
 
+⚠️ IMPORTANT - DO NOT EXTRACT:
+- Analyst firms mentioned as the source (e.g., "Oppenheimer", "Wells Fargo Securities", "RBC Capital", "TD Cowen")
+- Investment banks mentioned as analysts (e.g., "JPMorgan Securities", "Goldman Sachs Research")
+- Companies that cannot be traded publicly (private companies, non-profits, government agencies)
+- Only extract companies that are the SUBJECT of the news, not those mentioned as analysts or news sources
+
 Instructions:
-1. Extract all relevant entities mentioned in the article
+1. Extract all relevant TRADEABLE entities mentioned in the article
 2. Provide stock ticker symbols when available (US markets: AAPL, MSFT, etc.)
 3. Count how many times each entity is mentioned
 4. Classify exposure type (direct/indirect/supply_chain)
 5. Assign confidence based on clarity of mention
+6. SKIP analyst firms and investment banks mentioned as analysts/sources
 
 Respond ONLY with the JSON object, no additional text.
+
