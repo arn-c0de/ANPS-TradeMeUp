@@ -1,4 +1,3 @@
-1
 """
 Statistics Tab - Analytics and Metrics
 """
@@ -297,7 +296,14 @@ def create_layout():
                         ], className="d-flex align-items-center")
                     ]),
                     dbc.CardBody([
-                        html.Div(id="entity-details-table")
+                        html.Div(
+                            id="entity-details-table",
+                            style={
+                                "maxHeight": "500px",
+                                "overflowY": "auto",
+                                "overflowX": "auto"
+                            }
+                        )
                     ])
                 ])
             ], width=12)
