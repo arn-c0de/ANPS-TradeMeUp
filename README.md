@@ -40,8 +40,8 @@ TradeMeUp is an MVP-grade pipeline that ingests news, extracts events/entities u
 ## Quick Start (3 steps) ⚡
 1. Clone:
    ```bash
-   git clone https://github.com/arn-c0de/TradeMeUp.git
-   cd TradeMeUp
+   git clone https://github.com/arn-c0de/ANPS-TradeMeUp.git
+   cd ANPS-TradeMeUp
    ```
 2. Create an environment file and add API keys:
    ```bash
