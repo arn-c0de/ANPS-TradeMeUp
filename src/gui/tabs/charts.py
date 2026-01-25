@@ -77,7 +77,7 @@ def create_layout():
         }),
         
         # Store for fullscreen state
-        dcc.Store(id='chart-fullscreen-state', storage_type='session', data={'fullscreen': False}),
+        dcc.Store(id='chart-fullscreen-state', storage_type='memory', data={'fullscreen': False}),
         
         # Store for panel sizes (for resizable layouts)
         dcc.Store(id='panel-sizes-store', storage_type='session', data={'sizes': [50, 50]}),  # percentage widths
@@ -87,6 +87,9 @@ def create_layout():
         
         # ESC key listener for fullscreen
         dcc.Input(id='esc-key-listener', type='text', style={'display': 'none'}),
+        
+        # Hidden button for ESC key triggering (clicked programmatically)
+        html.Button(id='esc-trigger-btn', style={'display': 'none'}),
         
         # Browser-style Tab Bar
         dbc.Row([
@@ -153,7 +156,9 @@ def create_layout():
                             ], md=10),
                             dbc.Col([
                                 dbc.Button("🔄", id="refresh-all-panels", color="success", size="sm", className="me-2", title="Refresh Charts (Ctrl+R)"),
-                                dbc.Button("⛶", id="toggle-fullscreen-btn", color="info", size="sm", outline=True, title="Toggle Fullscreen (ESC to exit)")
+                                dbc.Button("⛶", id="toggle-fullscreen-btn", color="info", size="sm", outline=True, title="Toggle Fullscreen (ESC to exit)"),
+                                # Exit fullscreen button (hidden by default, shown in fullscreen mode via callback)
+                                dbc.Button("⬇ Exit Fullscreen", id="exit-fullscreen-btn", color="danger", size="sm", style={'display': 'none'})
                             ], md=2, className="text-end")
                         ], className="align-items-center")
                     ], className="py-2 px-3")
@@ -1123,8 +1128,8 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
                     ], md=6),
                     dbc.Col([
                         dbc.Button("🔄 Refresh All", id="refresh-all-panels", color="success", size="sm", className="me-2"),
-                        dbc.Button("⭐ Manage Favorites", id="show-favorites-modal", color="warning", size="sm", className="me-2"),
-                        dbc.Button("⬇ Exit Fullscreen", id="toggle-fullscreen-btn", color="danger", size="sm")
+                        dbc.Button("⭐ Manage Favorites", id="show-favorites-modal", color="warning", size="sm", className="me-2")
+                        # Exit button is now in main layout, controlled by visibility callback
                     ], md=6, className="text-end")
                 ])
             ], className="py-1 px-2", style={'padding': '3px 8px'})
