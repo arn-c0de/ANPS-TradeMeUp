@@ -5,7 +5,7 @@ Follows patterns from MarketDataProvider for consistency
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
 from functools import lru_cache
 import threading
@@ -133,14 +133,22 @@ class ChartDataManager:
         try:
             # Determine how much data to load
             load_amount = LOAD_AMOUNTS.get(timeframe, timedelta(days=30))
+
+            # Ensure current_latest_date is timezone-aware (yfinance data is UTC)
+            if current_latest_date.tzinfo is None:
+                current_latest_date = pd.Timestamp(current_latest_date, tz='UTC')
+
             target_end_date = current_latest_date + load_amount
-            
+
+            # Get current time as timezone-aware
+            now_utc = pd.Timestamp.now(tz='UTC')
+
             # Calculate period string for yfinance (from now to target_end_date)
-            days_diff = (target_end_date - datetime.now()).days
-            
+            days_diff = (target_end_date - now_utc).days
+
             # For future data, we typically want recent data up to now
             # Calculate period from current_latest_date to now
-            days_from_latest = (datetime.now() - current_latest_date).days
+            days_from_latest = (now_utc - current_latest_date).days
             
             if days_from_latest <= 7:
                 period = '7d'
@@ -172,6 +180,12 @@ class ChartDataManager:
                 return None
             
             # Filter to only data after current_latest_date
+            # Ensure timezone compatibility for comparison
+            if not df.empty and df.index.tzinfo is not None and current_latest_date.tzinfo is None:
+                current_latest_date = pd.Timestamp(current_latest_date, tz=df.index.tzinfo)
+            elif not df.empty and df.index.tzinfo is None and current_latest_date.tzinfo is not None:
+                current_latest_date = current_latest_date.tz_localize(None)
+
             df = df[df.index > current_latest_date]
             
             if df.empty:
@@ -200,10 +214,18 @@ class ChartDataManager:
         try:
             # Determine how much data to load
             load_amount = LOAD_AMOUNTS.get(timeframe, timedelta(days=30))
+
+            # Ensure current_earliest_date is timezone-aware (yfinance data is UTC)
+            if current_earliest_date.tzinfo is None:
+                current_earliest_date = pd.Timestamp(current_earliest_date, tz='UTC')
+
             target_start_date = current_earliest_date - load_amount
-            
+
+            # Get current time as timezone-aware
+            now_utc = pd.Timestamp.now(tz='UTC')
+
             # Calculate period string for yfinance
-            days_diff = (datetime.now() - target_start_date).days
+            days_diff = (now_utc - target_start_date).days
             
             if days_diff <= 7:
                 period = '7d'
@@ -235,6 +257,12 @@ class ChartDataManager:
                 return None
             
             # Filter to only data before current_earliest_date
+            # Ensure timezone compatibility for comparison
+            if not df.empty and df.index.tzinfo is not None and current_earliest_date.tzinfo is None:
+                current_earliest_date = pd.Timestamp(current_earliest_date, tz=df.index.tzinfo)
+            elif not df.empty and df.index.tzinfo is None and current_earliest_date.tzinfo is not None:
+                current_earliest_date = current_earliest_date.tz_localize(None)
+
             df = df[df.index < current_earliest_date]
             
             if df.empty:
