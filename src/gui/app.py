@@ -46,7 +46,9 @@ app.index_string = '''
         <script src="/assets/react_suppress.js"></script>
         {%metas%}
         <title>{%title%}</title>
-        {%favicon%}
+        <link rel="icon" type="image/png" href="/assets/ANPS-LOGO.png">
+        <link rel="shortcut icon" type="image/png" href="/assets/ANPS-LOGO.png">
+        <link rel="apple-touch-icon" href="/assets/ANPS-LOGO.png">
         {%css%}
     </head>
     <body>

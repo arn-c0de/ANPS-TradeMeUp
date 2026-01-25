@@ -12,6 +12,7 @@ class TradingSimulation(Base):
     """Model for storing trading simulation outcomes."""
 
     __tablename__ = "trading_simulations"
+    __table_args__ = {'extend_existing': True}
 
     simulation_id = Column(GUID, primary_key=True, default=uuid.uuid4)
     prediction_id = Column(GUID, ForeignKey("predictions.prediction_id"), nullable=False)
@@ -24,8 +25,18 @@ class TradingSimulation(Base):
     risk_score = Column(Float)
     confidence = Column(Float)
     calibrated_confidence = Column(Float)
+
+    # Cost metrics
     transaction_cost_bps = Column(Float)
+    overnight_cost_bps = Column(Float)  # NEW: Overnight financing costs
+    borrow_cost_bps = Column(Float)  # NEW: Short-selling borrow costs
     cost_breakdown = Column(JSON)
+
+    # Position metrics
+    position_size_pct = Column(Float)  # NEW: Position size as % of portfolio
+    position_value_usd = Column(Float)  # NEW: Position value in USD
+
+    # Risk and metadata
     risk_breakdown = Column(JSON)
     simulation_metadata = Column(JSON)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -37,6 +48,7 @@ class TradingSimulation(Base):
         Index("idx_simulation_prediction", "prediction_id"),
         Index("idx_simulation_entity_time", "entity_id", "created_at"),
         Index("idx_simulation_decision", "decision", "created_at"),
+        Index("idx_simulation_risk_score", "risk_score"),  # NEW: Index for risk-based queries
     )
 
     def __repr__(self):

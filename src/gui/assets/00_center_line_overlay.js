@@ -9,10 +9,11 @@
          * Creates vertical line, center timestamp label, and last update label
          */
         function createCenterLineOverlay(graphElement, graphId) {
-        // Check if overlay already exists
+        // Check if overlay already exists - if so, update it instead of recreating
         let overlay = graphElement.querySelector('.chart-center-line-overlay');
+        let needsUpdate = false;
         if (overlay) {
-            return overlay;
+            needsUpdate = true;
         }
 
         // Find the Plotly plot container (the actual chart area)
@@ -35,6 +36,43 @@
             graphElement.style.position = 'relative';
         }
 
+        // Update overlay height function - shared for both new and existing overlays
+        const updateOverlayHeight = () => {
+            if (!overlay) return;
+            let currentHeight = plotContainer.offsetHeight || plotContainer.clientHeight;
+            if (currentHeight === 0 && svgElement) {
+                currentHeight = svgElement.clientHeight || svgElement.getBoundingClientRect().height || 400;
+            }
+            if (currentHeight > 0) {
+                overlay.style.height = currentHeight + 'px';
+                overlay.style.minHeight = currentHeight + 'px';
+                // Apply gradient background after height is set
+                overlay.style.background = 'linear-gradient(to bottom, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.3) 50%, transparent 50%, transparent 52%, rgba(255,255,255,0.3) 52%)';
+                overlay.style.backgroundSize = '1px 8px';
+            }
+        };
+        
+        // If overlay exists, update it immediately and return
+        if (needsUpdate && overlay) {
+            updateOverlayHeight();
+            // Use ResizeObserver to keep it updated
+            if (window.ResizeObserver) {
+                // Check if observer already exists (avoid duplicates)
+                if (!overlay.__resizeObserver) {
+                    const resizeObserver = new ResizeObserver(updateOverlayHeight);
+                    resizeObserver.observe(plotContainer);
+                    if (svgElement) {
+                        resizeObserver.observe(svgElement);
+                    }
+                    overlay.__resizeObserver = resizeObserver;
+                }
+            }
+            // Immediate update
+            requestAnimationFrame(updateOverlayHeight);
+            return overlay;
+        }
+        
+        // Create new overlay only if it doesn't exist
         // Get plot container height for overlay - wait a bit if height is 0
         let plotHeight = plotContainer.offsetHeight || plotContainer.clientHeight;
         if (plotHeight === 0) {
@@ -62,38 +100,23 @@
             pointer-events: none;
             z-index: 1000;
         `;
-
-        // Update overlay height when plot container is ready (using ResizeObserver)
-        const updateOverlayHeight = () => {
-            let currentHeight = plotContainer.offsetHeight || plotContainer.clientHeight;
-            if (currentHeight === 0 && svgElement) {
-                currentHeight = svgElement.clientHeight || svgElement.getBoundingClientRect().height || 400;
-            }
-            if (currentHeight > 0 && overlay) {
-                overlay.style.height = currentHeight + 'px';
-                overlay.style.minHeight = currentHeight + 'px';
-                // Apply gradient background after height is set
-                overlay.style.background = 'linear-gradient(to bottom, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.3) 50%, transparent 50%, transparent 52%, rgba(255,255,255,0.3) 52%)';
-                overlay.style.backgroundSize = '1px 8px';
-            }
-        };
         
-        // Use ResizeObserver to update height dynamically
+        // Use ResizeObserver to update height dynamically for new overlays
         if (window.ResizeObserver) {
             const resizeObserver = new ResizeObserver(updateOverlayHeight);
             resizeObserver.observe(plotContainer);
             if (svgElement) {
                 resizeObserver.observe(svgElement);
             }
+            overlay.__resizeObserver = resizeObserver;
         } else {
             // Fallback: update after a delay
             setTimeout(updateOverlayHeight, 500);
         }
         
         // Also update immediately if height is available
-        setTimeout(updateOverlayHeight, 100);
-        setTimeout(updateOverlayHeight, 300);
-        setTimeout(updateOverlayHeight, 600);
+        requestAnimationFrame(updateOverlayHeight);
+        setTimeout(updateOverlayHeight, 50);
 
         // Create center timestamp label (at top of line, inside chart)
         const centerLabel = document.createElement('div');
