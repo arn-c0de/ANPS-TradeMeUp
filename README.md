@@ -1,5 +1,9 @@
 # ANPS-TradeMeUp 🚀
 
+<div align="center">
+  <img src="images/ANPS-LOGO.png" alt="ANPS Logo" height="80px">
+</div>
+
 **ANPS (AI News Prediction System) - Multi-Agent News-Based Market Prediction System**
 
 ![Main Dashboard](images/screenshots/trademeup-1.0.2-maindash.png)

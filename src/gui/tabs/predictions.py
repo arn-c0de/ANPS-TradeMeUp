@@ -113,7 +113,8 @@ def create_layout():
             # Hidden stores
             dcc.Store(id="prediction-detail-cache", data={}),
             dcc.Store(id="current-prediction-id", data=None),
-            dcc.Store(id="refresh-loading-state", data={})
+            dcc.Store(id="refresh-loading-state", data={}),
+            dcc.Store(id="simulation-sync-trigger", data={})  # Triggered when simulations update
         ], fluid=True),
 
         # Modal OUTSIDE container for proper z-index and positioning
@@ -600,13 +601,16 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
     }
 
 
-def get_prediction_details(engine, prediction_id, load_performance=False):
+def get_prediction_details(engine, prediction_id, load_performance=False, portfolio_capital=100000, currency="USD", risk_adjustment=0.3):
     """Get detailed information about a prediction
 
     Args:
         engine: Database engine
         prediction_id: UUID of prediction to show details for
         load_performance: Whether to load live performance data (slow)
+        portfolio_capital: Total portfolio capital for position sizing
+        currency: Currency symbol (USD/EUR/GBP)
+        risk_adjustment: Risk adjustment factor (0-1)
 
     Returns:
         Tuple of (title, body_content)
@@ -898,11 +902,26 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
 
                 cost_bps = simulation.transaction_cost_bps or 0
                 cost_breakdown = simulation.cost_breakdown or {}
+                risk_breakdown = simulation.risk_breakdown or {}
+                sim_metadata = simulation.simulation_metadata or {}
+
+                # Extract detailed metrics
+                position_info = sim_metadata.get("position_info", {})
+                cost_details = sim_metadata.get("cost_details", {})
+                constraints = sim_metadata.get("constraints", {})
+                market_snapshot = sim_metadata.get("market_snapshot", {})
+
+                # Calculate recommended investment size
+                currency_symbol = {"EUR": "\u20AC", "USD": "$", "GBP": "\u00A3"}.get(currency, currency)
+                position_size_pct = position_info.get('position_size_pct', 0)
+                base_investment = portfolio_capital * (position_size_pct / 100) if position_size_pct > 0 else 0
+                risk_factor = 1.0 - (risk_score * risk_adjustment) if risk_score is not None else 1.0
+                recommended_investment = base_investment * risk_factor
 
                 simulation_section = dbc.Row([
                     dbc.Col([
                         dbc.Card([
-                            dbc.CardHeader(html.Div("🧪 Trading Simulation", style={"fontWeight": "bold"}), className="py-1"),
+                            dbc.CardHeader(html.Div("🧪 Trading Simulation - Complete Analysis", style={"fontWeight": "bold"}), className="py-1"),
                             dbc.CardBody([
                                 # Top Row: Decision, Risk Score, Returns
                                 dbc.Row([
@@ -919,7 +938,7 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
                                         dbc.Card([
                                             dbc.CardBody([
                                                 html.H5(f"{risk_score:.2f}", className=f"text-{risk_color} text-center mb-0"),
-                                                html.Small("Risk", className="text-center text-muted d-block")
+                                                html.Small("Risk Score", className="text-center text-muted d-block")
                                             ], className="py-1 px-2")
                                         ], color="light")
                                     ], width=3),
@@ -927,7 +946,7 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
                                         dbc.Card([
                                             dbc.CardBody([
                                                 html.H5(f"{expected_return:+.2f}%", className=f"text-{expected_color} text-center mb-0"),
-                                                html.Small("Expected", className="text-center text-muted d-block")
+                                                html.Small("Expected Return", className="text-center text-muted d-block")
                                             ], className="py-1 px-2")
                                         ], color="light")
                                     ], width=3),
@@ -935,24 +954,167 @@ def get_prediction_details(engine, prediction_id, load_performance=False):
                                         dbc.Card([
                                             dbc.CardBody([
                                                 html.H5(f"{actual_return:+.2f}%", className=f"text-{actual_color} text-center mb-0"),
-                                                html.Small("Actual", className="text-center text-muted d-block")
+                                                html.Small("Actual Return", className="text-center text-muted d-block")
                                             ], className="py-1 px-2")
                                         ], color="light")
                                     ], width=3)
-                                ], className="mb-2"),
-                                # Second Row: Details
+                                ], className="mb-3"),
+
+                                # Cost Breakdown Section
                                 dbc.Row([
                                     dbc.Col([
-                                        html.Small([
-                                            html.Strong("Divergence: "),
-                                            html.Span(f"{divergence:+.2f}%", className=f"text-{divergence_color}"),
-                                            " | ",
-                                            html.Strong("Cost: "),
-                                            html.Span(f"{cost_bps:.1f} bps"),
-                                            " | ",
-                                            html.Strong("Conf: "),
-                                            html.Span(f"{simulation.confidence:.1%}" if simulation.confidence else "N/A")
-                                        ], className="d-block")
+                                        dbc.Card([
+                                            dbc.CardHeader([
+                                                html.Strong("💰 Cost Breakdown "),
+                                                html.Small(f"(Total: {cost_bps:.1f} bps)", className="text-muted")
+                                            ], className="py-1"),
+                                            dbc.CardBody([
+                                                dbc.Row([
+                                                    dbc.Col([
+                                                        html.Small("Commission:", className="text-muted"),
+                                                        html.Strong(f" {cost_breakdown.get('commission_bps', 0):.2f} bps")
+                                                    ], width=4),
+                                                    dbc.Col([
+                                                        html.Small("Spread:", className="text-muted"),
+                                                        html.Strong(f" {cost_breakdown.get('spread_bps', 0):.2f} bps")
+                                                    ], width=4),
+                                                    dbc.Col([
+                                                        html.Small("Slippage:", className="text-muted"),
+                                                        html.Strong(f" {cost_breakdown.get('slippage_bps', 0):.2f} bps")
+                                                    ], width=4)
+                                                ], className="mb-2"),
+                                                dbc.Row([
+                                                    dbc.Col([
+                                                        html.Small("Market Impact:", className="text-muted"),
+                                                        html.Strong(f" {cost_breakdown.get('market_impact_bps', 0):.2f} bps")
+                                                    ], width=4),
+                                                    dbc.Col([
+                                                        html.Small("Overnight Financing:", className="text-muted"),
+                                                        html.Strong(f" {cost_breakdown.get('overnight_cost_bps', 0):.2f} bps")
+                                                    ], width=4),
+                                                    dbc.Col([
+                                                        html.Small("Borrow Cost:", className="text-muted"),
+                                                        html.Strong(f" {cost_breakdown.get('borrow_cost_bps', 0):.2f} bps")
+                                                    ], width=4)
+                                                ], className="mb-2"),
+                                                dbc.Row([
+                                                    dbc.Col([
+                                                        html.Small("Regulatory (SEC/FINRA):", className="text-muted"),
+                                                        html.Strong(f" {cost_breakdown.get('regulatory_bps', 0):.2f} bps")
+                                                    ], width=4),
+                                                    dbc.Col([
+                                                        html.Small("Cost Ratio:", className="text-muted"),
+                                                        html.Strong(f" {cost_details.get('cost_ratio', 0):.2f}",
+                                                                   className="text-warning" if cost_details.get('cost_ratio', 0) > 0.5 else "")
+                                                    ], width=4)
+                                                ])
+                                            ], className="py-2")
+                                        ], color="dark", className="mb-2")
+                                    ], width=12)
+                                ]),
+
+                                # Risk Components Breakdown Section
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardHeader([
+                                                html.Strong("⚠️ Risk Components "),
+                                                html.Small(f"(Weighted Score: {risk_score:.2f})", className=f"text-{risk_color}")
+                                            ], className="py-1"),
+                                            dbc.CardBody([
+                                                dbc.Row([
+                                                    dbc.Col([
+                                                        html.Small("Model Uncertainty:", className="text-muted d-block"),
+                                                        dbc.Progress(value=risk_breakdown.get('model_uncertainty', 0) * 100,
+                                                                   color="warning", className="mb-1", style={"height": "12px"}),
+                                                        html.Small(f"{risk_breakdown.get('model_uncertainty', 0):.3f}", className="text-muted")
+                                                    ], width=4),
+                                                    dbc.Col([
+                                                        html.Small("Divergence:", className="text-muted d-block"),
+                                                        dbc.Progress(value=risk_breakdown.get('divergence_magnitude', 0) * 100,
+                                                                   color="warning", className="mb-1", style={"height": "12px"}),
+                                                        html.Small(f"{risk_breakdown.get('divergence_magnitude', 0):.3f}", className="text-muted")
+                                                    ], width=4),
+                                                    dbc.Col([
+                                                        html.Small("Volatility Regime:", className="text-muted d-block"),
+                                                        dbc.Progress(value=risk_breakdown.get('volatility_regime', 0) * 100,
+                                                                   color="danger", className="mb-1", style={"height": "12px"}),
+                                                        html.Small(f"{risk_breakdown.get('volatility_regime', 0):.3f}", className="text-muted")
+                                                    ], width=4)
+                                                ], className="mb-2"),
+                                                dbc.Row([
+                                                    dbc.Col([
+                                                        html.Small("Liquidity Stress:", className="text-muted d-block"),
+                                                        dbc.Progress(value=risk_breakdown.get('liquidity_stress', 0) * 100,
+                                                                   color="info", className="mb-1", style={"height": "12px"}),
+                                                        html.Small(f"{risk_breakdown.get('liquidity_stress', 0):.3f}", className="text-muted")
+                                                    ], width=4),
+                                                    dbc.Col([
+                                                        html.Small("Position Concentration:", className="text-muted d-block"),
+                                                        dbc.Progress(value=risk_breakdown.get('position_concentration', 0) * 100,
+                                                                   color="warning", className="mb-1", style={"height": "12px"}),
+                                                        html.Small(f"{risk_breakdown.get('position_concentration', 0):.3f}", className="text-muted")
+                                                    ], width=4),
+                                                    dbc.Col([
+                                                        html.Small("Liquidity Constraint:", className="text-muted d-block"),
+                                                        dbc.Progress(value=risk_breakdown.get('liquidity_constraint', 0) * 100,
+                                                                   color="info", className="mb-1", style={"height": "12px"}),
+                                                        html.Small(f"{risk_breakdown.get('liquidity_constraint', 0):.3f}", className="text-muted")
+                                                    ], width=4)
+                                                ])
+                                            ], className="py-2")
+                                        ], color="dark", className="mb-2")
+                                    ], width=12)
+                                ]),
+
+                                # Position & Constraints Section
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardHeader([
+                                                html.Strong("📍 Position & Investment Recommendation"),
+                                                html.Small(f" (Portfolio: {currency_symbol}{portfolio_capital:,.0f})", className="text-muted ms-2")
+                                            ], className="py-1"),
+                                            dbc.CardBody([
+                                                dbc.Row([
+                                                    dbc.Col([
+                                                        html.Small("Position Size:", className="text-muted"),
+                                                        html.Strong(f" {position_info.get('position_size_pct', 0):.1f}%",
+                                                                   className="text-info" if constraints.get('position_size_ok', True) else "text-danger")
+                                                    ], width=3),
+                                                    dbc.Col([
+                                                        html.Small("Position Value:", className="text-muted"),
+                                                        html.Strong(f" ${position_info.get('position_value_usd', 0):,.0f}")
+                                                    ], width=3),
+                                                    dbc.Col([
+                                                        html.Small("Daily Volume:", className="text-muted"),
+                                                        html.Strong(f" ${market_snapshot.get('volume_usd', 0):,.0f}",
+                                                                   className="text-info" if constraints.get('liquidity_ok', True) else "text-danger")
+                                                    ], width=3),
+                                                    dbc.Col([
+                                                        html.Small("Constraints:", className="text-muted"),
+                                                        html.Strong(" ✅ Pass" if not constraints.get('blocked_by', []) else f" ⚠️ {len(constraints.get('blocked_by', []))} violations",
+                                                                   className="text-success" if not constraints.get('blocked_by', []) else "text-warning")
+                                                    ], width=3)
+                                                ], className="mb-2"),
+                                                # Recommended Investment Row
+                                                dbc.Row([
+                                                    dbc.Col([
+                                                        dbc.Alert([
+                                                            html.Div([
+                                                                html.H5([
+                                                                    html.Span("💰 Recommended Investment: ", className="text-muted"),
+                                                                    html.Strong(f"{currency_symbol}{recommended_investment:,.0f}", className="text-success")
+                                                                ], className="mb-2"),
+                                                                html.Small([
+                                                                    f"Base ({position_size_pct:.1f}%): {currency_symbol}{base_investment:,.0f} × Risk Factor ({risk_factor:.3f}) = {currency_symbol}{recommended_investment:,.0f}"
+                                                                ], className="text-muted")
+                                                            ])
+                                                        ], color="success", className="mb-0")
+                                                    ], width=12)
+                                                ])
+                                            ], className="py-2")
+                                        ], color="dark")
                                     ], width=12)
                                 ])
                             ], className="py-2")
@@ -1091,9 +1253,10 @@ def register_callbacks(app):
          Input("pred-horizon-filter", "value"),
          Input("pred-surprise-filter", "value"),
          Input("pred-confidence-filter", "value"),
-         Input("refresh-loading-state", "data")]
+         Input("refresh-loading-state", "data"),
+         Input("simulation-sync-trigger", "data")]  # Triggered when simulations update
     )
-    def update_predictions_table(entities, start_date, end_date, horizon, surprise_filter, min_conf, loading_state):
+    def update_predictions_table(entities, start_date, end_date, horizon, surprise_filter, min_conf, loading_state, sim_sync):
         """Update predictions table with filters (removed interval for performance)"""
         date_range = (start_date, end_date) if start_date or end_date else None
         refreshing_id = loading_state.get("prediction_id") if loading_state else None
@@ -1303,14 +1466,30 @@ def register_callbacks(app):
         [Output("prediction-modal-title", "children"),
          Output("prediction-modal-body", "children")],
         [Input("prediction-detail-cache", "data")],
-        [State("prediction-modal", "is_open")],
+        [State("prediction-modal", "is_open"),
+         State("portfolio-capital-input", "value"),
+         State("portfolio-currency-dropdown", "value"),
+         State("portfolio-risk-adjustment", "value")],
         prevent_initial_call=True
     )
-    def update_modal_content(cached_data, is_open):
-        """Update modal content from cached prediction_id"""
+    def update_modal_content(cached_data, is_open, portfolio_capital, currency, risk_adjustment):
+        """Update modal content from cached prediction_id with portfolio context"""
         if not is_open or not cached_data or "prediction_id" not in cached_data:
             return dash.no_update, dash.no_update
         prediction_id = cached_data["prediction_id"]
         load_performance = cached_data.get("load_performance", False)
-        title, body = get_prediction_details(_engine, prediction_id, load_performance=load_performance)
+
+        # Use default values if portfolio settings not configured
+        portfolio_capital = portfolio_capital or 100000
+        currency = currency or "USD"
+        risk_adjustment = risk_adjustment if risk_adjustment is not None else 0.3
+
+        title, body = get_prediction_details(
+            _engine,
+            prediction_id,
+            load_performance=load_performance,
+            portfolio_capital=portfolio_capital,
+            currency=currency,
+            risk_adjustment=risk_adjustment
+        )
         return title, body

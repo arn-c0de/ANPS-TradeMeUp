@@ -168,6 +168,39 @@ p, span, small, label, h1, h2, h3, h4, h5, h6 {
     overflow-y: auto;
 }
 
+/* Overlay list items in trading overlay (compact list next to button) */
+.overlay-list-item {
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.overlay-list-item:hover {
+    background-color: #222 !important;
+    transform: translateX(2px);
+}
+
+.overlay-list-item:active {
+    background-color: #333 !important;
+    transform: translateX(0);
+}
+
+/* Scrollbar styling for overlay list */
+.overlay-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.overlay-list::-webkit-scrollbar-track {
+    background: #111;
+}
+
+.overlay-list::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 2px;
+}
+
+.overlay-list::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
 .overlay-group-container {
     display: block;
 }

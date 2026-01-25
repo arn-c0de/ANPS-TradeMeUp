@@ -1,0 +1,101 @@
+{
+  "version": "1.0.0",
+  "description": "Trading simulation parameters for cost modeling and risk constraints",
+
+  "cost_parameters": {
+    "commission": {
+      "per_share": 0.005,
+      "min_commission": 1.0,
+      "description": "Commission charged per share with minimum per trade"
+    },
+    "spread_bps": {
+      "low_volatility": 4.0,
+      "medium_volatility": 8.0,
+      "high_volatility": 12.0,
+      "stressed_volatility": 18.0,
+      "description": "Bid-ask spread in basis points by volatility regime"
+    },
+    "slippage_bps": {
+      "normal": 5.0,
+      "high_volatility": 9.0,
+      "stressed": 15.0,
+      "description": "Price slippage in basis points"
+    },
+    "market_impact_bps": {
+      "small_order": 6.0,
+      "medium_order": 12.0,
+      "large_order": 25.0,
+      "volume_threshold_pct": 1.0,
+      "description": "Market impact based on order size relative to daily volume"
+    },
+    "overnight_financing": {
+      "long_position_bps_per_day": 1.1,
+      "short_position_bps_per_day": 1.4,
+      "description": "Overnight financing costs (margin interest) per day in basis points"
+    },
+    "short_borrow_costs": {
+      "easy_to_borrow_annual_pct": 0.5,
+      "moderate_borrow_annual_pct": 5.0,
+      "hard_to_borrow_annual_pct": 25.0,
+      "very_hard_to_borrow_annual_pct": 50.0,
+      "description": "Annual short-selling borrow costs as percentage of position value"
+    },
+    "regulatory_fees": {
+      "sec_fee_bps": 0.278,
+      "finra_taf_bps": 0.013,
+      "description": "SEC Section 31 fees and FINRA Trading Activity Fee"
+    }
+  },
+
+  "position_constraints": {
+    "max_position_size_pct": 10.0,
+    "max_sector_concentration_pct": 25.0,
+    "max_leverage": 2.0,
+    "min_liquidity_usd": 100000,
+    "max_daily_volume_participation_pct": 5.0,
+    "description": "Position sizing and portfolio-level risk limits"
+    },
+
+  "decision_thresholds": {
+    "min_confidence": 0.55,
+    "min_expected_return_pct": 0.75,
+    "max_risk_score": 0.65,
+    "max_cost_ratio": 0.70,
+    "description": "Thresholds for BUY/SELL/HOLD decisions"
+  },
+
+  "risk_weights": {
+    "model_uncertainty": 0.18,
+    "divergence_magnitude": 0.18,
+    "volatility_regime": 0.13,
+    "liquidity_stress": 0.10,
+    "regime_instability": 0.10,
+    "transaction_cost": 0.09,
+    "market_impact": 0.09,
+    "correlation_breakdown": 0.05,
+    "position_concentration": 0.05,
+    "liquidity_constraint": 0.03,
+    "description": "Risk component weights (must sum to 1.0)"
+  },
+
+  "presets": {
+    "conservative": {
+      "description": "Higher costs, stricter risk limits for conservative backtesting",
+      "cost_multiplier": 1.5,
+      "max_risk_score": 0.50,
+      "max_position_size_pct": 5.0
+    },
+    "aggressive": {
+      "description": "Lower costs, relaxed limits for optimistic scenarios",
+      "cost_multiplier": 0.75,
+      "max_risk_score": 0.75,
+      "max_position_size_pct": 15.0
+    },
+    "realistic": {
+      "description": "Standard parameters matching real-world institutional trading",
+      "cost_multiplier": 1.0,
+      "max_risk_score": 0.65,
+      "max_position_size_pct": 10.0
+    }
+  }
+}

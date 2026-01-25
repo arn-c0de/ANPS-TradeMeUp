@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import logging
+import json
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
@@ -31,12 +33,69 @@ class TradingSimulationEngine:
         market_data_provider: Optional[MarketDataProvider] = None,
         performance_service: Optional[PredictionPerformanceService] = None,
         risk_calculator: Optional[RiskCalculator] = None,
+        config_path: Optional[str] = None,
     ):
         self.market_data_provider = market_data_provider or MarketDataProvider()
         self.performance_service = performance_service or PredictionPerformanceService()
         self.risk_calculator = risk_calculator or RiskCalculator()
         self._market_cache: Dict[str, Dict] = {}
         self._market_cache_ttl = timedelta(minutes=10)
+
+        # Load simulation parameters from config
+        self.config = self._load_config(config_path)
+        self._update_thresholds_from_config()
+
+    def _load_config(self, config_path: Optional[str] = None) -> Dict:
+        """Load simulation parameters from JSON config file."""
+        if config_path is None:
+            # Default path relative to project root
+            config_path = Path(__file__).parent.parent.parent / "config" / "simulation_params.json"
+        else:
+            config_path = Path(config_path)
+
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                logger.info(f"Loaded simulation config from {config_path}")
+                return config
+        except FileNotFoundError:
+            logger.warning(f"Config file not found at {config_path}, using defaults")
+            return self._get_default_config()
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in config file: {e}, using defaults")
+            return self._get_default_config()
+
+    def _get_default_config(self) -> Dict:
+        """Fallback default configuration if file not found."""
+        return {
+            "cost_parameters": {
+                "commission": {"per_share": 0.005},
+                "spread_bps": {"low_volatility": 4.0, "medium_volatility": 8.0, "high_volatility": 12.0},
+                "slippage_bps": {"normal": 5.0, "high_volatility": 9.0},
+                "market_impact_bps": {"small_order": 6.0, "medium_order": 12.0},
+                "overnight_financing": {"long_position_bps_per_day": 1.1, "short_position_bps_per_day": 1.4},
+                "short_borrow_costs": {"easy_to_borrow_annual_pct": 0.5},
+                "regulatory_fees": {"sec_fee_bps": 0.278}
+            },
+            "position_constraints": {
+                "max_position_size_pct": 10.0,
+                "max_daily_volume_participation_pct": 5.0
+            },
+            "decision_thresholds": {
+                "min_confidence": 0.55,
+                "min_expected_return_pct": 0.75,
+                "max_risk_score": 0.65,
+                "max_cost_ratio": 0.70
+            }
+        }
+
+    def _update_thresholds_from_config(self):
+        """Update decision thresholds from loaded config."""
+        thresholds = self.config.get("decision_thresholds", {})
+        self.MIN_CONFIDENCE = thresholds.get("min_confidence", self.MIN_CONFIDENCE)
+        self.MIN_EXPECTED_RETURN_PCT = thresholds.get("min_expected_return_pct", self.MIN_EXPECTED_RETURN_PCT)
+        self.MAX_RISK_SCORE = thresholds.get("max_risk_score", self.MAX_RISK_SCORE)
+        self.MAX_COST_RATIO = thresholds.get("max_cost_ratio", self.MAX_COST_RATIO)
 
     def _get_expected_return_pct(self, prediction: Prediction) -> float:
         expected_return = prediction.expected_return or {}
@@ -67,30 +126,147 @@ class TradingSimulationEngine:
         self,
         price: float,
         volatility_regime: str,
+        predicted_direction: str,
+        horizon: str,
         shares: int = DEFAULT_SHARES,
+        daily_volume: Optional[float] = None,
     ) -> Tuple[float, Dict]:
+        """
+        Estimate comprehensive transaction costs in basis points.
+
+        Args:
+            price: Current price per share
+            volatility_regime: Market volatility regime (low/medium/high/stressed)
+            predicted_direction: Trade direction (up/down/flat) - affects overnight & borrow costs
+            horizon: Prediction horizon (1d/5d/20d) - affects time-based costs
+            shares: Number of shares to trade
+            daily_volume: Average daily trading volume (for liquidity analysis)
+
+        Returns:
+            Tuple of (total_bps, breakdown_dict)
+        """
         if price <= 0:
             return 0.0, {}
 
-        commission_per_share = 0.005
-        commission = commission_per_share * shares
+        cost_params = self.config.get("cost_parameters", {})
+
+        # 1. Commission costs
+        commission_config = cost_params.get("commission", {})
+        commission_per_share = commission_config.get("per_share", 0.005)
+        min_commission = commission_config.get("min_commission", 1.0)
+        commission = max(commission_per_share * shares, min_commission)
         commission_bps = (commission / (price * shares)) * 10000
 
+        # 2. Spread costs (volatility-dependent)
         vol_key = (volatility_regime or "medium").lower()
-        spread_bps = 4.0 if vol_key == "low" else 8.0 if vol_key == "medium" else 12.0
-        slippage_bps = 5.0 if vol_key != "high" else 9.0
+        spread_config = cost_params.get("spread_bps", {})
+        spread_bps = spread_config.get(f"{vol_key}_volatility", spread_config.get("medium_volatility", 8.0))
 
-        impact_bps = 6.0 if shares <= 100 else 12.0
+        # 3. Slippage costs
+        slippage_config = cost_params.get("slippage_bps", {})
+        slippage_bps = slippage_config.get("high_volatility", 9.0) if vol_key == "high" or vol_key == "stressed" else slippage_config.get("normal", 5.0)
 
-        total_bps = commission_bps + spread_bps + slippage_bps + impact_bps
+        # 4. Market impact (volume-aware if daily_volume provided)
+        impact_bps = self._calculate_market_impact(price, shares, daily_volume, vol_key)
+
+        # 5. Overnight financing costs (time-based, direction-dependent)
+        overnight_bps = self._calculate_overnight_costs(predicted_direction, horizon)
+
+        # 6. Short borrow costs (only for short positions)
+        borrow_bps = self._calculate_borrow_costs(predicted_direction, horizon)
+
+        # 7. Regulatory fees (SEC + FINRA)
+        regulatory_config = cost_params.get("regulatory_fees", {})
+        sec_fee_bps = regulatory_config.get("sec_fee_bps", 0.278)
+        finra_fee_bps = regulatory_config.get("finra_taf_bps", 0.013)
+        regulatory_bps = sec_fee_bps + finra_fee_bps
+
+        # Total costs
+        total_bps = (
+            commission_bps +
+            spread_bps +
+            slippage_bps +
+            impact_bps +
+            overnight_bps +
+            borrow_bps +
+            regulatory_bps
+        )
+
         breakdown = {
-            "commission_bps": commission_bps,
-            "spread_bps": spread_bps,
-            "slippage_bps": slippage_bps,
-            "market_impact_bps": impact_bps,
-            "total_bps": total_bps,
+            "commission_bps": round(commission_bps, 3),
+            "spread_bps": round(spread_bps, 3),
+            "slippage_bps": round(slippage_bps, 3),
+            "market_impact_bps": round(impact_bps, 3),
+            "overnight_cost_bps": round(overnight_bps, 3),
+            "borrow_cost_bps": round(borrow_bps, 3),
+            "regulatory_bps": round(regulatory_bps, 3),
+            "total_bps": round(total_bps, 3),
         }
         return total_bps, breakdown
+
+    def _calculate_market_impact(
+        self,
+        price: float,
+        shares: int,
+        daily_volume: Optional[float],
+        vol_regime: str
+    ) -> float:
+        """Calculate dynamic market impact based on order size vs daily volume."""
+        impact_config = self.config.get("cost_parameters", {}).get("market_impact_bps", {})
+
+        if daily_volume and daily_volume > 0:
+            # Volume-aware calculation
+            participation_pct = (shares / daily_volume) * 100
+            volume_threshold = impact_config.get("volume_threshold_pct", 1.0)
+
+            if participation_pct <= volume_threshold:
+                return impact_config.get("small_order", 6.0)
+            elif participation_pct <= volume_threshold * 3:
+                # Scale linearly between small and medium
+                return impact_config.get("medium_order", 12.0)
+            else:
+                # Large order - exponential penalty
+                base_impact = impact_config.get("large_order", 25.0)
+                # Add penalty for stressed vol
+                stress_multiplier = 1.5 if vol_regime == "stressed" else 1.0
+                return base_impact * stress_multiplier
+        else:
+            # Fallback to simple share-based calculation
+            return impact_config.get("small_order", 6.0) if shares <= 100 else impact_config.get("medium_order", 12.0)
+
+    def _calculate_overnight_costs(self, predicted_direction: str, horizon: str) -> float:
+        """Calculate overnight financing fees based on holding period."""
+        financing_config = self.config.get("cost_parameters", {}).get("overnight_financing", {})
+
+        # Convert horizon to days
+        horizon_days = {"1d": 1, "5d": 5, "20d": 20}.get(horizon, 5)
+
+        # Direction determines if long or short position
+        if predicted_direction == "down":
+            # Short position - higher overnight costs
+            cost_per_day = financing_config.get("short_position_bps_per_day", 1.4)
+        else:
+            # Long position (up or flat)
+            cost_per_day = financing_config.get("long_position_bps_per_day", 1.1)
+
+        return cost_per_day * horizon_days
+
+    def _calculate_borrow_costs(self, predicted_direction: str, horizon: str) -> float:
+        """Calculate short-selling borrow costs (only applies to short positions)."""
+        if predicted_direction != "down":
+            return 0.0  # No borrow costs for long positions
+
+        borrow_config = self.config.get("cost_parameters", {}).get("short_borrow_costs", {})
+
+        # Assume "easy to borrow" for most liquid stocks
+        # In production, this should be determined by stock-specific data
+        annual_pct = borrow_config.get("easy_to_borrow_annual_pct", 0.5)
+
+        # Convert to bps for the holding period
+        horizon_days = {"1d": 1, "5d": 5, "20d": 20}.get(horizon, 5)
+        borrow_bps = (annual_pct / 100) * (horizon_days / 365) * 10000
+
+        return borrow_bps
 
     def _get_market_snapshot(self, ticker: str) -> Optional[Dict]:
         now = datetime.utcnow()
@@ -112,21 +288,65 @@ class TradingSimulationEngine:
         confidence: float,
         risk_score: float,
         cost_ratio: float,
-    ) -> str:
-        if confidence < self.MIN_CONFIDENCE:
-            return "hold"
-        if abs(expected_return_pct) < self.MIN_EXPECTED_RETURN_PCT:
-            return "hold"
-        if risk_score > self.MAX_RISK_SCORE:
-            return "hold"
-        if cost_ratio > self.MAX_COST_RATIO:
-            return "hold"
+        position_constraints: Optional[Dict] = None,
+    ) -> Tuple[str, Dict]:
+        """
+        Calculate trading decision with position sizing constraints.
 
+        Returns:
+            Tuple of (decision, constraint_info)
+        """
+        constraint_info = {
+            "blocked_by": [],
+            "position_size_ok": True,
+            "liquidity_ok": True,
+            "risk_ok": True
+        }
+
+        # Standard decision thresholds
+        if confidence < self.MIN_CONFIDENCE:
+            constraint_info["blocked_by"].append(f"confidence ({confidence:.2%} < {self.MIN_CONFIDENCE:.2%})")
+            return "hold", constraint_info
+
+        if abs(expected_return_pct) < self.MIN_EXPECTED_RETURN_PCT:
+            constraint_info["blocked_by"].append(f"expected_return ({abs(expected_return_pct):.2f}% < {self.MIN_EXPECTED_RETURN_PCT:.2f}%)")
+            return "hold", constraint_info
+
+        if risk_score > self.MAX_RISK_SCORE:
+            constraint_info["blocked_by"].append(f"risk_score ({risk_score:.2f} > {self.MAX_RISK_SCORE:.2f})")
+            constraint_info["risk_ok"] = False
+            return "hold", constraint_info
+
+        if cost_ratio > self.MAX_COST_RATIO:
+            constraint_info["blocked_by"].append(f"cost_ratio ({cost_ratio:.2f} > {self.MAX_COST_RATIO:.2f})")
+            return "hold", constraint_info
+
+        # Position sizing constraints (if provided)
+        if position_constraints:
+            position_size_pct = position_constraints.get("position_size_pct", 0)
+            max_position_size = self.config.get("position_constraints", {}).get("max_position_size_pct", 10.0)
+
+            if position_size_pct > max_position_size:
+                constraint_info["blocked_by"].append(f"position_size ({position_size_pct:.1f}% > {max_position_size:.1f}%)")
+                constraint_info["position_size_ok"] = False
+                return "hold", constraint_info
+
+            # Liquidity constraints
+            daily_volume_usd = position_constraints.get("daily_volume_usd", 0)
+            min_liquidity = self.config.get("position_constraints", {}).get("min_liquidity_usd", 100000)
+
+            if daily_volume_usd > 0 and daily_volume_usd < min_liquidity:
+                constraint_info["blocked_by"].append(f"liquidity (${daily_volume_usd:,.0f} < ${min_liquidity:,.0f})")
+                constraint_info["liquidity_ok"] = False
+                return "hold", constraint_info
+
+        # All constraints passed - make direction-based decision
         if predicted_direction == "up" and expected_return_pct > 0:
-            return "buy"
+            return "buy", constraint_info
         if predicted_direction == "down" and expected_return_pct < 0:
-            return "sell"
-        return "hold"
+            return "sell", constraint_info
+
+        return "hold", constraint_info
 
     def simulate_prediction(
         self,
@@ -145,13 +365,29 @@ class TradingSimulationEngine:
         expected_return_pct = self._get_expected_return_pct(prediction)
         confidence = prediction.calibrated_confidence or prediction.confidence or 0.0
 
+        # Try to get live performance data first
         performance = self.performance_service.get_prediction_performance(prediction, entity)
         actual_return_pct = performance.get("total_return_pct") if performance else None
+        
+        # FALLBACK: Check PredictionOutcome table if live data unavailable
+        if actual_return_pct is None:
+            from src.models.predictions import PredictionOutcome
+            outcome = db.query(PredictionOutcome).filter(
+                PredictionOutcome.prediction_id == prediction.prediction_id
+            ).first()
+            if outcome and outcome.actual_return is not None:
+                actual_return_pct = outcome.actual_return
+                logger.info(f"Using saved PredictionOutcome for {entity.entity_id}: {actual_return_pct:.2f}%")
+            else:
+                logger.warning(f"No actual return data available for {entity.entity_id} (prediction {prediction.prediction_id})")
+        
+        # Calculate divergence only when actual data exists
         divergence_pct = None
         if actual_return_pct is not None:
             divergence_pct = expected_return_pct - actual_return_pct
         else:
-            divergence_pct = expected_return_pct
+            # Don't default to expected - leave as None to indicate missing data
+            pass
 
         regime = self._get_latest_regime(db)
         volatility_regime = None
@@ -162,10 +398,27 @@ class TradingSimulationEngine:
 
         market_snapshot = self._get_market_snapshot(entity.entity_id)
         price = market_snapshot.get("price") if market_snapshot else 0.0
-        total_cost_bps, cost_breakdown = self._estimate_costs_bps(price, volatility_regime)
+        daily_volume = market_snapshot.get("volume") if market_snapshot else None
+        total_cost_bps, cost_breakdown = self._estimate_costs_bps(
+            price=price,
+            volatility_regime=volatility_regime,
+            predicted_direction=predicted_direction,
+            horizon=prediction.horizon,
+            daily_volume=daily_volume
+        )
         expected_return_bps = abs(expected_return_pct) * 100.0
         cost_ratio = total_cost_bps / expected_return_bps if expected_return_bps > 0 else 1.0
 
+        # Calculate risk-adjusted position size
+        # Start with a FIXED DOLLAR AMOUNT baseline (not fixed shares!)
+        assumed_portfolio_value = 100000  # $100k default portfolio
+        baseline_dollar_position = 5000  # $5k baseline position (5% of portfolio)
+        baseline_position_size_pct = (baseline_dollar_position / assumed_portfolio_value) * 100
+        
+        # Calculate daily volume and initial metrics for risk calculation
+        daily_volume_usd = (daily_volume * price) if daily_volume and price > 0 else 0
+
+        # First, calculate risk WITHOUT position adjustment
         risk_inputs = RiskInputs(
             model_uncertainty=1.0 - min(max(confidence, 0.0), 1.0),
             divergence_pct=divergence_pct,
@@ -175,15 +428,40 @@ class TradingSimulationEngine:
             transaction_cost_ratio=min(max(cost_ratio, 0.0), 1.0),
             market_impact_bps=cost_breakdown.get("market_impact_bps", 0.0),
             correlation_breakdown=None,
+            position_size_pct=baseline_position_size_pct,
+            daily_volume_usd=daily_volume_usd,
         )
         risk_result = self.risk_calculator.calculate(risk_inputs)
+        
+        # Now adjust position size based on risk score (INVERSE relationship)
+        # Higher risk = smaller position
+        # risk_result is a Dict with keys: risk_score, component_scores, weights
+        risk_score = risk_result["risk_score"]
+        max_position_pct = self.config.get("position_constraints", {}).get("max_position_size_pct", 10.0)
+        
+        # Risk-adjusted position sizing: reduce position as risk increases
+        # Formula: baseline * (1 - risk_score) with floor at 20% of baseline
+        risk_adjustment_factor = max(0.2, 1.0 - risk_score)
+        position_size_pct = baseline_position_size_pct * risk_adjustment_factor
+        
+        # Cap at max_position_pct
+        position_size_pct = min(position_size_pct, max_position_pct)
+        
+        # Calculate actual position value based on adjusted size
+        position_value = (assumed_portfolio_value * position_size_pct) / 100
 
-        decision = self._calculate_decision(
+        position_constraints = {
+            "position_size_pct": position_size_pct,
+            "daily_volume_usd": daily_volume_usd,
+        }
+
+        decision, constraint_info = self._calculate_decision(
             predicted_direction=predicted_direction,
             expected_return_pct=expected_return_pct,
             confidence=confidence,
             risk_score=risk_result["risk_score"],
             cost_ratio=cost_ratio,
+            position_constraints=position_constraints,
         )
 
         simulation_payload = {
@@ -194,7 +472,21 @@ class TradingSimulationEngine:
                 "price": price,
                 "change_percent": market_snapshot.get("change_percent") if market_snapshot else None,
                 "timestamp": market_snapshot.get("timestamp").isoformat() if market_snapshot else None,
+                "volume": daily_volume,
+                "volume_usd": daily_volume_usd,
             },
+            "position_info": {
+                "shares": self.DEFAULT_SHARES,
+                "position_value_usd": position_value,
+                "position_size_pct": position_size_pct,
+                "assumed_portfolio_value": assumed_portfolio_value,
+            },
+            "constraints": constraint_info,
+            "cost_details": {
+                **cost_breakdown,
+                "cost_ratio": cost_ratio,
+                "expected_return_bps": expected_return_bps,
+            }
         }
 
         if existing:
@@ -206,6 +498,10 @@ class TradingSimulationEngine:
             existing.confidence = prediction.confidence
             existing.calibrated_confidence = prediction.calibrated_confidence
             existing.transaction_cost_bps = total_cost_bps
+            existing.overnight_cost_bps = cost_breakdown.get("overnight_cost_bps")
+            existing.borrow_cost_bps = cost_breakdown.get("borrow_cost_bps")
+            existing.position_size_pct = position_size_pct
+            existing.position_value_usd = position_value
             existing.cost_breakdown = cost_breakdown
             existing.risk_breakdown = risk_result["components"]
             existing.simulation_metadata = simulation_payload
@@ -224,6 +520,10 @@ class TradingSimulationEngine:
             confidence=prediction.confidence,
             calibrated_confidence=prediction.calibrated_confidence,
             transaction_cost_bps=total_cost_bps,
+            overnight_cost_bps=cost_breakdown.get("overnight_cost_bps"),
+            borrow_cost_bps=cost_breakdown.get("borrow_cost_bps"),
+            position_size_pct=position_size_pct,
+            position_value_usd=position_value,
             cost_breakdown=cost_breakdown,
             risk_breakdown=risk_result["components"],
             simulation_metadata=simulation_payload,

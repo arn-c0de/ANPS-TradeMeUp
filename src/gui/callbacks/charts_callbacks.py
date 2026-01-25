@@ -65,27 +65,53 @@ function(chart_resize_trigger) {
     const chartArea = document.getElementById('chart-display-area');
     if (!chartArea) return window.dash_clientside.no_update;
     
-    function resizeCharts() {
+    // Optimized resize function - immediate resize, delayed redraw, overlay update
+    function performResize() {
         if (!window.Plotly || !Plotly.Plots || !Plotly.Plots.resize) return;
         const graphs = chartArea.querySelectorAll('.js-plotly-plot');
+        
+        // Immediate resize for all charts
         graphs.forEach(graph => {
             if (graph && graph.offsetParent !== null) {
                 try {
                     Plotly.Plots.resize(graph);
+                    
+                    // Update overlays after resize
+                    const graphElement = graph.closest('[id*="chart-content"], .dash-graph') || graph.parentElement;
+                    if (graphElement && window.ChartCenterLineOverlay && window.ChartCenterLineOverlay.create) {
+                        try {
+                            window.ChartCenterLineOverlay.create(graphElement, graph.id || '');
+                        } catch (err) {
+                            // ignore overlay errors
+                        }
+                    }
                 } catch (err) {
                     // ignore resize errors for detached nodes
                 }
             }
         });
+        
+        // Single delayed redraw after resize settles (for content rendering)
+        setTimeout(function() {
+            graphs.forEach(graph => {
+                if (graph && graph.offsetParent !== null && Plotly.redraw) {
+                    try {
+                        Plotly.redraw(graph);
+                    } catch (err) {
+                        // ignore redraw errors
+                    }
+                }
+            });
+        }, 100);
     }
     
-    // Immediate resize
-    setTimeout(resizeCharts, 0);
-    
-    // Additional delayed resizes for reliable behavior
-    [50, 250, 500, 1000].forEach(delay => {
-        setTimeout(resizeCharts, delay);
-    });
+    // Use requestAnimationFrame for optimal performance
+    if (window.requestAnimationFrame) {
+        window.requestAnimationFrame(performResize);
+    } else {
+        // Fallback for older browsers
+        setTimeout(performResize, 0);
+    }
     
     return window.dash_clientside.no_update;
 }
