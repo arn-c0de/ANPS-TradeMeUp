@@ -18,13 +18,40 @@ import plotly.graph_objects as go
 import pandas as pd
 from sqlalchemy import create_engine
 import logging
+import functools
 
 from src.config.settings import settings
+from src.models.database import engine as db_engine
 from src.gui.components import create_navbar
 from src.utils.activity_logger import activity_logger
 from src.gui.utils.task_queue import get_task_queue, add_gui_task
 
 logger = logging.getLogger(__name__)
+
+# Error handling decorator for callbacks
+def safe_callback(default_return=dash.no_update, log_errors=True):
+    """
+    Decorator to wrap Dash callbacks with error handling.
+    Prevents "Callback failed: the server did not respond" errors.
+    
+    Args:
+        default_return: Value to return on error (default: dash.no_update)
+        log_errors: Whether to log errors (default: True)
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except dash.exceptions.PreventUpdate:
+                # Re-raise PreventUpdate - it's intentional
+                raise
+            except Exception as e:
+                if log_errors:
+                    logger.error(f"Error in callback {func.__name__}: {e}", exc_info=True)
+                return default_return
+        return wrapper
+    return decorator
 
 # Import tab modules
 from src.gui.tabs import dashboard, predictions, news, statistics, charts, simulations, system, control, testing
@@ -54,6 +81,43 @@ app.index_string = '''
 <!DOCTYPE html>
 <html>
     <head>
+        <script>
+            // CRITICAL: Suppress React warnings IMMEDIATELY before anything loads
+            // This must run before React/Dash scripts load
+            (function() {
+                const suppressedPatterns = [
+                    /Support for defaultProps will be removed/i,
+                    /componentWillReceiveProps has been renamed/i,
+                    /componentWillMount has been renamed/i,
+                    /findDOMNode is deprecated/i,
+                    /Download the React DevTools/i,
+                    /UNSAFE_componentWillReceiveProps/i,
+                    /UNSAFE_componentWillMount/i
+                ];
+                
+                // Override console.warn immediately
+                const originalWarn = console.warn || function(){};
+                console.warn = function(...args) {
+                    const message = args.join(' ');
+                    if (suppressedPatterns.some(pattern => pattern.test(message))) {
+                        return; // Suppress this warning
+                    }
+                    originalWarn.apply(console, args);
+                };
+                
+                // Also override console.error for React warnings
+                const originalError = console.error || function(){};
+                console.error = function(...args) {
+                    const message = args.join(' ');
+                    // Only suppress React deprecation warnings, not actual errors
+                    if (suppressedPatterns.some(pattern => pattern.test(message)) && 
+                        (message.includes('Warning:') || message.includes('deprecated'))) {
+                        return; // Suppress this warning
+                    }
+                    originalError.apply(console, args);
+                };
+            })();
+        </script>
         {%metas%}
         <title>{%title%}</title>
         {%favicon%}
@@ -657,8 +721,9 @@ app.index_string = '''
 </html>
 '''
 
-# Database connection
-engine = create_engine(settings.database_url)
+# Database connection - use the properly configured engine from database.py
+# This engine has proper pool settings (pool_size=20, max_overflow=30, pool_timeout=30)
+engine = db_engine
 
 # ============================================================================
 # MAIN LAYOUT
@@ -1011,6 +1076,7 @@ def update_continuous_status(n, state):
     Output("dashboard-metrics", "children"),
     Input("interval-component", "n_intervals")
 )
+@safe_callback(default_return=html.Div("⚠️ Unable to load metrics", className="text-warning"))
 def update_dashboard_metrics(n):
     """Update dashboard metric cards"""
     return dashboard.get_metrics(engine)
@@ -1020,6 +1086,7 @@ def update_dashboard_metrics(n):
     Output("recent-news-table", "children"),
     Input("interval-component", "n_intervals")
 )
+@safe_callback(default_return=html.Div("⚠️ Unable to load news", className="text-warning"))
 def update_recent_news(n):
     """Update recent news table"""
     return dashboard.get_recent_news(engine, limit=50)
@@ -1029,6 +1096,7 @@ def update_recent_news(n):
     Output("market-regime-display", "children"),
     Input("interval-component", "n_intervals")
 )
+@safe_callback(default_return=html.Div("⚠️ Unable to load market regime", className="text-warning"))
 def update_market_regime(n):
     """Update market regime display"""
     return dashboard.get_market_regime(engine)
@@ -1038,6 +1106,7 @@ def update_market_regime(n):
     Output("live-agent-activity", "children"),
     Input("interval-component", "n_intervals")
 )
+@safe_callback(default_return=html.Div("⚠️ Unable to load activity", className="text-warning"))
 def update_live_agent_activity(n):
     """Update live agent activity display"""
     return dashboard.get_live_agent_activity()
@@ -1047,6 +1116,7 @@ def update_live_agent_activity(n):
     Output("server-logs-display", "value"),
     Input("interval-component", "n_intervals")
 )
+@safe_callback(default_return="")
 def update_server_logs(n):
     """Update server logs display"""
     return dashboard.get_server_logs()
@@ -1090,6 +1160,7 @@ def update_performance_chart(n):
     Output("pred-entity-filter", "options"),
     Input("interval-component", "n_intervals")
 )
+@safe_callback(default_return=[])
 def update_entity_filter_options(n):
     """Update entity filter dropdown options"""
     return predictions.get_entity_options(engine)
@@ -1801,6 +1872,7 @@ def update_news_source_options(n):
      Input("news-sentiment-filter", "value"),
      Input("news-search-input", "value")]
 )
+@safe_callback(default_return=html.Div("⚠️ Unable to load news feed", className="text-warning p-3"))
 def update_news_feed(n, sources, events, sentiment, search):
     """Update news feed with filters"""
     return news.get_news_feed(engine, sources, events, sentiment, search)
@@ -1842,6 +1914,7 @@ def _resolve_stats_date_range(start_date, end_date, active_filter):
      Input("stats-granularity", "value"),
      Input("active-filter-store", "data")]
 )
+@safe_callback(default_return=html.Div("⚠️ Unable to load statistics", className="text-warning p-3"))
 def update_statistics_metrics(n, start_date, end_date, granularity, active_filter):
     """Update statistics metrics with date filters"""
     date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
@@ -1954,6 +2027,7 @@ def update_button_styles(active_filter):
      Input("stats-date-range", "end_date"),
      Input("active-filter-store", "data")]
 )
+@safe_callback(default_return=(go.Figure(), go.Figure()))
 def update_statistics_charts(n, start_date, end_date, active_filter):
     """Update statistics charts with date filtering"""
     date_range = _resolve_stats_date_range(start_date, end_date, active_filter)
@@ -5597,6 +5671,7 @@ def update_agent_status(n):
     Output("db-statistics", "children"),
     Input("interval-component", "n_intervals")
 )
+@safe_callback(default_return=html.Div("⚠️ Unable to load database statistics", className="text-warning"))
 def update_db_statistics(n):
     """Update database statistics"""
     return system.get_db_statistics(engine)
@@ -5606,6 +5681,7 @@ def update_db_statistics(n):
     Output("pipeline-stats", "children"),
     Input("interval-component", "n_intervals")
 )
+@safe_callback(default_return=html.Div("⚠️ Unable to load pipeline statistics", className="text-warning"))
 def update_pipeline_stats(n):
     """Update pipeline statistics"""
     return system.get_pipeline_stats(engine)
