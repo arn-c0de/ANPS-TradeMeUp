@@ -41,6 +41,62 @@ class EntityMappingAgent:
     - Continues processing even if individual items fail
     """
 
+    # Analyst and financial service firms to EXCLUDE (not companies to trade)
+    # These are often mentioned in news as the source/analyst, not as the subject
+    ANALYST_FIRMS = {
+        'Oppenheimer', 'oppenheimer', 'Oppenheimer & Co',
+        'Wells Fargo Securities', 'wells fargo securities', 
+        'RBC Capital', 'RBC Capital Markets', 'rbc capital',
+        'TD Cowen', 'td cowen', 'Cowen',
+        'Scotiabank', 'scotiabank', 'Scotia Capital',
+        'JPMorgan Securities', 'jpmorgan securities',
+        'Goldman Sachs Research', 'goldman sachs research',
+        'Morgan Stanley Research', 'morgan stanley research',
+        'BofA Securities', 'bofa securities', 'Bank of America Securities',
+        'Barclays Capital', 'barclays capital',
+        'Citi Research', 'citi research', 'Citigroup Global Markets',
+        'Deutsche Bank Securities', 'deutsche bank securities',
+        'Credit Suisse Securities', 'credit suisse securities',
+        'UBS Securities', 'ubs securities',
+        'Jefferies', 'jefferies',
+        'Piper Sandler', 'piper sandler',
+        'Raymond James', 'raymond james',
+        'Stifel', 'stifel',
+        'Evercore ISI', 'evercore',
+        'Bernstein Research', 'bernstein',
+        'Wedbush Securities', 'wedbush',
+        'Needham', 'needham',
+        'Truist Securities', 'truist securities',
+        'KeyBanc', 'keybanc',
+        'Baird', 'baird',
+        'BMO Capital', 'bmo capital',
+        'BTIG', 'btig',
+        'Canaccord Genuity', 'canaccord',
+        'Mizuho Securities', 'mizuho securities',
+        'Loop Capital', 'loop capital',
+    }
+    
+    # Non-tradeable entities to exclude (government agencies, crypto, etc.)
+    EXCLUDE_ENTITIES = {
+        # Government/Regulatory
+        'SEC', 'sec', 'Securities and Exchange Commission',
+        'BoJ', 'boj', 'Bank of Japan',
+        'Fed', 'Federal Reserve', 'FRB',
+        'ECB', 'European Central Bank',
+        'RBI', 'rbi', 'Reserve Bank of India',
+        'BJP', 'bjp',  # Political party
+        'Labour Party', 'Conservative Party',
+        # Crypto (these should use crypto tickers like BTC-USD, ETH-USD)
+        'Bitcoin', 'Ethereum', 'Cardano', 'Polkadot', 'Filecoin',
+        'Uniswap', 'Chainlink', 'Avalanche', 'Solana', 'Cosmos',
+        # Cloud/Tech platforms (part of parent companies)
+        'AWS', 'aws', 'Amazon Web Services',  # Part of AMZN
+        'Azure', 'azure',  # Part of MSFT
+        'Google Cloud', 'GCP',  # Part of GOOGL
+        # Generic/Non-specific
+        'Company', 'companies', 'Corporation',
+    }
+
     # Common sector mappings
     SECTORS = {
         'Technology': 'TECH',
@@ -465,6 +521,16 @@ Respond ONLY with JSON."""
 
                 # Handle companies
                 if entity_type == 'company':
+                    # FILTER OUT ANALYST FIRMS - they're not companies to trade
+                    if entity_text in self.ANALYST_FIRMS or entity_text.lower() in self.ANALYST_FIRMS:
+                        logger.debug(f"Skipping analyst/financial service firm: {entity_text}")
+                        continue
+                    
+                    # FILTER OUT NON-TRADEABLE ENTITIES
+                    if entity_text in self.EXCLUDE_ENTITIES or entity_text.upper() in self.EXCLUDE_ENTITIES:
+                        logger.debug(f"Skipping non-tradeable entity: {entity_text}")
+                        continue
+                    
                     # Validate ticker
                     ticker = self._normalize_ticker(entity_text, suggested_ticker)
 
@@ -473,19 +539,14 @@ Respond ONLY with JSON."""
                         logger.debug(f"Ticker validation failed for '{entity_text}' (suggested: '{suggested_ticker}'). Trying company name lookup...")
                         ticker = self._find_ticker_by_company_name(entity_text)
                     
-                    # If still no ticker, use normalized company name as fallback entity_id
+                    # If still no ticker, SKIP this entity instead of creating a fallback
+                    # This prevents creating entities we can't get market data for
                     if not ticker:
-                        # Create a normalized entity_id from company name
-                        normalized_name = re.sub(r'[^a-zA-Z0-9]', '', entity_text.upper())[:20]  # Max 20 chars
-                        ticker = f"COMP_{normalized_name}"
-                        logger.warning(f"Using fallback entity_id '{ticker}' for company '{entity_text}' (suggested ticker '{suggested_ticker}' was invalid)")
+                        logger.warning(f"Could not find valid ticker for company '{entity_text}' (suggested: '{suggested_ticker}') - SKIPPING")
+                        continue
 
                     if ticker:
-                        # Check if entity exists or create new
-                        # Calculate normalized name for metadata comparison
-                        normalized_name_fallback = re.sub(r'[^a-zA-Z0-9]', '', entity_text.upper())[:20]
-                        is_validated = ticker != f"COMP_{normalized_name_fallback}"
-                        
+                        # Entity has a valid ticker - proceed with creation
                         entity = self._get_or_create_entity_no_commit(
                             db,
                             entity_id=ticker,
@@ -495,7 +556,7 @@ Respond ONLY with JSON."""
                                 'sector': ent.get('sector'),
                                 'industry': ent.get('industry'),
                                 'suggested_ticker': suggested_ticker,  # Store original suggestion
-                                'ticker_validated': is_validated
+                                'ticker_validated': True  # If we got here, ticker is validated
                             }
                         )
 

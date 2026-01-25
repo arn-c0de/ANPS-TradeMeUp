@@ -1861,6 +1861,19 @@ def register_charts_extended(app):
 
 
     @app.callback(
+        Output("refresh-all-panels", "n_clicks"),
+        Input("refresh-all-panels-btn", "n_clicks"),
+        State("refresh-all-panels", "n_clicks"),
+        prevent_initial_call=True
+    )
+    def bridge_refresh(btn_clicks, hidden_clicks):
+        """Propagate clicks from visible button to global hidden refresh trigger."""
+        if not btn_clicks:
+            raise PreventUpdate
+        return (hidden_clicks or 0) + 1
+
+
+    @app.callback(
         Output("chart-panels-config", "data"),
         [Input("layout-single", "n_clicks"),
          Input("layout-split-h", "n_clicks"),

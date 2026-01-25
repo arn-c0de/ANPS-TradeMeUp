@@ -145,7 +145,7 @@ def create_layout():
                                 )
                             ], md=10),
                             dbc.Col([
-                                dbc.Button("🔄", id="refresh-all-panels", color="success", size="sm", className="me-2", title="Refresh Charts (Ctrl+R)"),
+                                dbc.Button("🔄", id="refresh-all-panels-btn", color="success", size="sm", className="me-2", title="Refresh Charts (Ctrl+R)"),
                                 dbc.Button("⛶", id="toggle-fullscreen-btn", color="info", size="sm", outline=True, title="Toggle Fullscreen (ESC to exit)"),
                                 # Exit fullscreen button (hidden by default, shown in fullscreen mode via callback)
                                 dbc.Button("⬇ Exit Fullscreen", id="exit-fullscreen-btn", color="danger", size="sm", style={'display': 'none'})
