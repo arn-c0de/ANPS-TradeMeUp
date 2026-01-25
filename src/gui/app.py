@@ -1,5 +1,5 @@
 """
-TradeMeUp Dashboard - Main Application
+ANPS-TradeMeUp Dashboard - Main Application
 Multi-tab dashboard for monitoring news, predictions, and system health
 """
 
@@ -12,6 +12,7 @@ import dash
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 
+from src.config.settings import VERSION
 from src.gui.components import create_navbar
 from src.gui.callbacks import register_charts_callbacks, register_common_callbacks
 from src.gui.tabs import (
@@ -35,7 +36,7 @@ app = dash.Dash(
     assets_ignore="react_suppress\\.js|chart_splitters\\.js",
 )
 
-app.title = "TradeMeUp - AI Trading Intelligence"
+app.title = f"ANPS-TradeMeUp v{VERSION} - AI Trading Intelligence"
 
 # Custom dark theme CSS for dropdowns, date pickers and news cards
 app.index_string = '''
@@ -102,6 +103,6 @@ system.register_callbacks(app)
 settings_tab.register_callbacks(app)
 
 if __name__ == "__main__":
-    print("🚀 Starting TradeMeUp Dashboard...")
+    print(f"🚀 Starting ANPS-TradeMeUp Dashboard v{VERSION}...")
     print("📊 Dashboard will be available at: http://127.0.0.1:8050")
     app.run(debug=True, host="0.0.0.0", port=8050)

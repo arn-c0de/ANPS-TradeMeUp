@@ -436,7 +436,7 @@ def register_callbacks(app):
                 logger.error(error_msg)
                 return dash.no_update
             try:
-                cmd = 'start "TradeMeUp Pipeline" /D "%s" "%s" --interval 300' % (
+                cmd = 'start "ANPS-TradeMeUp Pipeline" /D "%s" "%s" --interval 300' % (
                     Path.cwd(),
                     wrapper_script,
                 )
@@ -477,7 +477,7 @@ def register_callbacks(app):
                 activity_logger.log_activity(error_msg, "ERROR")
                 logger.error(error_msg)
                 return {"status": "error", "message": str(error_msg)}
-            cmd = 'start "TradeMeUp RSS Fetch" /D "%s" "%s"' % (Path.cwd(), wrapper_script)
+            cmd = 'start "ANPS-TradeMeUp RSS Fetch" /D "%s" "%s"' % (Path.cwd(), wrapper_script)
             subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
             logger.info("RSS fetch terminal opened with command: %s", cmd)
             activity_logger.log_activity(
@@ -561,14 +561,14 @@ def register_callbacks(app):
         if not n_clicks:
             return dash.no_update
         activity_logger.log_activity("User initiated Full MVP Pipeline from GUI", "INFO")
-        activity_logger.log_pipeline_start("TradeMeUp MVP Pipeline (GUI)")
+        activity_logger.log_pipeline_start("ANPS-TradeMeUp MVP Pipeline (GUI)")
         wrapper = Path("scripts/run_mvp_pipeline_wrapper.bat").absolute()
         if not wrapper.exists():
             msg = f"Wrapper script not found: {wrapper}"
             activity_logger.log_activity(msg, "ERROR")
             return {"running": False}, msg, "ERROR", "danger"
         try:
-            cmd = f'start "TradeMeUp MVP Pipeline" /D "{Path.cwd()}" "{wrapper}"'
+            cmd = f'start "ANPS-TradeMeUp MVP Pipeline" /D "{Path.cwd()}" "{wrapper}"'
             proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
         except Exception as e:
             activity_logger.log_agent_error("Full Pipeline (GUI)", str(e))
@@ -598,7 +598,7 @@ def register_callbacks(app):
             activity_logger.log_activity(msg, "ERROR")
             return {"running": False}, msg, "ERROR", "danger"
         try:
-            cmd = f'start "TradeMeUp Quick Test" /D "{Path.cwd()}" "{wrapper}" --quick'
+            cmd = f'start "ANPS-TradeMeUp Quick Test" /D "{Path.cwd()}" "{wrapper}" --quick'
             proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
         except Exception as e:
             activity_logger.log_agent_error("Quick Test (GUI)", str(e))
@@ -629,7 +629,7 @@ def register_callbacks(app):
             activity_logger.log_activity(msg, "ERROR")
             return {"running": False}, msg, "ERROR", "danger"
         try:
-            cmd = f'start "TradeMeUp Backfill" /D "{Path.cwd()}" "{wrapper}" --batch-size {batch_size}'
+            cmd = f'start "ANPS-TradeMeUp Backfill" /D "{Path.cwd()}" "{wrapper}" --batch-size {batch_size}'
             proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
         except Exception as e:
             activity_logger.log_agent_error("Backfill (GUI)", str(e))
@@ -665,7 +665,7 @@ def register_callbacks(app):
             if p not in selected_phases:
                 args.append(f"--skip-{p}")
         try:
-            cmd = f'start "TradeMeUp Backfill" /D "{Path.cwd()}" "{wrapper}" {" ".join(args)}'
+            cmd = f'start "ANPS-TradeMeUp Backfill" /D "{Path.cwd()}" "{wrapper}" {" ".join(args)}'
             proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
         except Exception as e:
             activity_logger.log_agent_error("Backfill (GUI)", str(e))

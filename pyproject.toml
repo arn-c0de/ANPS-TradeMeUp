@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "trademeup"
-version = "0.1.0"
-description = "AI Multi-Agent News-Based Market Prediction System"
+name = "anps-trademeup"
+version = "1.0.3"
+description = "ANPS (AI News Prediction System) - Multi-Agent News-Based Market Prediction System"
 authors = ["TradeMeUp Team"]
 readme = "README.md"
 
