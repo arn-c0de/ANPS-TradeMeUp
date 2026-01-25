@@ -1,5 +1,5 @@
 """
-Callback utilities for TradeMeUp Dashboard.
+Callback utilities for ANPS-TradeMeUp Dashboard.
 """
 
 import functools

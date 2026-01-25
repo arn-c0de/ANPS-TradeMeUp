@@ -1,9 +1,11 @@
 """
-Shared GUI components for TradeMeUp Dashboard
+Shared GUI components for ANPS-TradeMeUp Dashboard
 """
 
 import dash_bootstrap_components as dbc
 from dash import html
+
+from src.config.settings import VERSION
 
 
 def create_metric_card(title, value, subtitle="", icon="📈", color="primary"):
@@ -29,8 +31,8 @@ def create_navbar():
             dbc.Row([
                 dbc.Col([
                     html.Div([
-                        html.H3("📊 TradeMeUp v1.0.2", className="text-primary mb-0"),
-                        html.Small("AI Trading Intelligence Platform", className="text-muted")
+                        html.H3(f"📊 ANPS-TradeMeUp v{VERSION}", className="text-primary mb-0"),
+                        html.Small("AI News Prediction System", className="text-muted")
                     ])
                 ], width="auto"),
                 dbc.Col([

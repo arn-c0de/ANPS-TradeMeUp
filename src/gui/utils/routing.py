@@ -1,5 +1,5 @@
 """
-URL/tab routing utilities for TradeMeUp Dashboard.
+URL/tab routing utilities for ANPS-TradeMeUp Dashboard.
 """
 
 VALID_MAIN_TAB_IDS = {

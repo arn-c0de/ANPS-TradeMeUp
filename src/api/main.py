@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.config.settings import settings
+from src.config.settings import settings, VERSION
 from src.api.routers import predictions, news, entities
 
 # Configure logging
@@ -18,19 +18,19 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    logger.info("Starting TradeMeUp API...")
+    logger.info("Starting ANPS-TradeMeUp API...")
     logger.info(f"Environment: {settings.app_env}")
     logger.info(f"Database: {settings.database_url}")
     logger.info(f"LLM Provider: {settings.llm_provider}")
     yield
-    logger.info("Shutting down TradeMeUp API...")
+    logger.info("Shutting down ANPS-TradeMeUp API...")
 
 
 # Create FastAPI application
 app = FastAPI(
-    title="TradeMeUp API",
-    description="AI Multi-Agent News-Based Market Prediction System",
-    version="0.1.0",
+    title="ANPS-TradeMeUp API",
+    description="ANPS (AI News Prediction System) - Multi-Agent News-Based Market Prediction System",
+    version=VERSION,
     lifespan=lifespan
 )
 
@@ -50,7 +50,7 @@ async def health_check():
     return {
         "status": "healthy",
         "environment": settings.app_env,
-        "version": "0.1.0",
+        "version": VERSION,
         "llm_provider": settings.llm_provider
     }
 
@@ -59,8 +59,8 @@ async def health_check():
 async def root():
     """Root endpoint."""
     return {
-        "message": "TradeMeUp API",
-        "version": "0.1.0",
+        "message": "ANPS-TradeMeUp API",
+        "version": VERSION,
         "docs": "/docs",
         "health": "/health"
     }

@@ -1,3 +1,3 @@
 """
-GUI Package - TradeMeUp Dashboard
+GUI Package - ANPS-TradeMeUp Dashboard
 """
