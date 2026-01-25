@@ -22,7 +22,7 @@ from src.gui.tabs.charts.components import (
     create_trading_overlay,
     render_multi_panel_layout
 )
-from src.gui.tabs.charts.market_data import MarketDataProvider
+from src.services.market_data import MarketDataProvider
 from src.gui.tabs.charts.fullscreen_manager import get_fullscreen_state, get_container_classname
 from src.gui.tabs.charts.overlay_utils import normalize_overlay_store, save_overlays_to_db, ensure_overlay_tab
 from src.gui.tabs.charts.chart_utils import find_index_binary
@@ -1209,7 +1209,7 @@ def register_charts_extended(app):
             tabs_data["active_tab"] = tab_id
             return tabs_data
 
-        from src.gui.tabs.charts.market_data import market_data
+        from src.services.market_data import market_data
 
         def fetch_df(symbol, timeframe):
             if timeframe == "1d_1m":
@@ -2167,7 +2167,7 @@ def register_charts_extended(app):
             ]), []
 
         try:
-            from src.gui.tabs.charts.market_data import market_data
+            from src.services.market_data import market_data
             results = market_data.search_symbols(query, limit=8)
 
             if not results:

@@ -444,7 +444,7 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
     Returns:
         dict: Performance data in same format as prediction_performance_service
     """
-    from src.gui.tabs.charts.market_data import MarketDataProvider
+    from src.services.market_data import MarketDataProvider
     
     # Get direction from prediction
     probs = pred.direction_probabilities or {}
