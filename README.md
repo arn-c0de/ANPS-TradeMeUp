@@ -6,10 +6,17 @@
 
 **ANPS (AI News Prediction System) - Multi-Agent News-Based Market Prediction System**
 
-![Main Dashboard](images/screenshots/trademeup-1.0.2-maindash.png)
-![Live Charts](images/screenshots/trademeup-1.0.2-livecharts.png)
-![Statistics](images/screenshots/trademeup-1.0.2-statistics.png)
-![Testing](images/screenshots/trademeup-1.0.2-testingsuite.png)
+> **Note:** This is a private, source-available project currently under active development. Features, APIs, and screenshots may change frequently and are not intended for production use. ⚠️
+
+![Main Dashboard](images/screenshots/1.0.3-dashboard.png)
+![News Feed](images/screenshots/1.0.3-news.png)
+![Predictions](images/screenshots/1.0.3-predict.png)
+![Simulations](images/screenshots/1.0.3-sim.png)
+![Statistics](images/screenshots/1.0.3-stats.png)
+![Live Charts](images/screenshots/1.0.3-charts.png)
+
+
+
 
 ---
 
