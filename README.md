@@ -243,6 +243,6 @@ See [LICENSE](LICENSE) for full details.
 ---
 
 **Last Updated:** January 26, 2026
-**Version:** 1.0.3
+**Version:** 1.0.4
 
 Developer note: When updating the project version, please also update the `VERSION` constant in `src/config/settings.py` so the GUI and documentation reflect the correct version.
