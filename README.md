@@ -32,11 +32,77 @@ ANPS-TradeMeUp (AI News Prediction System) is an MVP-grade pipeline that ingests
 
 ## Features
 
-- Modular multi-agent architecture (ingest → understand → analyse → predict)
-- LLM-based content understanding and entity/ticker mapping
-- Impact, surprise, and regime scoring
-- XGBoost prediction baseline with multi-horizon forecasts
-- Dash GUI: Dashboard, Live Charts, Agent Control, System Health
+### Multi-Agent Pipeline
+- 16-agent modular architecture (ingest → understand → analyse → predict)
+- LLM-based content understanding with fact verification
+- Entity mapping with confidence scoring
+- Impact, surprise, and regime detection
+- Signal decay tracking and correlation analysis
+- Multi-horizon predictions (1d, 5d, 20d)
+
+### Dashboard
+- Real-time metrics overview (news volume, predictions, entities)
+- Recent news feed with quality scores
+- Current market regime indicator
+- Top performers tracking (1h, 24h, 5d, 30d, 1y, all-time)
+- Pipeline health monitoring
+
+### Predictions Tab
+- Advanced filtering (entity, date range, horizon, confidence)
+- Live performance tracking with actual vs expected returns
+- Direction probabilities (up/down/flat)
+- Risk and confidence scores
+- Detailed modal view with market data
+- Refresh individual predictions
+- Export and batch operations
+
+### Trading Simulations
+- Portfolio configuration (capital, currency, risk adjustment)
+- Create simulations from predictions (date range or last N)
+- Trading decisions (buy/sell/hold) with risk assessment
+- Stop loss and take profit calculations
+- Transaction cost breakdown (commission, spread, slippage, market impact)
+- Position sizing recommendations (risk-adjusted)
+- Penny stock detection with special cost handling
+- Expected vs actual return tracking
+- Resimulate all with latest market data
+- Filter by entity, horizon, decision, date range
+
+### Statistics Tab
+- Overall metrics (articles, entities, predictions, impact scores)
+- Event and quality distribution charts
+- Sentiment analysis (positive/negative/neutral)
+- Impact score visualization
+- Top entities rankings
+- Entity sentiment analysis with timeframes (7d, 30d, 90d, all)
+- Entity details table with search
+- News volume trends over time
+
+### Live Charts
+- Multi-panel chart view (single, dual, quad mode)
+- Candlestick and line chart types
+- Real-time price updates (30s interval)
+- Multiple timeframes (1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, max)
+- Volume overlay and moving averages
+- Infinite scroll for historical data
+- Zoom and pan with state persistence
+- Fullscreen mode
+- Chart overlays (brackets, breakouts) - DB-backed
+- Custom symbol search
+
+### Agent Testing
+- Individual agent health checks
+- Test all 16 agents independently
+- Real-time status monitoring
+- Error tracking and logging
+- Agent performance metrics
+
+### System Health
+- Pipeline status overview
+- Database statistics
+- Agent operational status
+- Processing metrics
+- Activity log monitoring
 
 ---
 
@@ -175,7 +241,7 @@ See [LICENSE](LICENSE) for full details.
 
 ---
 
-**Last Updated:** January 25, 2026
+**Last Updated:** January 26, 2026
 **Version:** 1.0.3
 
 Developer note: When updating the project version, please also update the `VERSION` constant in `src/config/settings.py` so the GUI and documentation reflect the correct version.
