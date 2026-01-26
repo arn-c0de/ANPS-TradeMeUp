@@ -6,7 +6,9 @@
   ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
   ![SQLite](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white)
   ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-1C1C1C?logo=python&logoColor=white)  
-  <img src="https://img.shields.io/badge/DeepWiki-Project%20Docs-blueviolet?logo=book" alt="DeepWiki" />
+  <a href="https://deepwiki.com/arn-c0de/ANPS-TradeMeUp">
+    <img src="https://img.shields.io/badge/DeepWiki-Project%20Docs-blueviolet?logo=book" alt="DeepWiki" />
+  </a>
 <br/>
 
 <div align="left">
