@@ -100,10 +100,60 @@ class TradingSimulationEngine:
         self.MAX_COST_RATIO = thresholds.get("max_cost_ratio", self.MAX_COST_RATIO)
 
     def _get_expected_return_pct(self, prediction: Prediction) -> float:
+        """
+        Extract expected return as a percentage from prediction.
+
+        Handles two storage formats:
+        1. Decimal format (e.g., 0.02 for 2%) - values in range [-0.50, 0.50]
+        2. Percentage format (e.g., 2.0 for 2%) - values outside that range
+
+        The threshold of 0.50 (50%) is chosen because:
+        - Normal stock predictions rarely exceed 50% expected return
+        - Values like 0.02 (2%) are common in decimal format
+        - Values like 5.0 (5%) are common in percentage format
+
+        If expected_return contains an 'is_percentage' key, that is used instead
+        of the heuristic.
+
+        Args:
+            prediction: Prediction object with expected_return dict
+
+        Returns:
+            Expected return as percentage (e.g., 2.0 for 2%)
+        """
         expected_return = prediction.expected_return or {}
-        mean_value = expected_return.get("mean", 0.0) if isinstance(expected_return, dict) else 0.0
-        # Heuristic: if value is in [-1, 1], treat as fraction and convert to percent.
-        return float(mean_value * 100.0) if abs(mean_value) <= 1.0 else float(mean_value)
+        if not isinstance(expected_return, dict):
+            return 0.0
+
+        mean_value = expected_return.get("mean", 0.0)
+        if mean_value is None:
+            return 0.0
+
+        mean_value = float(mean_value)
+
+        # Check for explicit format indicator
+        is_percentage = expected_return.get("is_percentage")
+        if is_percentage is True:
+            return mean_value
+        elif is_percentage is False:
+            return mean_value * 100.0
+
+        # Heuristic: Use threshold of 0.50 (50%) to distinguish formats
+        # Values in [-0.50, 0.50] are likely decimals, otherwise already percentages
+        # This handles edge cases like 1.5 (150% as decimal) correctly
+        if abs(mean_value) <= 0.50:
+            result = mean_value * 100.0
+        else:
+            # Value is already in percentage format OR represents extreme return
+            # Log a warning for large values to help identify data issues
+            if abs(mean_value) > 100:
+                logger.warning(
+                    f"Unusually large expected return value: {mean_value} for prediction "
+                    f"{prediction.prediction_id}. Treating as percentage."
+                )
+            result = mean_value
+
+        return float(result)
 
     def _get_predicted_direction(self, prediction: Prediction) -> str:
         probabilities = prediction.direction_probabilities or {}
