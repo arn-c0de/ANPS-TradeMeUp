@@ -4,8 +4,15 @@
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.128+-009688?logo=fastapi&logoColor=white)
   ![Dash](https://img.shields.io/badge/Dash-3.4.0-3F4F75?logo=plotly&logoColor=white)
   ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
+  ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-1C1C1C?logo=python&logoColor=white)
   ![SQLite](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white)
-  ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-1C1C1C?logo=python&logoColor=white)  
+  ![Alembic](https://img.shields.io/badge/Alembic-1.13+-330F51?logo=alembic&logoColor=white)
+  ![Pydantic](https://img.shields.io/badge/Pydantic-2.5+-E92063?logo=pydantic&logoColor=white)
+  ![Poetry](https://img.shields.io/badge/Poetry-Dependency%20Mgmt-60A5FA?logo=poetry&logoColor=white)
+  ![yfinance](https://img.shields.io/badge/yfinance-0.2+-FF6B6B?logo=python&logoColor=white)
+  ![OpenAI](https://img.shields.io/badge/OpenAI-LLM-412991?logo=openai&logoColor=white)
+  ![Anthropic](https://img.shields.io/badge/Anthropic-LLM-FF6B35?logo=anthropic&logoColor=white)
+  ![Ollama](https://img.shields.io/badge/Ollama-LLM-3B82F6?logo=ollama&logoColor=white)
   <a href="https://deepwiki.com/arn-c0de/ANPS-TradeMeUp">
     <img src="https://img.shields.io/badge/DeepWiki-Project%20Docs-blueviolet?logo=book" alt="DeepWiki" />
   </a>
