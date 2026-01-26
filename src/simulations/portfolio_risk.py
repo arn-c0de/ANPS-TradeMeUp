@@ -14,7 +14,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PortfolioRiskMetrics:
-    """Portfolio-level risk metrics."""
+    """
+    Portfolio-level risk metrics.
+
+    Note on VaR/CVaR: These are SIMPLIFIED metrics based on the distribution of
+    expected returns across positions. They do not account for position correlations
+    or historical volatility. See _calculate_var_cvar() for details.
+    """
 
     total_exposure_usd: float
     total_positions: int
@@ -22,8 +28,8 @@ class PortfolioRiskMetrics:
     active_sell_positions: int
     avg_risk_score: float
     max_risk_score: float
-    portfolio_var_95: float
-    portfolio_cvar_95: float
+    portfolio_var_95: float  # Simplified VaR - see class docstring
+    portfolio_cvar_95: float  # Simplified CVaR - see class docstring
     total_leverage: float
     sector_concentrations: Dict[str, float]
     position_size_violations: int
@@ -153,15 +159,25 @@ class PortfolioRiskCalculator:
         """
         Calculate Value at Risk (VaR) and Conditional VaR (CVaR) at specified confidence level.
 
-        VaR: Maximum expected loss at given confidence level
-        CVaR: Average loss in worst (1-confidence_level)% of scenarios
+        IMPORTANT: This is a SIMPLIFIED VaR calculation based on the distribution of
+        expected returns across individual positions. It does NOT account for:
+        - Correlations between positions (diversification effects)
+        - Historical return volatility
+        - Monte Carlo simulation of portfolio outcomes
+
+        For a true portfolio VaR, consider implementing variance-covariance or
+        historical simulation methods with actual return time series data.
+
+        VaR: The (1-confidence_level) percentile of expected returns across positions.
+             Represents the return threshold below which the worst-performing positions fall.
+        CVaR: Average expected return of positions below the VaR threshold.
 
         Args:
-            returns: List of expected returns (percentages)
+            returns: List of expected returns (percentages) from individual positions
             confidence_level: Confidence level (default 95%)
 
         Returns:
-            Tuple of (VaR, CVaR)
+            Tuple of (VaR, CVaR) in percentage terms
         """
         if not returns or len(returns) < 2:
             return 0.0, 0.0
@@ -181,23 +197,26 @@ class PortfolioRiskCalculator:
         """
         Calculate total portfolio exposure in USD.
 
-        Assumes DEFAULT_SHARES (100) per position and extracts price from simulation_metadata.
+        Uses the actual position_value_usd from simulation metadata which accounts for
+        dynamically calculated share counts (e.g., higher shares for penny stocks).
+        Falls back to the TradingSimulation.position_value_usd field if metadata unavailable.
         """
-        from src.simulations.trading_simulator import TradingSimulationEngine
-
         total_exposure = 0.0
-        default_shares = TradingSimulationEngine.DEFAULT_SHARES
 
         for sim in simulations:
             if sim.decision not in ["buy", "sell"]:
                 continue
 
+            # Primary: Get position value from simulation_metadata (most accurate)
             metadata = sim.simulation_metadata or {}
-            market_snapshot = metadata.get("market_snapshot", {})
-            price = market_snapshot.get("price", 0.0)
+            position_info = metadata.get("position_info", {})
+            position_value = position_info.get("position_value_usd", 0.0)
 
-            if price > 0:
-                position_value = price * default_shares
+            # Fallback: Use the model's position_value_usd field
+            if position_value <= 0 and sim.position_value_usd:
+                position_value = sim.position_value_usd
+
+            if position_value > 0:
                 total_exposure += position_value
 
         return total_exposure
@@ -210,13 +229,13 @@ class PortfolioRiskCalculator:
         """
         Calculate sector concentration as percentage of total exposure.
 
+        Uses the actual position_value_usd from simulation metadata which accounts for
+        dynamically calculated share counts (e.g., higher shares for penny stocks).
+
         Returns dict mapping sector -> percentage of total exposure
         """
-        from src.simulations.trading_simulator import TradingSimulationEngine
-
-        sector_exposure = {}
+        sector_exposure: Dict[str, float] = {}
         total_exposure = 0.0
-        default_shares = TradingSimulationEngine.DEFAULT_SHARES
 
         for sim in simulations:
             if sim.decision not in ["buy", "sell"]:
@@ -227,15 +246,18 @@ class PortfolioRiskCalculator:
             if not entity:
                 continue
 
-            sector = entity.metadata.get("sector", "Unknown") if entity.metadata else "Unknown"
+            sector = entity.metadata_.get("sector", "Unknown") if entity.metadata_ else "Unknown"
 
-            # Calculate position value
+            # Primary: Get position value from simulation_metadata (most accurate)
             metadata = sim.simulation_metadata or {}
-            market_snapshot = metadata.get("market_snapshot", {})
-            price = market_snapshot.get("price", 0.0)
+            position_info = metadata.get("position_info", {})
+            position_value = position_info.get("position_value_usd", 0.0)
 
-            if price > 0:
-                position_value = price * default_shares
+            # Fallback: Use the model's position_value_usd field
+            if position_value <= 0 and sim.position_value_usd:
+                position_value = sim.position_value_usd
+
+            if position_value > 0:
                 sector_exposure[sector] = sector_exposure.get(sector, 0.0) + position_value
                 total_exposure += position_value
 
