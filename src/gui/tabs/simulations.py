@@ -506,6 +506,23 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                         f"Total: {cost_bps:.1f} bps"
                     )
 
+                # Extract exit strategy data
+                stop_loss_pct = sim.stop_loss_pct
+                take_profit_pct = sim.take_profit_pct
+                risk_reward_ratio = sim.risk_reward_ratio
+                
+                # Format stop loss tooltip
+                sl_tooltip = None
+                if sim.stop_loss_price:
+                    sl_tooltip = f"Stop Loss Price: ${sim.stop_loss_price:.4f}" if sim.stop_loss_price < 1 else f"Stop Loss Price: ${sim.stop_loss_price:,.2f}"
+                    if sim.stop_loss_type:
+                        sl_tooltip += f"\nMethod: {sim.stop_loss_type.replace('_', ' ').title()}"
+                
+                # Format take profit tooltip
+                tp_tooltip = None
+                if sim.take_profit_price:
+                    tp_tooltip = f"Take Profit Price: ${sim.take_profit_price:.4f}" if sim.take_profit_price < 1 else f"Take Profit Price: ${sim.take_profit_price:,.2f}"
+
                 rows.append(html.Tr([
                     html.Td(sim.created_at.strftime("%Y-%m-%d %H:%M") if sim.created_at else "N/A"),
                     html.Td([
@@ -536,6 +553,24 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                     html.Td(f"{position_size:.1f}%" if position_size is not None else "—",
                             className="text-info text-center",
                             title=f"Position size as % of portfolio"),
+                    # Stop Loss column
+                    html.Td(
+                        f"-{stop_loss_pct:.2f}%" if stop_loss_pct is not None else "—",
+                        className="text-danger text-center",
+                        title=sl_tooltip
+                    ),
+                    # Take Profit column
+                    html.Td(
+                        f"+{take_profit_pct:.2f}%" if take_profit_pct is not None else "—",
+                        className="text-success text-center",
+                        title=tp_tooltip
+                    ),
+                    # Risk/Reward ratio column
+                    html.Td(
+                        f"1:{risk_reward_ratio:.1f}" if risk_reward_ratio is not None else "—",
+                        className="text-info text-center" if risk_reward_ratio and risk_reward_ratio >= 2.0 else "text-warning text-center",
+                        title=f"Risk/Reward Ratio: {risk_reward_ratio:.2f}" if risk_reward_ratio else None
+                    ),
                     html.Td(
                         f"{currency_symbol}{recommended_investment:,.0f}" if recommended_investment is not None else "—",
                         className="text-success text-end fw-bold",
@@ -590,6 +625,9 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                     html.Th("Δ (E-R)", title="Expected - Actual divergence"),
                     html.Th("Cost (bps)", title="Total transaction costs (hover for breakdown)"),
                     html.Th("Position %", title="Position size as % of portfolio"),
+                    html.Th("Stop Loss", title="Stop loss distance from entry (hover for price)"),
+                    html.Th("Take Profit", title="Take profit target (hover for price)"),
+                    html.Th("R:R", title="Risk/Reward ratio"),
                     html.Th("Recommended", title="Recommended investment size (risk-adjusted)"),
                     html.Th("Actions", className="text-center")
                 ])),

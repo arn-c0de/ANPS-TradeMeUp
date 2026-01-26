@@ -15,6 +15,7 @@ from src.models.trading_simulation import TradingSimulation
 from src.services.prediction_performance_service import PredictionPerformanceService
 from src.services.market_data import MarketDataProvider
 from src.simulations.risk_calculations import RiskCalculator, RiskInputs
+from src.simulations.exit_strategy import ExitStrategyCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,9 @@ class TradingSimulationEngine:
         # Load simulation parameters from config
         self.config = self._load_config(config_path)
         self._update_thresholds_from_config()
+        
+        # Initialize exit strategy calculator
+        self.exit_calculator = ExitStrategyCalculator(config=self.config)
 
     def _load_config(self, config_path: Optional[str] = None) -> Dict:
         """Load simulation parameters from JSON config file."""
@@ -709,8 +713,8 @@ class TradingSimulationEngine:
 
         # Calculate risk-adjusted position size
         # Start with a FIXED DOLLAR AMOUNT baseline (not fixed shares!)
-        assumed_portfolio_value = 100000  # $100k default portfolio
-        baseline_dollar_position = 5000  # $5k baseline position (5% of portfolio)
+        assumed_portfolio_value = 5000  # $5k default portfolio
+        baseline_dollar_position = 250  # $250 baseline position (5% of portfolio)
         baseline_position_size_pct = (baseline_dollar_position / assumed_portfolio_value) * 100
         
         # Calculate daily volume and initial metrics for risk calculation
@@ -762,6 +766,18 @@ class TradingSimulationEngine:
             position_constraints=position_constraints,
         )
 
+        # Calculate exit strategy (stop loss and take profit)
+        exit_strategy = self.exit_calculator.calculate_exit_levels(
+            entry_price=price,
+            direction=predicted_direction,
+            volatility_regime=volatility_regime,
+            risk_score=risk_result["risk_score"],
+            confidence=confidence,
+            horizon=prediction.horizon,
+            market_data_provider=self.market_data_provider,
+            ticker=entity.entity_id
+        )
+
         simulation_payload = {
             "predicted_direction": predicted_direction,
             "actual_direction": performance.get("actual_direction") if performance else None,
@@ -793,7 +809,8 @@ class TradingSimulationEngine:
                 "cost_method": cost_breakdown.get("cost_method", "standard"),
                 "shares_used": shares,
                 "shares_multiplier": shares / self.DEFAULT_SHARES if self.DEFAULT_SHARES > 0 else 1.0,
-            }
+            },
+            "exit_strategy": exit_strategy.get("exit_strategy_metadata", {})
         }
 
         if existing:
@@ -811,6 +828,15 @@ class TradingSimulationEngine:
             existing.position_value_usd = position_value
             existing.cost_breakdown = cost_breakdown
             existing.risk_breakdown = risk_result["components"]
+            # Exit strategy fields
+            existing.stop_loss_price = exit_strategy.get("stop_loss_price")
+            existing.stop_loss_pct = exit_strategy.get("stop_loss_pct")
+            existing.stop_loss_type = exit_strategy.get("method")
+            existing.trailing_stop_price = exit_strategy.get("trailing_stop_price")
+            existing.take_profit_price = exit_strategy.get("take_profit_price")
+            existing.take_profit_pct = exit_strategy.get("take_profit_pct")
+            existing.risk_reward_ratio = exit_strategy.get("risk_reward_ratio")
+            existing.exit_strategy = exit_strategy
             existing.simulation_metadata = simulation_payload
             existing.created_at = datetime.utcnow()
             return existing
@@ -833,6 +859,15 @@ class TradingSimulationEngine:
             position_value_usd=position_value,
             cost_breakdown=cost_breakdown,
             risk_breakdown=risk_result["components"],
+            # Exit strategy fields
+            stop_loss_price=exit_strategy.get("stop_loss_price"),
+            stop_loss_pct=exit_strategy.get("stop_loss_pct"),
+            stop_loss_type=exit_strategy.get("method"),
+            trailing_stop_price=exit_strategy.get("trailing_stop_price"),
+            take_profit_price=exit_strategy.get("take_profit_price"),
+            take_profit_pct=exit_strategy.get("take_profit_pct"),
+            risk_reward_ratio=exit_strategy.get("risk_reward_ratio"),
+            exit_strategy=exit_strategy,
             simulation_metadata=simulation_payload,
             created_at=datetime.utcnow(),
         )
