@@ -2,10 +2,10 @@
 
 ## 🎮 Overview
 
-Der Agent Control Tab ermöglicht es, die TradeMeUp Pipeline direkt über die GUI zu steuern.
+The Agent Control Tab allows you to control the TradeMeUp pipeline directly from the GUI.
 
 **Tab:** 🎮 Agent Control  
-**Datei:** `src/gui/tabs/control.py`  
+**File:** `src/gui/tabs/control.py`  
 **URL:** http://localhost:8050 → Tab "Agent Control"
 
 ---
@@ -14,15 +14,15 @@ Der Agent Control Tab ermöglicht es, die TradeMeUp Pipeline direkt über die GU
 
 ### 1. Pipeline Control Panel
 
-Drei Hauptoptionen zum Starten der Pipeline:
+Three main options to run the pipeline:
 
 #### **🚀 Full MVP Pipeline**
-- Führt alle 8 Agents sequenziell aus
-- Verarbeitet alle verfügbaren Artikel
-- Dauer: ~15 Minuten
-- Button: "Run Full Pipeline" (Blau)
+- Runs all 8 agents sequentially
+- Processes all available articles
+- Duration: ~15 minutes
+- Button: "Run Full Pipeline" (Blue)
 
-**Was wird gemacht:**
+**What it does:**
 1. Agent 1: Data Ingestion (RSS Feeds)
 2. Agent 1.5: Data Quality Assessment
 3. Agent 2: Content Understanding (LLM)
@@ -33,22 +33,22 @@ Drei Hauptoptionen zum Starten der Pipeline:
 8. Agent 6: Predictions
 
 #### **⚡ Quick Test**
-- Schneller Test mit 3 Artikeln
-- Alle Agents werden getestet
-- Dauer: ~2 Minuten
-- Button: "Run Quick Test" (Grün)
+- Fast test using 3 articles
+- All agents are exercised
+- Duration: ~2 minutes
+- Button: "Run Quick Test" (Green)
 
-**Ideal für:**
-- Schnelle Funktionstests
-- Nach Code-Änderungen
+**Ideal for:**
+- Quick functional checks
+- After code changes
 - Debugging
 
 #### **🎯 Single Agent**
-- Führt nur einen ausgewählten Agent aus
-- Dropdown zur Agent-Auswahl
-- Button wird erst nach Auswahl aktiv
+- Runs only the selected agent
+- Agent selection via dropdown
+- Run button is enabled only after selecting an agent
 
-**Verfügbare Agents:**
+**Available agents:**
 - Agent 1: Ingestion
 - Agent 1.5: Quality
 - Agent 2: Content Understanding
@@ -63,33 +63,33 @@ Drei Hauptoptionen zum Starten der Pipeline:
 ### 2. Pipeline Options
 
 #### **Articles to Process** (Slider)
-- Range: 1-50 Artikel
+- Range: 1–50 articles
 - Default: 10
-- Limitiert wie viele Artikel durch die LLM-Phase gehen
+- Limits how many articles proceed to the LLM phase
 
 #### **Force Refresh** (Checkbox)
-- Ignoriert Cache
-- Lädt alle Daten neu
-- Nützlich für Tests
+- Ignores cache
+- Reloads all data
+- Useful for testing
 
 #### **Verbose Logging** (Checkbox)
-- Detaillierte Logs
-- Default: AN
-- Zeigt alle Debug-Informationen
+- Detailed logs
+- Default: ON
+- Shows full debug information
 
 ---
 
 ### 3. Execution Status
 
 **Status Badge:**
-- 🟢 Idle (Grau) - Keine Pipeline läuft
-- 🟡 Running (Gelb/Grün) - Pipeline aktiv
-- 🔴 Error (Rot) - Fehler aufgetreten
+- 🟢 Idle (Gray) — No pipeline running
+- 🟡 Running (Yellow/Green) — Pipeline active
+- 🔴 Error (Red) — An error occurred
 
 **Status Display:**
-- Current Phase (welcher Agent läuft)
-- Started (Startzeit)
-- Articles Processed (Fortschritt)
+- Current Phase (which agent is running)
+- Started (start time)
+- Articles Processed (progress)
 - Progress Bar
 
 ---
@@ -97,14 +97,14 @@ Drei Hauptoptionen zum Starten der Pipeline:
 ### 4. Execution Log
 
 **Live Log Output:**
-- Echtzeit-Logs der laufenden Pipeline
-- Monospace Font für bessere Lesbarkeit
-- Read-only Textarea
-- Zeigt:
+- Real-time logs from the running pipeline
+- Monospace font for improved readability
+- Read-only textarea
+- Shows:
   - Timestamps
-  - Agent-Status
-  - Fehler und Warnungen
-  - Verarbeitungsfortschritt
+  - Agent status
+  - Errors and warnings
+  - Processing progress
 
 **Log Format:**
 ```
@@ -121,38 +121,38 @@ Articles to process: 10
 
 ### 5. Recent Executions
 
-Historie der letzten Pipeline-Läufe:
+History of recent pipeline runs:
 - Timestamp
-- Pipeline Type
+- Pipeline type
 - Status (Success/Failed)
 - Duration
-- Articles Processed
+- Articles processed
 
 ---
 
-## 🔧 Technische Implementierung
+## 🔧 Technical Implementation
 
-### Backend (control.py)
+### Backend (`control.py`)
 
-**Hauptfunktionen:**
+**Main functions:**
 
 ```python
 create_layout()
-# Erstellt das Tab-Layout mit allen Controls
+# Builds the tab layout with all controls
 
 run_pipeline_command(command_type, options)
-# Startet Pipeline als subprocess
-# command_type: 'full', 'quick', oder agent name
-# options: dict mit limit, force, verbose
+# Starts the pipeline as a subprocess
+# command_type: 'full', 'quick', or agent name
+# options: dict containing limit, force, verbose
 
 get_process_output(process)
-# Liest Output vom laufenden Process
+# Reads output from the running process
 
 format_pipeline_status(status)
-# Formatiert Status-Display
+# Formats the status display
 
 get_recent_executions()
-# Lädt Execution History
+# Loads execution history
 ```
 
 ### Process Management
@@ -168,14 +168,14 @@ process = subprocess.Popen(
 )
 ```
 
-**Non-Blocking:**
-- Pipeline läuft im Hintergrund
-- Dashboard bleibt responsive
-- Status-Updates alle 2 Sekunden
+**Non-blocking behavior:**
+- Pipeline runs in the background
+- Dashboard remains responsive
+- Status updates every 2 seconds
 
 ---
 
-## 🎯 Callbacks in app.py
+## 🎯 Callbacks in `app.py`
 
 ### 1. Toggle Single Agent Button
 ```python
@@ -184,7 +184,7 @@ process = subprocess.Popen(
     Input("agent-selector", "value")
 )
 ```
-Aktiviert Button nur wenn Agent ausgewählt ist.
+Enables the button only when an agent is selected.
 
 ### 2. Run Full Pipeline
 ```python
@@ -197,39 +197,39 @@ Aktiviert Button nur wenn Agent ausgewählt ist.
     State(...)
 )
 ```
-Startet Full Pipeline und updated Status/Logs.
+Starts the full pipeline and updates status/logs.
 
 ### 3. Run Quick Test
-Analog zu Full Pipeline, aber mit Quick Test Script.
+Similar to the full pipeline callback but runs the quick test script.
 
 ---
 
-## 📋 Verwendung
+## 📋 Usage
 
 ### Scenario 1: Full Pipeline Run
 
-1. Öffne Dashboard: http://localhost:8050
-2. Navigiere zu Tab "🎮 Agent Control"
-3. Optional: Passe "Articles to Process" an
-4. Klicke "Run Full Pipeline"
-5. Beobachte Status und Logs
-6. Nach Abschluss: Wechsle zu anderen Tabs um Ergebnisse zu sehen
+1. Open the dashboard: http://localhost:8050
+2. Navigate to the "🎮 Agent Control" tab
+3. Optionally adjust "Articles to Process"
+4. Click "Run Full Pipeline"
+5. Monitor status and logs
+6. After completion: check other tabs for results
 
-### Scenario 2: Quick Test nach Code-Änderung
+### Scenario 2: Quick Test after Code Changes
 
-1. Code geändert (z.B. Agent verbessert)
-2. Agent Control Tab öffnen
-3. "Run Quick Test" klicken
-4. Nach ~2 Minuten: Ergebnisse prüfen
-5. Bei Fehler: Logs analysieren
+1. Make code changes (e.g., improve an agent)
+2. Open the Agent Control tab
+3. Click "Run Quick Test"
+4. After ~2 minutes: inspect results
+5. If failures occur: analyze the logs
 
-### Scenario 3: Einzelnen Agent testen
+### Scenario 3: Test a Single Agent
 
-1. Dropdown "Select agent..." öffnen
-2. z.B. "Agent 2: Content Understanding" wählen
-3. "Run Selected Agent" wird aktiv
-4. Klicken und Logs beobachten
-5. Nur dieser Agent wird ausgeführt
+1. Open the "Select agent..." dropdown
+2. Choose e.g. "Agent 2: Content Understanding"
+3. "Run Selected Agent" becomes enabled
+4. Click and watch the logs
+5. Only the selected agent is executed
 
 ---
 
@@ -237,135 +237,135 @@ Analog zu Full Pipeline, aber mit Quick Test Script.
 
 ### Pipeline Failed
 
-**Symptom:** Status Badge wird rot, Log zeigt ERROR
+**Symptom:** Status badge turns red and logs show ERROR
 
-**Ursachen:**
-- LLM Server offline (Ollama nicht gestartet)
-- Datenbank-Verbindung fehlgeschlagen
-- Python-Fehler im Agent-Code
-- Netzwerk-Timeout bei RSS Feeds
+**Possible causes:**
+- LLM server offline (Ollama not started)
+- Database connection failure
+- Python error in agent code
+- Network timeout fetching RSS feeds
 
-**Lösung:**
-1. Log analysieren für genaue Fehlermeldung
-2. Ollama prüfen: `ollama list`
-3. Database prüfen: `python view_results.py`
-4. Bei Code-Fehler: Debug mode, Stack trace prüfen
+**Troubleshooting:**
+1. Inspect logs for the exact error message
+2. Check Ollama: `ollama list`
+3. Check the database: `python view_results.py`
+4. For code errors: enable debug mode and examine the stack trace
 
 ### Process Hangs
 
-**Symptom:** Pipeline läuft ewig, kein Fortschritt
+**Symptom:** Pipeline runs indefinitely with no progress
 
-**Lösung:**
+**Remediation:**
 ```powershell
-# Process finden
+# Find the process
 Get-Process python
 
-# Process killen
+# Kill the process
 Stop-Process -Id <PID> -Force
 ```
 
-### Button disabled
+### Buttons Disabled
 
-**Symptom:** Buttons reagieren nicht
+**Symptom:** Buttons are unresponsive
 
-**Ursachen:**
-- Keine Agent-Auswahl (Single Agent)
-- Pipeline läuft bereits
-- Browser-Cache
+**Possible causes:**
+- No agent selected (Single Agent)
+- A pipeline run is already in progress
+- Browser cache
 
-**Lösung:**
-- Agent aus Dropdown wählen
-- Warten bis aktuelle Pipeline fertig
-- Browser-Reload (Ctrl+R)
-
----
-
-## 🚀 Erweiterungen (TODO)
-
-### Kurzfristig
-- [ ] Live Log-Streaming (WebSocket statt Polling)
-- [ ] Stop/Cancel Button (Process kill)
-- [ ] Progress Bar mit echten Prozentwerten
-- [ ] Pipeline Schedule (Cron-Jobs über GUI)
-
-### Mittelfristig
-- [ ] Multi-Pipeline Support (mehrere parallel)
-- [ ] Execution History in Datenbank speichern
-- [ ] Export Logs als .txt oder .json
-- [ ] Email/Slack Notifications bei Completion/Failure
-
-### Langfristig
-- [ ] Custom Pipeline Builder (Agents per Drag&Drop)
-- [ ] Parameter-Tuning über GUI
-- [ ] A/B Testing Interface
-- [ ] Performance Profiling Visualization
+**Solutions:**
+- Select an agent from the dropdown
+- Wait for the current pipeline to finish
+- Reload the browser (Ctrl+R)
 
 ---
 
-## 📊 Integration mit anderen Tabs
+## 🚀 Enhancements (TODO)
 
-**Nach Pipeline-Run:**
+### Short term
+- [ ] Live log streaming (WebSocket instead of polling)
+- [ ] Stop/Cancel button (ability to kill the process)
+- [ ] Progress bar with real percentage values
+- [ ] Pipeline scheduling (cron-style jobs via GUI)
 
-1. **Dashboard Tab**: Updated automatisch
-   - Neue Artikel-Count
-   - Aktualisierte Quality Stats
-   - Market Regime Änderungen
+### Medium term
+- [ ] Multi-pipeline support (parallel runs)
+- [ ] Persist execution history to the database
+- [ ] Export logs as .txt or .json
+- [ ] Email/Slack notifications on completion/failure
 
-2. **News Feed Tab**: Zeigt neue Artikel
-   - LLM-Summaries
-   - Sentiment Badges
-   - Event Tags
+### Long term
+- [ ] Custom pipeline builder (drag & drop agents)
+- [ ] Parameter tuning via the GUI
+- [ ] A/B testing interface
+- [ ] Performance profiling visualizations
 
-3. **Predictions Tab**: Neue Predictions (wenn Entities gefunden)
-   - Direction & Confidence
-   - Forecast Horizon
+---
 
-4. **Statistics Tab**: Updated Charts
-   - Event Distribution
-   - Quality Histogram
+## 📊 Integration with Other Tabs
 
-5. **System Health Tab**: Updated Agent Status
-   - Last Execution Time
-   - Success/Failure Count
+**After a pipeline run:**
+
+1. **Dashboard Tab:** Automatically updated
+   - New article count
+   - Updated quality statistics
+   - Market regime changes
+
+2. **News Feed Tab:** Shows new articles
+   - LLM summaries
+   - Sentiment badges
+   - Event tags
+
+3. **Predictions Tab:** New predictions (if entities were found)
+   - Direction & confidence
+   - Forecast horizon
+
+4. **Statistics Tab:** Updated charts
+   - Event distribution
+   - Quality histogram
+
+5. **System Health Tab:** Updated agent status
+   - Last execution time
+   - Success/failure counts
 
 ---
 
 ## 🎓 Best Practices
 
-### 1. Entwicklung
-- Immer erst "Quick Test" nach Code-Änderung
-- Verbose Logging aktivieren beim Debugging
-- Einzelne Agents testen bei Agent-spezifischen Änderungen
+### 1. Development
+- Always run a "Quick Test" after code changes
+- Enable verbose logging while debugging
+- Test individual agents for agent-specific changes
 
-### 2. Produktion
-- "Full Pipeline" für regelmäßige Runs
-- Verbose Logging deaktivieren (Performance)
-- Execution History regelmäßig prüfen
+### 2. Production
+- Use "Full Pipeline" for regular runs
+- Disable verbose logging in production (performance)
+- Check execution history periodically
 
 ### 3. Monitoring
-- Status Badge im Auge behalten
-- Bei langen Runs: Log regelmäßig prüfen
-- System Health Tab parallel offen halten
+- Keep an eye on the status badge
+- For long runs: monitor the logs frequently
+- Keep the System Health tab open while monitoring
 
 ---
 
-## 📚 Dateien
+## 📚 Files
 
 ```
-src/gui/tabs/control.py          # Control Tab Implementation
-src/gui/app.py                   # Callbacks für Control
-scripts/run_mvp_pipeline.py      # Full Pipeline Script
-test_quick.py                    # Quick Test Script
-scripts/run_ingestion.py         # Ingestion-only Script
+src/gui/tabs/control.py          # Control Tab implementation
+src/gui/app.py                   # Callbacks for Control
+scripts/run_mvp_pipeline.py      # Full pipeline script
+test_quick.py                    # Quick test script
+scripts/run_ingestion.py         # Ingestion-only script
 ```
 
 ---
 
 ## 🔗 Related Documentation
 
-- [GUI_README.md](../GUI_README.md) - Komplette GUI Dokumentation
-- [PIPELINE_RESULTS.md](../PIPELINE_RESULTS.md) - Pipeline Ergebnisse
-- [Implementation_Plan.md](../Implementation_Plan.md) - Architektur
+- [GUI_README.md](../GUI_README.md) — Complete GUI documentation
+- [PIPELINE_RESULTS.md](../PIPELINE_RESULTS.md) — Pipeline results
+- [Implementation_Plan.md](../Implementation_Plan.md) — Architecture
 
 ---
 

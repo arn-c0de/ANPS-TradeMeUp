@@ -6,12 +6,6 @@ This document contains the licenses of all third-party dependencies used in the 
 
 **Project License:** Proprietary Source-Available License (see [LICENSE](LICENSE))
 
-**Compatibility Status:** ✅ All third-party dependencies are compatible
-
-All dependencies use permissive open-source licenses (MIT, BSD, Apache 2.0) that allow use in proprietary software. The only requirement is attribution, which is fulfilled by this document.
-
----
-
 ## Core Web Framework Dependencies
 
 ### FastAPI
