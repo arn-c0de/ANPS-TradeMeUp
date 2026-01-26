@@ -27,23 +27,23 @@ env/
 .venv
 
 # IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
 *~
-.DS_Store
 
 # Environment variables
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
+.env.test
 *.env
+!*.env.example
 
-# Database
-*.db
-*.sqlite
-*.sqlite3
+# Database (temporary files only - .db files will be tracked)
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite-journal
 data/
 pgdata/
 
@@ -70,18 +70,41 @@ models/*.joblib
 # Docker
 docker-compose.override.yml
 
-# Secrets
+# Secrets & Credentials
 secrets/
 *.key
 *.pem
-
-# OS
-Thumbs.db
-.DS_Store
+*.p12
+*.pfx
+*.crt
+*.cer
+credentials.json
+service-account*.json
+config.json
+*.token
+*.secret
 
 # Temporary files
 tmp/
 temp/
 *.tmp
+*.bak
+*.backup
+*.swp
+*.swo
 
+# IDE & Editor
 .claude
+.vscode/
+.idea/
+*.sublime-*
+
+# OS specific
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes

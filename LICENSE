@@ -1,25 +1,21 @@
-Copyright (c) 2026 arn-c0de. All rights reserved.
+Copyright (c) 2026 arn-c0de
+All rights reserved.
 
-PROPRIETARY LICENSE
+PROPRIETARY SOURCE-AVAILABLE LICENSE
 
-Maintainer: arn-c0de
-Contact: arn-c0de@protonmail.com
-Repository: https://github.com/arn-c0de/ANPS-TradeMeUp
+Permission is hereby granted to view, clone, and modify this repository
+solely for the purpose of contributing improvements to this repository
+via pull requests or issues.
 
-This software and associated documentation files (the "Software") are the 
-exclusive property of the copyright holder.
+The following is strictly prohibited without explicit written permission:
+- Commercial use
+- Redistribution
+- Publication of modified or unmodified versions
+- Use in other software projects
+- Sublicensing or selling
 
-All rights reserved. No part of this Software may be:
-- Used
-- Copied
-- Modified
-- Merged
-- Published
-- Distributed
-- Sublicensed
-- Sold
-
-without the prior express written permission of the copyright holder.
+All contributions submitted to this repository become the exclusive
+property of the copyright holder.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
@@ -30,3 +26,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Unauthorized use, reproduction, or distribution of this software is strictly 
 prohibited and may result in civil and criminal penalties.
+
+---
+Maintainer: arn-c0de
+Contact: arn-c0de@protonmail.com
+Repository: https://github.com/arn-c0de/ANPS-TradeMeUp
