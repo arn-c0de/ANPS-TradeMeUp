@@ -74,14 +74,13 @@ That's enough to explore the GUI and view sample dashboards. For a full developm
 ## Installation & Full Setup
 Prerequisites:
 - Python 3.11+
-- Docker & Docker Compose
 - Poetry (recommended)
 
+> **Note:** Docker & Docker Compose are currently not available in this distribution. Local infra services (Postgres, Redis, MinIO) may be unavailable; configure remote services or proceed without them and expect limited functionality.
+
 Full steps:
-1. Start infra services (optional, but recommended for full functionality):
-   ```bash
-   docker-compose up -d
-   ```
+1. Infrastructure services (Docker not available):
+   > **Note:** Docker & Docker Compose are currently unavailable. If you have access to infrastructure elsewhere (cloud/staging), set `DATABASE_URL`, `REDIS_URL`, and `MINIO` accordingly. Otherwise skip this step; some features will be limited.
 2. Install Python dependencies (using Poetry):
    ```bash
    poetry install
@@ -127,6 +126,7 @@ Full implementation details, architecture, and agent breakdown are available dee
 - GUI docs: `docs/GUI_README.md`
 - Local setup: `docs/SETUP_LOCAL.md`
 - Performance: `docs/CONTINUOUS_PIPELINE_PERFORMANCE.md`
+- Third-party licenses: `THIRD_PARTY_LICENSES.md`
 
 ---
 
