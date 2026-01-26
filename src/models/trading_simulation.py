@@ -36,6 +36,16 @@ class TradingSimulation(Base):
     position_size_pct = Column(Float)  # NEW: Position size as % of portfolio
     position_value_usd = Column(Float)  # NEW: Position value in USD
 
+    # Stop Loss & Take Profit
+    stop_loss_price = Column(Float)  # Calculated stop loss price
+    stop_loss_pct = Column(Float)  # Stop loss distance as percentage
+    stop_loss_type = Column(String(20))  # atr_based, risk_adjusted, percentage
+    trailing_stop_price = Column(Float)  # Trailing stop price (if applicable)
+    take_profit_price = Column(Float)  # Target take profit price
+    take_profit_pct = Column(Float)  # Take profit distance as percentage
+    risk_reward_ratio = Column(Float)  # Risk/reward ratio
+    exit_strategy = Column(JSON)  # Detailed exit strategy metadata
+
     # Risk and metadata
     risk_breakdown = Column(JSON)
     simulation_metadata = Column(JSON)

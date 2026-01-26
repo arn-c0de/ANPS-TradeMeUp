@@ -274,6 +274,31 @@ def get_statistics_metrics(engine, date_range=None, granularity="all"):
 
             entities_24h = db.query(func.count(Entity.entity_id)).filter(Entity.created_at >= day_ago).scalar() or 0
 
+            # Count unique entities mentioned in articles (respects date filter)
+            unique_entities_query = db.query(
+                func.count(func.distinct(NewsEntityMapping.entity_id))
+            ).join(
+                RawNews, NewsEntityMapping.news_id == RawNews.news_id
+            )
+            if start_date:
+                unique_entities_query = unique_entities_query.filter(RawNews.fetched_at >= start_date)
+            if end_date:
+                unique_entities_query = unique_entities_query.filter(RawNews.fetched_at <= end_date)
+            unique_entities_mentioned = unique_entities_query.scalar() or 0
+
+            # Unique entities mentioned in last 1h/24h
+            unique_entities_1h = db.query(
+                func.count(func.distinct(NewsEntityMapping.entity_id))
+            ).join(
+                RawNews, NewsEntityMapping.news_id == RawNews.news_id
+            ).filter(RawNews.fetched_at >= hour_ago).scalar() or 0
+
+            unique_entities_24h = db.query(
+                func.count(func.distinct(NewsEntityMapping.entity_id))
+            ).join(
+                RawNews, NewsEntityMapping.news_id == RawNews.news_id
+            ).filter(RawNews.fetched_at >= day_ago).scalar() or 0
+
 
 
             predictions_1h = db.query(func.count(Prediction.prediction_id)).filter(
@@ -460,9 +485,13 @@ def get_statistics_metrics(engine, date_range=None, granularity="all"):
 
                                     f"+{processed_1h} 1h", f"+{processed_24h} 24h"), xs=6, sm=4, md=2),
 
-                dbc.Col(metric_card("🏢", "Entities", f"{total_entities:,}", "text-info",
+                dbc.Col(metric_card("🏢", "Entities Created", f"{total_entities:,}", "text-info",
 
                                     f"+{entities_1h} 1h", f"+{entities_24h} 24h"), xs=6, sm=4, md=2),
+
+                dbc.Col(metric_card("📊", "Tracked in News", f"{unique_entities_mentioned:,}", "text-cyan",
+
+                                    f"+{unique_entities_1h} 1h", f"+{unique_entities_24h} 24h"), xs=6, sm=4, md=2),
 
                 dbc.Col(metric_card("🔮", "Predictions", f"{total_predictions:,}", "text-warning",
 

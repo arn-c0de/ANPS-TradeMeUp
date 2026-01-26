@@ -8,8 +8,8 @@ prediction information. It can be used by multiple tabs (predictions, simulation
 import logging
 import dash_bootstrap_components as dbc
 from dash import html
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import desc, and_
 from datetime import datetime
 
 from src.models.predictions import Prediction, PredictionOutcome
@@ -218,16 +218,19 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
     """
     try:
         with Session(engine) as db:
-            # Get prediction
-            pred = db.query(Prediction).filter(
+            # OPTIMIZED: Get prediction with eager loading for entity in single query
+            # This eliminates N+1 query problem by using JOINs
+            pred = db.query(Prediction).options(
+                joinedload(Prediction.entity)
+            ).filter(
                 Prediction.prediction_id == prediction_id
             ).first()
 
             if not pred:
                 return "Error", dbc.Alert("Prediction not found", color="danger")
 
-            # Get entity
-            entity = db.query(Entity).filter(Entity.entity_id == pred.entity_id).first()
+            # Entity is now already loaded via eager loading
+            entity = pred.entity
             entity_name = entity.entity_name if entity else pred.entity_id
 
             # Get direction
@@ -236,10 +239,9 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
             direction_emoji = {"up": "🔼", "down": "🔽", "flat": "➡️"}.get(direction, "❓")
 
             # Check for saved performance first
+            # Note: pred.outcome is a list due to backref, so we take first element if exists
             performance = None
-            saved_outcome = db.query(PredictionOutcome).filter(
-                PredictionOutcome.prediction_id == prediction_id
-            ).first()
+            saved_outcome = pred.outcome[0] if hasattr(pred, 'outcome') and pred.outcome else None
 
             logger.info(f"🔍 Checking saved performance for {prediction_id}")
             logger.info(f"   Found outcome: {saved_outcome is not None}")
@@ -248,7 +250,8 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                 logger.info(f"   Direction correct: {saved_outcome.direction_correct}")
                 logger.info(f"   Timestamp: {saved_outcome.evaluation_timestamp}")
 
-            # Load simulation data if available
+            # OPTIMIZED: Load simulation data with separate query (necessary for order_by)
+            # Using outerjoin would require more complex query structure
             simulation = db.query(TradingSimulation).filter(
                 TradingSimulation.prediction_id == prediction_id
             ).order_by(desc(TradingSimulation.created_at)).first()
@@ -310,12 +313,25 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
             else:
                 news_id = news_ids[0] if isinstance(news_ids, list) else news_ids
 
-                raw_news = db.query(RawNews).filter(RawNews.news_id == news_id).first()
-                processed = db.query(ProcessedNews).filter(ProcessedNews.news_id == news_id).first()
-                impact = db.query(ImpactScore).filter(
-                    ImpactScore.news_id == news_id,
-                    ImpactScore.entity_id == pred.entity_id
+                # OPTIMIZED: Combine 3 separate queries into single JOIN query
+                # This reduces 3 database roundtrips to just 1
+                news_data = db.query(
+                    RawNews, ProcessedNews, ImpactScore
+                ).outerjoin(
+                    ProcessedNews, 
+                    RawNews.news_id == ProcessedNews.news_id
+                ).outerjoin(
+                    ImpactScore,
+                    and_(
+                        ImpactScore.news_id == RawNews.news_id,
+                        ImpactScore.entity_id == pred.entity_id
+                    )
+                ).filter(
+                    RawNews.news_id == news_id
                 ).first()
+                
+                # Unpack results
+                raw_news, processed, impact = news_data if news_data else (None, None, None)
 
                 news_content = dbc.Card([
                     dbc.CardHeader(html.Div("📰 News", style={"fontWeight": "bold"}), className="py-1"),
@@ -480,6 +496,194 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                         html.Strong("Click the 🔄 Refresh button above to load it.")
                     ])
                 ], color="light", className="mb-2 py-2")
+
+            # Exit Strategy (Stop Loss & Take Profit) section
+            exit_strategy_section = None
+            if simulation and simulation.stop_loss_price is not None:
+                # Format prices based on magnitude
+                def _format_exit_price(p):
+                    if p is None:
+                        return "N/A"
+                    try:
+                        p = float(p)
+                    except Exception:
+                        return str(p)
+                    return f"${p:.4f}" if abs(p) < 1.0 else f"${p:,.2f}"
+
+                entry_price = performance.get('prediction_price') if performance else None
+                current_price = performance.get('current_price') if performance else None
+                
+                # Determine colors based on direction
+                sl_color = "danger"
+                tp_color = "success"
+                
+                # Calculate position in range (for visual ladder)
+                if entry_price and simulation.stop_loss_price and simulation.take_profit_price:
+                    total_range = abs(simulation.take_profit_price - simulation.stop_loss_price)
+                    if total_range > 0 and current_price:
+                        # Calculate where current price is in the range
+                        if simulation.stop_loss_price < simulation.take_profit_price:
+                            # Long position
+                            current_pct = ((current_price - simulation.stop_loss_price) / total_range) * 100
+                        else:
+                            # Short position
+                            current_pct = ((simulation.stop_loss_price - current_price) / total_range) * 100
+                        current_pct = max(0, min(100, current_pct))
+                    else:
+                        current_pct = 50
+                else:
+                    current_pct = 50
+
+                # Risk/reward ratio color
+                rr_ratio = simulation.risk_reward_ratio or 0
+                rr_color = "success" if rr_ratio >= 2.0 else "warning" if rr_ratio >= 1.5 else "danger"
+
+                exit_strategy_section = dbc.Row([
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardHeader(html.Div("🎯 Exit Strategy - Stop Loss & Take Profit", style={"fontWeight": "bold"}), className="py-1"),
+                            dbc.CardBody([
+                                # Method and Risk/Reward
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.Small("Method", className="text-muted d-block"),
+                                                dbc.Badge(
+                                                    (simulation.stop_loss_type or "unknown").replace("_", " ").title(),
+                                                    color="info",
+                                                    className="mt-1"
+                                                )
+                                            ], className="py-1 px-2 text-center")
+                                        ], color="light")
+                                    ], width=6),
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.Small("Risk:Reward", className="text-muted d-block"),
+                                                html.H6(
+                                                    f"1:{rr_ratio:.2f}" if rr_ratio else "N/A",
+                                                    className=f"text-{rr_color} mb-0 mt-1"
+                                                )
+                                            ], className="py-1 px-2 text-center")
+                                        ], color="light")
+                                    ], width=6)
+                                ], className="mb-2"),
+
+                                # Stop Loss and Take Profit Side by Side
+                                dbc.Row([
+                                    # Stop Loss
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.Div([
+                                                    html.Strong("🛑 Stop Loss", className="text-danger d-block mb-2"),
+                                                    html.Div([
+                                                        html.Small("Price:", className="text-muted"),
+                                                        html.Strong(
+                                                            f" {_format_exit_price(simulation.stop_loss_price)}",
+                                                            className="text-danger"
+                                                        )
+                                                    ], className="mb-1"),
+                                                    html.Div([
+                                                        html.Small("Distance:", className="text-muted"),
+                                                        html.Strong(
+                                                            f" {simulation.stop_loss_pct:.2f}%",
+                                                            className="text-danger"
+                                                        )
+                                                    ])
+                                                ])
+                                            ], className="py-2")
+                                        ], outline=True, color="danger")
+                                    ], width=6),
+
+                                    # Take Profit
+                                    dbc.Col([
+                                        dbc.Card([
+                                            dbc.CardBody([
+                                                html.Div([
+                                                    html.Strong("✅ Take Profit", className="text-success d-block mb-2"),
+                                                    html.Div([
+                                                        html.Small("Price:", className="text-muted"),
+                                                        html.Strong(
+                                                            f" {_format_exit_price(simulation.take_profit_price)}",
+                                                            className="text-success"
+                                                        )
+                                                    ], className="mb-1"),
+                                                    html.Div([
+                                                        html.Small("Target:", className="text-muted"),
+                                                        html.Strong(
+                                                            f" +{simulation.take_profit_pct:.2f}%",
+                                                            className="text-success"
+                                                        )
+                                                    ])
+                                                ])
+                                            ], className="py-2")
+                                        ], outline=True, color="success")
+                                    ], width=6)
+                                ], className="mb-3"),
+
+                                # Visual Price Ladder
+                                html.Div([
+                                    html.Small("Price Levels:", className="text-muted d-block mb-2"),
+                                    html.Div([
+                                        # Take Profit level
+                                        html.Div([
+                                            html.Span("🎯 ", style={"fontSize": "0.9rem"}),
+                                            html.Small(
+                                                f"Take Profit: {_format_exit_price(simulation.take_profit_price)}",
+                                                className="text-success"
+                                            )
+                                        ], className="mb-1"),
+                                        # Visual progress bar
+                                        dbc.Progress([
+                                            dbc.Progress(
+                                                value=current_pct,
+                                                color="info",
+                                                bar=True,
+                                                label=f"Current: {_format_exit_price(current_price)}" if current_price else "—",
+                                                style={"fontSize": "0.7rem"}
+                                            )
+                                        ], value=100, color="light", className="mb-1", style={"height": "25px"}),
+                                        # Entry level
+                                        html.Div([
+                                            html.Span("📍 ", style={"fontSize": "0.9rem"}),
+                                            html.Small(
+                                                f"Entry: {_format_exit_price(entry_price)}",
+                                                className="text-info"
+                                            )
+                                        ], className="mb-1"),
+                                        # Stop Loss level
+                                        html.Div([
+                                            html.Span("🛑 ", style={"fontSize": "0.9rem"}),
+                                            html.Small(
+                                                f"Stop Loss: {_format_exit_price(simulation.stop_loss_price)}",
+                                                className="text-danger"
+                                            )
+                                        ])
+                                    ], style={
+                                        "backgroundColor": "#2a2a2a",
+                                        "padding": "10px",
+                                        "borderRadius": "5px"
+                                    })
+                                ], className="mb-2"),
+
+                                # Trailing Stop (if applicable)
+                                html.Div([
+                                    html.Hr(className="my-2"),
+                                    html.Small([
+                                        html.Strong("🔄 Trailing Stop: "),
+                                        html.Span(
+                                            f"{_format_exit_price(simulation.trailing_stop_price)}" if simulation.trailing_stop_price else "Not activated",
+                                            className="text-warning" if simulation.trailing_stop_price else "text-muted"
+                                        )
+                                    ], className="d-block")
+                                ]) if simulation.trailing_stop_price or self.config.get("stop_loss_take_profit", {}).get("trailing_stop", {}).get("enabled") else None
+
+                            ], className="py-2")
+                        ], className="mb-2")
+                    ], width=12)
+                ], className="mb-2")
 
             # Simulation section
             simulation_section = None
@@ -767,6 +971,9 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
             body = dbc.Container([
                 # Live Performance Section (if available)
                 performance_section if performance_section else None,
+
+                # Exit Strategy Section (Stop Loss & Take Profit)
+                exit_strategy_section if exit_strategy_section else None,
 
                 # Simulation Section (if available)
                 simulation_section if simulation_section else None,

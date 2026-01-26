@@ -136,5 +136,75 @@
       "max_risk_score": 0.65,
       "max_position_size_pct": 10.0
     }
+  },
+
+  "stop_loss_take_profit": {
+    "enabled": true,
+    "default_method": "atr_based",
+    "description": "Stop loss and take profit calculation parameters",
+
+    "atr_based": {
+      "description": "ATR-based stops adapt to market volatility using Average True Range",
+      "atr_period_days": 14,
+      "atr_multiplier_stop_loss": {
+        "low": 1.5,
+        "medium": 2.0,
+        "high": 2.5,
+        "stressed": 3.0,
+        "unknown": 2.0
+      },
+      "atr_multiplier_take_profit": {
+        "low": 2.5,
+        "medium": 3.0,
+        "high": 3.5,
+        "stressed": 4.0,
+        "unknown": 3.0
+      },
+      "min_risk_reward_ratio": 1.5
+    },
+
+    "risk_adjusted": {
+      "description": "Risk score adjusts stop loss distance (tighter stops for higher risk)",
+      "base_stop_loss_pct": 2.0,
+      "base_take_profit_pct": 4.0,
+      "risk_multiplier_min": 0.5,
+      "risk_multiplier_max": 2.0,
+      "confidence_adjustment_enabled": true,
+      "confidence_adjustment_factor": 0.2
+    },
+
+    "percentage_based": {
+      "description": "Simple fixed percentage-based stops (fallback method)",
+      "default_stop_loss_pct": 2.0,
+      "default_take_profit_pct": 4.0,
+      "by_horizon": {
+        "1d": {"stop_loss_pct": 1.5, "take_profit_pct": 3.0},
+        "5d": {"stop_loss_pct": 2.5, "take_profit_pct": 5.0},
+        "20d": {"stop_loss_pct": 4.0, "take_profit_pct": 8.0}
+      }
+    },
+
+    "trailing_stop": {
+      "enabled": true,
+      "activation_profit_pct": 1.0,
+      "trail_distance_pct": 1.5,
+      "description": "Trailing stop activates after reaching profit threshold"
+    },
+
+    "penny_stock_adjustments": {
+      "enabled": true,
+      "description": "Special handling for low-priced stocks",
+      "penny_stock_multiplier": 1.5,
+      "ultra_penny_multiplier": 2.0,
+      "min_stop_loss_pct": 5.0,
+      "max_stop_loss_pct": 15.0
+    },
+
+    "position_exit": {
+      "partial_exit_enabled": false,
+      "partial_exit_at_profit_pct": 2.0,
+      "partial_exit_size_pct": 50.0,
+      "description": "Partial position exit rules (not yet implemented)"
+    }
   }
 }
