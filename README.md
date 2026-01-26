@@ -10,9 +10,6 @@
   ![Pydantic](https://img.shields.io/badge/Pydantic-2.5+-E92063?logo=pydantic&logoColor=white)
   ![Poetry](https://img.shields.io/badge/Poetry-Dependency%20Mgmt-60A5FA?logo=poetry&logoColor=white)
   ![yfinance](https://img.shields.io/badge/yfinance-0.2+-FF6B6B?logo=python&logoColor=white)
-  ![OpenAI](https://img.shields.io/badge/OpenAI-LLM-412991?logo=openai&logoColor=white)
-  ![Anthropic](https://img.shields.io/badge/Anthropic-LLM-FF6B35?logo=anthropic&logoColor=white)
-  ![Ollama](https://img.shields.io/badge/Ollama-LLM-3B82F6?logo=ollama&logoColor=white)
   <a href="https://deepwiki.com/arn-c0de/ANPS-TradeMeUp">
     <img src="https://img.shields.io/badge/DeepWiki-Project%20Docs-blueviolet?logo=book" alt="DeepWiki" />
   </a>
