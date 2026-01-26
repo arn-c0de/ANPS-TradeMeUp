@@ -56,6 +56,45 @@
     "description": "Position sizing and portfolio-level risk limits"
     },
 
+  "penny_stock_handling": {
+    "enabled": true,
+    "price_threshold_usd": 1.0,
+    "min_valid_price_usd": 0.00001,
+    "cost_method": "per_share_only",
+    "max_cost_bps_cap": 1000,
+    "description": "Special handling for low-priced stocks to prevent unrealistic BPS calculations",
+    "ultra_penny_threshold_usd": 0.001,
+    "ultra_penny_share_multiplier": 1000,
+    "ultra_penny_description": "Ultra-cheap stocks (< $0.001) use 1000x higher share counts to achieve realistic position sizes",
+    "methods": {
+      "per_share_only": {
+        "description": "Use only per-share commission costs, skip BPS-based costs",
+        "commission_per_share": 0.005,
+        "min_commission": 1.0
+      },
+      "flat_dollar": {
+        "description": "Use flat dollar amounts instead of BPS calculations",
+        "total_cost_usd": 5.0
+      },
+      "capped_bps": {
+        "description": "Calculate BPS normally but cap at maximum",
+        "max_bps": 1000
+      }
+    },
+    "position_value_targets": {
+      "ultra_penny": {
+        "min_position_value_usd": 10.0,
+        "max_position_value_usd": 100.0,
+        "description": "For ultra-pennies (< $0.001), target $10-100 positions"
+      },
+      "penny": {
+        "min_position_value_usd": 50.0,
+        "max_position_value_usd": 500.0,
+        "description": "For pennies ($0.001-$1.00), target $50-500 positions"
+      }
+    }
+  },
+
   "decision_thresholds": {
     "min_confidence": 0.55,
     "min_expected_return_pct": 0.75,

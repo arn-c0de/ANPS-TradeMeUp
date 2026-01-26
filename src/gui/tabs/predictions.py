@@ -28,6 +28,46 @@ from src.gui.utils.task_queue import get_task_queue, add_gui_task
 logger = logging.getLogger(__name__)
 
 
+def _format_price_ui(p):
+    """Format prices with higher precision for sub-dollar values."""
+    if p is None:
+        return "N/A"
+    try:
+        p = float(p)
+    except Exception:
+        return str(p)
+    return f"${p:.4f}" if abs(p) < 1.0 else f"${p:,.2f}"
+
+
+def _find_first_valid_trigger(triggered):
+    """Helper to find the first non-empty trigger and extract action + prediction_id
+
+    Returns:
+        tuple(action, prediction_id) where action in {'close', 'refresh', 'detail'} or (None, None)
+    """
+    if not triggered:
+        return None, None
+    for trigger in triggered:
+        prop_id = trigger.get("prop_id", "")
+        value = trigger.get("value")
+        # Skip falsy clicks (None or 0)
+        if value is None or value == 0:
+            continue
+        if "close-prediction-modal" in prop_id:
+            return "close", None
+        if "refresh-prediction-detail" in prop_id:
+            return "refresh", None
+        if ("pred-detail-btn" in prop_id or "sim-detail-btn" in prop_id) and ".n_clicks" in prop_id:
+            try:
+                id_str = prop_id.split('.')[0]
+                id_dict = json.loads(id_str)
+                return "detail", id_dict.get("index")
+            except Exception as e:
+                logger.warning(f"Failed to parse detail button id from trigger: {prop_id}, error: {e}")
+                return None, None
+    return None, None
+
+
 def create_layout():
     """Create predictions tab layout"""
     return html.Div([
@@ -510,8 +550,8 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
                         returns = hist_data_filtered['Close'].pct_change().dropna()
                         volatility = returns.std() * 100 if len(returns) > 0 else 0
                     
-                    logger.info(f"   Entry: ${prediction_price:.2f}, Current: ${current_price:.2f}")
-                    logger.info(f"   High: ${high_since:.2f}, Low: ${low_since:.2f}, Vol: {volatility:.2f}%")
+                    logger.info(f"   Entry: {_format_price_ui(prediction_price)}, Current: {_format_price_ui(current_price)}")
+                    logger.info(f"   High: {_format_price_ui(high_since)}, Low: {_format_price_ui(low_since)}, Vol: {volatility:.2f}%")
                 else:
                     logger.warning(f"   No data since prediction date, using all available")
                     prediction_price = hist_data.iloc[0]['Close']
@@ -671,7 +711,8 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                                 prediction_id, performance, db
                             )
                             db.commit()
-                            logger.info(f"✅ Saved updated performance: {performance.get('total_return_pct'):.2f}%")
+                            tr = performance.get('total_return_pct')
+                            logger.info(f"✅ Saved updated performance: {tr:.2f}%" if tr is not None else "✅ Saved updated performance: N/A")
                         except Exception as save_error:
                             logger.warning(f"Could not save updated performance: {save_error}")
                             db.rollback()
@@ -691,7 +732,8 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                                 prediction_id, performance, db
                             )
                             db.commit()
-                            logger.info(f"✅ Saved new performance: {performance.get('total_return_pct'):.2f}%")
+                            tr = performance.get('total_return_pct')
+                            logger.info(f"✅ Saved new performance: {tr:.2f}%" if tr is not None else "✅ Saved new performance: N/A")
                         except Exception as save_error:
                             logger.warning(f"Could not save performance: {save_error}")
                             db.rollback()
@@ -842,17 +884,17 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                                     dbc.Col([
                                         html.Small([
                                             html.Strong("Entry: "),
-                                            html.Span(f"${performance['prediction_price']:.2f}"),
+                                            html.Span(_format_price_ui(performance['prediction_price'])),
                                             " → ",
                                             html.Strong("Now: "),
-                                            html.Span(f"${performance['current_price']:.2f} ", className=f"text-{return_color}"),
-                                            html.Span(f"({performance['current_price'] - performance['prediction_price']:+.2f})", className=f"text-{return_color}")
+                                            html.Span(_format_price_ui(performance['current_price']), className=f"text-{return_color}"),
+                                            html.Span(f"({_format_price_ui(performance['current_price'] - performance['prediction_price'])})", className=f"text-{return_color}")
                                         ], className="d-block")
                                     ], width=6),
                                     dbc.Col([
                                         html.Small([
                                             html.Strong("Range: "),
-                                            html.Span(f"${performance['low_since_prediction']:.2f} - ${performance['high_since_prediction']:.2f}"),
+                                            html.Span(f"{_format_price_ui(performance.get('low_since_prediction'))} - {_format_price_ui(performance.get('high_since_prediction'))}"),
                                             " | ",
                                             html.Strong("Vol: "),
                                             html.Span(f"{performance['volatility']:.1f}%")
@@ -890,6 +932,14 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
 
                 risk_score = simulation.risk_score or 0
                 risk_color = "danger" if risk_score > 0.7 else "warning" if risk_score > 0.4 else "success"
+
+                # Extract penny stock info from metadata
+                sim_metadata = simulation.simulation_metadata or {}
+                penny_stock_info = sim_metadata.get("penny_stock_info", {})
+                is_penny_stock = penny_stock_info.get("is_penny_stock", False)
+                is_ultra_penny = penny_stock_info.get("is_ultra_penny_stock", False)
+                cost_method = penny_stock_info.get("cost_method", "standard")
+                shares_multiplier = penny_stock_info.get("shares_multiplier", 1.0)
 
                 expected_return = simulation.expected_return_pct or 0
                 expected_color = "success" if expected_return > 0 else "danger" if expected_return < 0 else "secondary"
@@ -937,7 +987,7 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                                     dbc.Col([
                                         dbc.Card([
                                             dbc.CardBody([
-                                                html.H5(f"{risk_score:.2f}", className=f"text-{risk_color} text-center mb-0"),
+                                                html.H5(f"{risk_score:.2f}" if risk_score is not None else "—", className=f"text-{risk_color} text-center mb-0"),
                                                 html.Small("Risk Score", className="text-center text-muted d-block")
                                             ], className="py-1 px-2")
                                         ], color="light")
@@ -959,6 +1009,13 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                                         ], color="light")
                                     ], width=3)
                                 ], className="mb-3"),
+
+                                # Show note when simulation was skipped/invalid
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Alert(sim_metadata.get('note'), color="warning", className="mb-2")
+                                    ], width=12)
+                                ]) if sim_metadata.get('note') else None,
 
                                 # Cost Breakdown Section
                                 dbc.Row([
@@ -1013,13 +1070,37 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                                     ], width=12)
                                 ]),
 
+                                # Penny Stock Info Section (if applicable)
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Alert([
+                                            html.Div([
+                                                html.Strong(
+                                                    "⭐ Ultra-Penny Stock Handling: " if is_ultra_penny else "💎 Penny Stock Handling: ",
+                                                    className="text-info"
+                                                ),
+                                                html.Span(f"Price ${penny_stock_info.get('price', 0):.6f} - " if is_ultra_penny else f"Price ${penny_stock_info.get('price', 0):.4f} - ", className="text-muted"),
+                                                dbc.Badge(
+                                                    cost_method.replace("_", " ").title(),
+                                                    color="warning" if is_ultra_penny else "info",
+                                                    className="ms-2"
+                                                ),
+                                            ]),
+                                            html.Small([
+                                                f"Ultra-cheap stock: Using {shares_multiplier:.0f}x shares ({penny_stock_info.get('shares_used', 0):,} shares) for realistic position sizing. " if is_ultra_penny else "",
+                                                "Alternative cost calculation used for low-priced stocks to prevent unrealistic basis point calculations."
+                                            ], className="d-block mt-2 text-muted")
+                                        ], color="warning" if is_ultra_penny else "info", className="mb-2")
+                                    ], width=12)
+                                ]) if is_penny_stock else None,
+
                                 # Risk Components Breakdown Section
                                 dbc.Row([
                                     dbc.Col([
                                         dbc.Card([
                                             dbc.CardHeader([
                                                 html.Strong("⚠️ Risk Components "),
-                                                html.Small(f"(Weighted Score: {risk_score:.2f})", className=f"text-{risk_color}")
+                                                html.Small(f"(Weighted Score: {risk_score:.2f})" if risk_score is not None else "(Weighted Score: N/A)", className=f"text-{risk_color}")
                                             ], className="py-1"),
                                             dbc.CardBody([
                                                 dbc.Row([
@@ -1270,6 +1351,34 @@ def register_callbacks(app):
             refreshing_prediction_id=refreshing_id
         )
 
+    def _find_first_valid_trigger(triggered):
+        """Helper to find the first non-empty trigger and extract action + prediction_id
+
+        Returns:
+            tuple(action, prediction_id) where action in {'close', 'refresh', 'detail'} or (None, None)
+        """
+        if not triggered:
+            return None, None
+        for trigger in triggered:
+            prop_id = trigger.get("prop_id", "")
+            value = trigger.get("value")
+            # Skip falsy clicks (None or 0)
+            if value is None or value == 0:
+                continue
+            if "close-prediction-modal" in prop_id:
+                return "close", None
+            if "refresh-prediction-detail" in prop_id:
+                return "refresh", None
+            if ("pred-detail-btn" in prop_id or "sim-detail-btn" in prop_id) and ".n_clicks" in prop_id:
+                try:
+                    id_str = prop_id.split('.')[0]
+                    id_dict = json.loads(id_str)
+                    return "detail", id_dict.get("index")
+                except Exception as e:
+                    logger.warning(f"Failed to parse detail button id from trigger: {prop_id}, error: {e}")
+                    return None, None
+        return None, None
+
     @app.callback(
         [Output("prediction-modal", "is_open"),
          Output("prediction-detail-cache", "data"),
@@ -1285,32 +1394,37 @@ def register_callbacks(app):
          State("current-prediction-id", "data")],
         prevent_initial_call=True
     )
+
     def toggle_prediction_modal(detail_clicks, sim_detail_clicks, close_click, refresh_click, is_open, button_ids, sim_button_ids, cached_data, current_pred_id):
         """Open/close prediction detail modal and cache prediction_id"""
         from dash import callback_context
         if not callback_context.triggered:
             return dash.no_update, dash.no_update, dash.no_update
-        trigger_id = callback_context.triggered[0]["prop_id"]
-        trigger_value = callback_context.triggered[0].get("value")
-        if trigger_value is None or trigger_value == 0:
+
+        # Log raw triggers for diagnostics
+        try:
+            logger.debug(f"toggle_prediction_modal raw triggered: {callback_context.triggered}")
+        except Exception:
+            logger.exception("Failed to access callback_context.triggered for logging")
+
+        try:
+            action, prediction_id = _find_first_valid_trigger(callback_context.triggered)
+
+            logger.debug(f"toggle_prediction_modal parsed action={action}, prediction_id={prediction_id}")
+
+            if not action:
+                return dash.no_update, dash.no_update, dash.no_update
+            if action == "close":
+                return False, dash.no_update, dash.no_update
+            if action == "refresh" and current_pred_id:
+                return True, {"prediction_id": current_pred_id, "load_performance": True}, current_pred_id
+            if action == "detail" and prediction_id:
+                logger.info(f"Opening prediction modal for id: {prediction_id}")
+                return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id
             return dash.no_update, dash.no_update, dash.no_update
-        if "close-prediction-modal" in trigger_id:
-            return False, dash.no_update, dash.no_update
-        if "refresh-prediction-detail" in trigger_id and current_pred_id:
-            return True, {"prediction_id": current_pred_id, "load_performance": True}, current_pred_id
-        if "pred-detail-btn" in trigger_id and ".n_clicks" in trigger_id:
-            id_str = trigger_id.split('.')[0]
-            id_dict = json.loads(id_str)
-            prediction_id = id_dict.get("index")
-            if prediction_id:
-                return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id
-        if "sim-detail-btn" in trigger_id and ".n_clicks" in trigger_id:
-            id_str = trigger_id.split('.')[0]
-            id_dict = json.loads(id_str)
-            prediction_id = id_dict.get("index")
-            if prediction_id:
-                return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id
-        return dash.no_update, dash.no_update, dash.no_update
+        except Exception as e:
+            logger.exception(f"Unexpected error in toggle_prediction_modal: {e}")
+            return dash.no_update, dash.no_update, dash.no_update
 
     @app.callback(
         [Output("refresh-loading-state", "data"),

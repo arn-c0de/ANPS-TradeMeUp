@@ -193,7 +193,7 @@ class EntityMappingAgent:
         # Load prompt template
         prompt_path = Path("config/prompts/entity_extraction.txt")
         if prompt_path.exists():
-            with open(prompt_path, 'r') as f:
+            with open(prompt_path, 'r', encoding='utf-8') as f:
                 self.prompt_template = f.read()
         else:
             self.prompt_template = self._get_fallback_prompt()

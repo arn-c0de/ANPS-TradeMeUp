@@ -86,7 +86,9 @@ class TradingSimulationEngine:
                 "min_expected_return_pct": 0.75,
                 "max_risk_score": 0.65,
                 "max_cost_ratio": 0.70
-            }
+            },
+            # Minimum valid price (USD). Prices below this are treated as invalid for simulations
+            "min_valid_price_usd": 0.01
         }
 
     def _update_thresholds_from_config(self):
@@ -122,6 +124,199 @@ class TradingSimulationEngine:
             return 0.2
         return 0.5
 
+    def _is_penny_stock(self, price: float) -> bool:
+        """Check if a stock qualifies as a penny stock based on configuration."""
+        penny_config = self.config.get("penny_stock_handling", {})
+        if not penny_config.get("enabled", False):
+            return False
+        threshold = penny_config.get("price_threshold_usd", 1.0)
+        min_valid = penny_config.get("min_valid_price_usd", 0.00001)
+        return min_valid < price <= threshold
+
+    def _is_ultra_penny_stock(self, price: float) -> bool:
+        """Check if a stock qualifies as an ultra-penny stock (< $0.001)."""
+        penny_config = self.config.get("penny_stock_handling", {})
+        if not penny_config.get("enabled", False):
+            return False
+        ultra_threshold = penny_config.get("ultra_penny_threshold_usd", 0.001)
+        min_valid = penny_config.get("min_valid_price_usd", 0.00001)
+        return min_valid < price < ultra_threshold
+
+    def _calculate_dynamic_shares(self, price: float, base_shares: int = None) -> int:
+        """
+        Calculate appropriate number of shares based on price to achieve realistic position sizes.
+
+        For ultra-penny stocks (< $0.001), use much higher share counts to ensure
+        minimum position value is reasonable.
+
+        Args:
+            price: Current price per share
+            base_shares: Base number of shares (default: DEFAULT_SHARES)
+
+        Returns:
+            Adjusted number of shares
+        """
+        if base_shares is None:
+            base_shares = self.DEFAULT_SHARES
+
+        if price <= 0:
+            return base_shares
+
+        penny_config = self.config.get("penny_stock_handling", {})
+
+        # Ultra-penny stocks: scale up shares to achieve minimum position value
+        if self._is_ultra_penny_stock(price):
+            targets = penny_config.get("position_value_targets", {}).get("ultra_penny", {})
+            target_position_value = targets.get("min_position_value_usd", 10.0)
+
+            # Calculate shares needed to reach target position value
+            shares_needed = int(target_position_value / price)
+
+            # Cap at reasonable maximum (e.g., 10 million shares)
+            max_shares = 10_000_000
+            shares = min(shares_needed, max_shares)
+
+            logger.info(f"Ultra-penny stock (${price:.6f}): using {shares:,} shares (target: ${shares * price:.2f} position)")
+            return shares
+
+        # Regular penny stocks: use moderate increase
+        elif self._is_penny_stock(price):
+            # For prices $0.001-$1.00, use modest multiplier
+            multiplier = penny_config.get("penny_share_multiplier", 10)
+            shares = base_shares * multiplier
+
+            logger.info(f"Penny stock (${price:.4f}): using {shares:,} shares")
+            return shares
+
+        # Normal stocks: use base shares
+        return base_shares
+
+    def _estimate_penny_stock_costs(
+        self,
+        price: float,
+        shares: int,
+        cost_method: str,
+        predicted_direction: str,
+        horizon: str,
+    ) -> Tuple[float, Dict]:
+        """
+        Estimate costs for penny stocks using alternative methods.
+
+        Args:
+            price: Current price per share
+            shares: Number of shares to trade
+            cost_method: Cost calculation method (per_share_only, flat_dollar, capped_bps)
+            predicted_direction: Trade direction (for overnight/borrow costs)
+            horizon: Prediction horizon (for time-based costs)
+
+        Returns:
+            Tuple of (total_bps, breakdown_dict with 'cost_method' field)
+        """
+        penny_config = self.config.get("penny_stock_handling", {})
+        methods_config = penny_config.get("methods", {})
+
+        position_value = price * shares
+        if position_value <= 0:
+            return 0.0, {"cost_method": "skipped_zero_value"}
+
+        breakdown = {"cost_method": cost_method}
+
+        if cost_method == "per_share_only":
+            # Only use per-share commission, skip spread/slippage/etc
+            method_config = methods_config.get("per_share_only", {})
+            commission_per_share = method_config.get("commission_per_share", 0.005)
+            min_commission = method_config.get("min_commission", 1.0)
+
+            # For ultra-penny stocks with very high share counts, use only minimum commission
+            # to avoid absurd costs (e.g., 100k shares * $0.005 = $500 is unrealistic)
+            if shares > 10000:  # Ultra-high share count
+                total_commission = min_commission
+                logger.info(f"Ultra-high share count ({shares:,}) - using min commission only: ${min_commission}")
+            else:
+                total_commission = max(commission_per_share * shares, min_commission)
+
+            commission_bps = (total_commission / position_value) * 10000
+
+            # Add overnight and borrow costs (still relevant for penny stocks)
+            overnight_bps = self._calculate_overnight_costs(predicted_direction, horizon)
+            borrow_bps = self._calculate_borrow_costs(predicted_direction, horizon)
+
+            total_bps = commission_bps + overnight_bps + borrow_bps
+
+            breakdown.update({
+                "commission_bps": round(commission_bps, 3),
+                "spread_bps": 0.0,
+                "slippage_bps": 0.0,
+                "market_impact_bps": 0.0,
+                "overnight_cost_bps": round(overnight_bps, 3),
+                "borrow_cost_bps": round(borrow_bps, 3),
+                "regulatory_bps": 0.0,
+                "total_bps": round(total_bps, 3),
+            })
+
+        elif cost_method == "flat_dollar":
+            # Use a flat dollar amount
+            method_config = methods_config.get("flat_dollar", {})
+            total_cost_usd = method_config.get("total_cost_usd", 5.0)
+
+            total_bps = (total_cost_usd / position_value) * 10000
+
+            breakdown.update({
+                "commission_bps": 0.0,
+                "spread_bps": 0.0,
+                "slippage_bps": 0.0,
+                "market_impact_bps": 0.0,
+                "overnight_cost_bps": 0.0,
+                "borrow_cost_bps": 0.0,
+                "regulatory_bps": 0.0,
+                "flat_cost_usd": total_cost_usd,
+                "total_bps": round(total_bps, 3),
+            })
+
+        elif cost_method == "capped_bps":
+            # Calculate normal BPS but cap at maximum
+            method_config = methods_config.get("capped_bps", {})
+            max_bps = method_config.get("max_bps", 1000)
+
+            # Use standard calculation but will be capped
+            cost_params = self.config.get("cost_parameters", {})
+            commission_config = cost_params.get("commission", {})
+            commission_per_share = commission_config.get("per_share", 0.005)
+            min_commission = commission_config.get("min_commission", 1.0)
+
+            total_commission = max(commission_per_share * shares, min_commission)
+            commission_bps = min((total_commission / position_value) * 10000, max_bps / 2)
+
+            # Simplified other costs for penny stocks
+            spread_bps = min(20.0, max_bps / 10)
+            slippage_bps = min(15.0, max_bps / 10)
+            overnight_bps = self._calculate_overnight_costs(predicted_direction, horizon)
+            borrow_bps = self._calculate_borrow_costs(predicted_direction, horizon)
+
+            total_bps = min(
+                commission_bps + spread_bps + slippage_bps + overnight_bps + borrow_bps,
+                max_bps
+            )
+
+            breakdown.update({
+                "commission_bps": round(commission_bps, 3),
+                "spread_bps": round(spread_bps, 3),
+                "slippage_bps": round(slippage_bps, 3),
+                "market_impact_bps": 0.0,
+                "overnight_cost_bps": round(overnight_bps, 3),
+                "borrow_cost_bps": round(borrow_bps, 3),
+                "regulatory_bps": 0.0,
+                "max_bps_cap": max_bps,
+                "total_bps": round(total_bps, 3),
+            })
+        else:
+            # Fallback to per_share_only
+            return self._estimate_penny_stock_costs(
+                price, shares, "per_share_only", predicted_direction, horizon
+            )
+
+        return total_bps, breakdown
+
     def _estimate_costs_bps(
         self,
         price: float,
@@ -147,6 +342,23 @@ class TradingSimulationEngine:
         """
         if price <= 0:
             return 0.0, {}
+
+        # FIRST: Check for extremely small prices that are too cheap even for penny stock handling
+        # (e.g., < $0.001) - these are considered invalid/unreliable
+        penny_config = self.config.get("penny_stock_handling", {})
+        min_valid_price = penny_config.get("min_valid_price_usd", 0.001)
+        if price < min_valid_price:
+            logger.warning(f"Price ${price:.6f} below min_valid_price_usd ${min_valid_price} - skipping cost estimation")
+            return 0.0, {}
+
+        # SECOND: Check if this is a penny stock (price between min_valid and threshold)
+        # and use alternative cost calculation
+        if self._is_penny_stock(price):
+            cost_method = penny_config.get("cost_method", "per_share_only")
+            logger.info(f"Penny stock detected (price: ${price:.4f}) - using '{cost_method}' cost method")
+            return self._estimate_penny_stock_costs(
+                price, shares, cost_method, predicted_direction, horizon
+            )
 
         cost_params = self.config.get("cost_parameters", {})
 
@@ -312,8 +524,13 @@ class TradingSimulationEngine:
             constraint_info["blocked_by"].append(f"expected_return ({abs(expected_return_pct):.2f}% < {self.MIN_EXPECTED_RETURN_PCT:.2f}%)")
             return "hold", constraint_info
 
-        if risk_score > self.MAX_RISK_SCORE:
+        if risk_score is not None and risk_score > self.MAX_RISK_SCORE:
             constraint_info["blocked_by"].append(f"risk_score ({risk_score:.2f} > {self.MAX_RISK_SCORE:.2f})")
+            constraint_info["risk_ok"] = False
+            return "hold", constraint_info
+        elif risk_score is None:
+            # Missing risk score - treat as conservative hold
+            constraint_info["blocked_by"].append("risk_score (N/A)")
             constraint_info["risk_ok"] = False
             return "hold", constraint_info
 
@@ -399,13 +616,44 @@ class TradingSimulationEngine:
         market_snapshot = self._get_market_snapshot(entity.entity_id)
         price = market_snapshot.get("price") if market_snapshot else 0.0
         daily_volume = market_snapshot.get("volume") if market_snapshot else None
+
+        # Calculate dynamic share count based on price (higher shares for ultra-pennies)
+        shares = self._calculate_dynamic_shares(price)
+
         total_cost_bps, cost_breakdown = self._estimate_costs_bps(
             price=price,
             volatility_regime=volatility_regime,
             predicted_direction=predicted_direction,
             horizon=prediction.horizon,
+            shares=shares,
             daily_volume=daily_volume
         )
+
+        # If cost_breakdown is empty it means price was invalid or unavailable
+        if not cost_breakdown:
+            # If we already have an existing simulation, clear its values to avoid showing stale/absurd numbers
+            if existing:
+                logger.warning(f"Invalid/too-small price for {entity.entity_id} ({price}) - clearing existing simulation values")
+                existing.decision = "hold"
+                existing.expected_return_pct = self._get_expected_return_pct(prediction)
+                existing.actual_return_pct = None
+                existing.divergence_pct = None
+                existing.risk_score = None
+                existing.confidence = prediction.confidence
+                existing.calibrated_confidence = prediction.calibrated_confidence
+                existing.transaction_cost_bps = 0.0
+                existing.overnight_cost_bps = None
+                existing.borrow_cost_bps = None
+                existing.position_size_pct = 0.0
+                existing.position_value_usd = 0.0
+                existing.cost_breakdown = {}
+                existing.risk_breakdown = {}
+                existing.simulation_metadata = {"note": "skipped - invalid/too-small market price", "market_price": price}
+                existing.created_at = datetime.utcnow()
+                return existing
+
+            logger.warning(f"Skipping simulation for {entity.entity_id}: invalid or missing market price ({price})")
+            return None
         expected_return_bps = abs(expected_return_pct) * 100.0
         cost_ratio = total_cost_bps / expected_return_bps if expected_return_bps > 0 else 1.0
 
@@ -476,7 +724,8 @@ class TradingSimulationEngine:
                 "volume_usd": daily_volume_usd,
             },
             "position_info": {
-                "shares": self.DEFAULT_SHARES,
+                "shares": shares,
+                "shares_base": self.DEFAULT_SHARES,
                 "position_value_usd": position_value,
                 "position_size_pct": position_size_pct,
                 "assumed_portfolio_value": assumed_portfolio_value,
@@ -486,6 +735,14 @@ class TradingSimulationEngine:
                 **cost_breakdown,
                 "cost_ratio": cost_ratio,
                 "expected_return_bps": expected_return_bps,
+            },
+            "penny_stock_info": {
+                "is_penny_stock": self._is_penny_stock(price),
+                "is_ultra_penny_stock": self._is_ultra_penny_stock(price),
+                "price": price,
+                "cost_method": cost_breakdown.get("cost_method", "standard"),
+                "shares_used": shares,
+                "shares_multiplier": shares / self.DEFAULT_SHARES if self.DEFAULT_SHARES > 0 else 1.0,
             }
         }
 
