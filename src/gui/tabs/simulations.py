@@ -424,6 +424,14 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                 borrow_bps = sim.borrow_cost_bps or 0
                 position_size = sim.position_size_pct
 
+                # Extract penny stock info from metadata
+                sim_metadata = sim.simulation_metadata or {}
+                penny_stock_info = sim_metadata.get("penny_stock_info", {})
+                is_penny_stock = penny_stock_info.get("is_penny_stock", False)
+                is_ultra_penny = penny_stock_info.get("is_ultra_penny_stock", False)
+                cost_method = penny_stock_info.get("cost_method", "standard")
+                shares_multiplier = penny_stock_info.get("shares_multiplier", 1.0)
+
                 # Calculate recommended investment size (risk-adjusted)
                 currency_symbol = {"EUR": "\u20AC", "USD": "$", "GBP": "\u00A3"}.get(currency, currency)
                 recommended_investment = None
@@ -434,13 +442,22 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                     recommended_investment = base_investment * risk_factor
 
                     # Build tooltip with breakdown
-                    investment_tooltip = (
-                        f"Base: {currency_symbol}{base_investment:,.0f} ({position_size:.1f}% of {currency_symbol}{portfolio_capital:,.0f})\n"
-                        f"Risk Adjustment: {risk_adjustment*100:.0f}% * {risk_score:.2f} = {(risk_score * risk_adjustment)*100:.1f}%\n"
-                        f"Risk Factor: {risk_factor:.3f}\n"
-                        f"─────────────\n"
-                        f"Recommended: {currency_symbol}{recommended_investment:,.0f}"
-                    )
+                    if risk_score is not None:
+                        investment_tooltip = (
+                            f"Base: {currency_symbol}{base_investment:,.0f} ({position_size:.1f}% of {currency_symbol}{portfolio_capital:,.0f})\n"
+                            f"Risk Adjustment: {risk_adjustment*100:.0f}% * {risk_score:.2f} = {(risk_score * risk_adjustment)*100:.1f}%\n"
+                            f"Risk Factor: {risk_factor:.3f}\n"
+                            f"─────────────\n"
+                            f"Recommended: {currency_symbol}{recommended_investment:,.0f}"
+                        )
+                    else:
+                        investment_tooltip = (
+                            f"Base: {currency_symbol}{base_investment:,.0f} ({position_size:.1f}% of {currency_symbol}{portfolio_capital:,.0f})\n"
+                            f"Risk Score: N/A\n"
+                            f"Risk Factor: {risk_factor:.3f}\n"
+                            f"─────────────\n"
+                            f"Recommended: {currency_symbol}{recommended_investment:,.0f}"
+                        )
 
                 # Build detailed cost tooltip
                 cost_breakdown_text = f"Total: {cost_bps:.1f} bps"
@@ -459,7 +476,12 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
 
                 rows.append(html.Tr([
                     html.Td(sim.created_at.strftime("%Y-%m-%d %H:%M") if sim.created_at else "N/A"),
-                    html.Td(entity.entity_name if entity else sim.entity_id, className="text-primary"),
+                    html.Td([
+                        entity.entity_name if entity else sim.entity_id,
+                        dbc.Badge("⭐", color="warning", className="ms-1", title=f"Ultra-Penny Stock ({shares_multiplier:.0f}x shares, {cost_method.replace('_', ' ')})") if is_ultra_penny else (
+                            dbc.Badge("💎", color="info", className="ms-1", title=f"Penny Stock ({cost_method.replace('_', ' ')})") if is_penny_stock else ""
+                        )
+                    ], className="text-primary"),
                     html.Td(sim.horizon or "N/A"),
                     html.Td(dbc.Badge(decision.upper(), color=decision_color, className="px-2")),
                     html.Td(f"{risk_score:.2f}" if risk_score is not None else "—",
@@ -494,8 +516,16 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                                 id={"type": "sim-detail-btn", "index": str(sim.prediction_id)},
                                 color="primary",
                                 size="sm",
-                                className="me-1",
-                                title="View prediction details"
+                                className="me-1 touch-button",
+                                title="View prediction details",
+                                style={
+                                    "minWidth": "44px",
+                                    "minHeight": "44px",
+                                    "touchAction": "manipulation",
+                                    "pointerEvents": "auto",
+                                    "cursor": "pointer",
+                                    "zIndex": "10"
+                                }
                             ),
                             dbc.Button(
                                 "🔄",

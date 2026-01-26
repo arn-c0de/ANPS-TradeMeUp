@@ -110,6 +110,146 @@ def test_cost_calculation_formulas():
         print("  ✅ Passed\n")
 
 
+def test_small_price_handling():
+    """Very small prices should be treated as invalid and return empty breakdown."""
+    engine = TradingSimulationEngine()
+    total_bps, breakdown = engine._estimate_costs_bps(
+        price=0.0001,
+        volatility_regime="medium",
+        predicted_direction="up",
+        horizon="5d",
+        shares=100,
+        daily_volume=170000
+    )
+    print("Small price test: price=0.0001")
+    print(f"  total_bps: {total_bps}, breakdown: {breakdown}")
+    assert total_bps == 0.0
+    assert breakdown == {}, "Expected empty breakdown for extremely small price"
+    print("  ✅ Passed\n")
+
+
+def test_penny_stock_detection():
+    """Test penny stock detection logic."""
+    print("\n=== Testing Penny Stock Detection ===\n")
+
+    engine = TradingSimulationEngine()
+
+    test_cases = [
+        {"price": 0.50, "expected": True, "desc": "$0.50 - Penny stock"},
+        {"price": 0.99, "expected": True, "desc": "$0.99 - Penny stock"},
+        {"price": 1.00, "expected": True, "desc": "$1.00 - Penny stock (at threshold)"},
+        {"price": 1.01, "expected": False, "desc": "$1.01 - NOT penny stock"},
+        {"price": 5.00, "expected": False, "desc": "$5.00 - NOT penny stock"},
+        {"price": 100.00, "expected": False, "desc": "$100.00 - NOT penny stock"},
+        {"price": 0.0, "expected": False, "desc": "$0.00 - Invalid (zero price)"},
+        {"price": -1.0, "expected": False, "desc": "$-1.00 - Invalid (negative price)"},
+    ]
+
+    for case in test_cases:
+        result = engine._is_penny_stock(case["price"])
+        print(f"{case['desc']}")
+        print(f"  Result: {result}")
+        assert result == case["expected"], \
+            f"Expected {case['expected']} for price ${case['price']}, got {result}"
+        print("  ✅ Passed\n")
+
+
+def test_penny_stock_cost_methods():
+    """Test different penny stock cost calculation methods."""
+    print("\n=== Testing Penny Stock Cost Methods ===\n")
+
+    engine = TradingSimulationEngine()
+
+    # Test each cost method
+    methods = ["per_share_only", "flat_dollar", "capped_bps"]
+
+    for method in methods:
+        print(f"Testing method: {method}")
+        total_bps, breakdown = engine._estimate_penny_stock_costs(
+            price=0.75,  # $0.75 penny stock
+            shares=100,
+            cost_method=method,
+            predicted_direction="up",
+            horizon="5d"
+        )
+
+        print(f"  Price: $0.75, Shares: 100")
+        print(f"  Total Cost: {total_bps:.1f} bps")
+        print(f"  Breakdown: {breakdown}")
+
+        # Verify method is tracked
+        assert "cost_method" in breakdown, "cost_method should be in breakdown"
+        assert breakdown["cost_method"] == method, f"Expected method {method}, got {breakdown['cost_method']}"
+
+        # Verify total is reasonable (not absurdly high)
+        assert total_bps < 10000, f"Cost {total_bps} bps is too high (likely calculation error)"
+        assert total_bps > 0, f"Cost should be positive, got {total_bps}"
+
+        # Method-specific validations
+        if method == "per_share_only":
+            assert breakdown.get("spread_bps", 0) == 0, "per_share_only should have zero spread"
+            assert breakdown.get("slippage_bps", 0) == 0, "per_share_only should have zero slippage"
+            assert breakdown.get("commission_bps", 0) > 0, "per_share_only should have commission"
+
+        elif method == "flat_dollar":
+            assert "flat_cost_usd" in breakdown, "flat_dollar should have flat_cost_usd field"
+
+        elif method == "capped_bps":
+            assert "max_bps_cap" in breakdown, "capped_bps should have max_bps_cap field"
+            assert total_bps <= breakdown["max_bps_cap"], \
+                f"Cost {total_bps} exceeds cap {breakdown['max_bps_cap']}"
+
+        print("  ✅ Passed\n")
+
+
+def test_penny_stock_integration():
+    """Test that penny stocks use alternative cost calculation in main flow."""
+    print("\n=== Testing Penny Stock Integration ===\n")
+
+    engine = TradingSimulationEngine()
+
+    # Test with penny stock price (should use penny stock method)
+    total_bps_penny, breakdown_penny = engine._estimate_costs_bps(
+        price=0.85,  # Penny stock
+        volatility_regime="medium",
+        predicted_direction="up",
+        horizon="5d",
+        shares=100,
+        daily_volume=50000
+    )
+
+    print(f"Penny Stock Test (price=$0.85):")
+    print(f"  Total Cost: {total_bps_penny:.1f} bps")
+    print(f"  Cost Method: {breakdown_penny.get('cost_method', 'standard')}")
+
+    assert "cost_method" in breakdown_penny, "Penny stock should have cost_method field"
+    assert breakdown_penny["cost_method"] != "standard", \
+        "Penny stock should use alternative cost method, not standard"
+    assert total_bps_penny < 1000, \
+        f"Penny stock costs {total_bps_penny} should be reasonable (< 1000 bps)"
+    print("  ✅ Penny stock handling passed\n")
+
+    # Test with normal stock price (should use standard method)
+    total_bps_normal, breakdown_normal = engine._estimate_costs_bps(
+        price=50.00,  # Normal stock
+        volatility_regime="medium",
+        predicted_direction="up",
+        horizon="5d",
+        shares=100,
+        daily_volume=500000
+    )
+
+    print(f"Normal Stock Test (price=$50.00):")
+    print(f"  Total Cost: {total_bps_normal:.1f} bps")
+    print(f"  Cost Method: {breakdown_normal.get('cost_method', 'standard')}")
+
+    # Normal stocks should NOT have cost_method field (or it should be 'standard')
+    cost_method_normal = breakdown_normal.get('cost_method', 'standard')
+    assert cost_method_normal == 'standard' or cost_method_normal not in breakdown_normal, \
+        "Normal stock should use standard cost method"
+    assert "spread_bps" in breakdown_normal, "Normal stock should have spread costs"
+    assert "slippage_bps" in breakdown_normal, "Normal stock should have slippage costs"
+    print("  ✅ Normal stock handling passed\n")
 def test_expected_return_calculation():
     """Verify expected return percentage scaling."""
     print("\n=== Testing Expected Return Calculations ===\n")
@@ -273,18 +413,22 @@ def main():
     print("\n" + "="*70)
     print("SIMULATION CALCULATIONS VALIDATION TEST SUITE")
     print("="*70)
-    
+
     try:
         test_expected_return_calculation()
         test_divergence_calculation()
         test_cost_calculation_formulas()
+        test_small_price_handling()
+        test_penny_stock_detection()
+        test_penny_stock_cost_methods()
+        test_penny_stock_integration()
         test_risk_calculation_formulas()
         test_decision_logic()
-        
+
         print("\n" + "="*70)
         print("✅ ALL TESTS PASSED - Simulation calculations are correct!")
         print("="*70 + "\n")
-        
+
     except AssertionError as e:
         print("\n" + "="*70)
         print(f"❌ TEST FAILED: {e}")
