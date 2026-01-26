@@ -18,6 +18,7 @@ from src.models.entities import Entity
 from src.models.predictions import Prediction
 from src.models.database import engine as _engine, get_scoped_session
 from src.utils.activity_logger import activity_logger
+from src.gui.helpers.prediction_details_popup import create_prediction_modal
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,13 @@ def create_layout():
         dcc.Store(id="sim-delete-status"),
         dcc.Store(id="sim-filter-sync-store", data={"entities": None, "horizon": None}),
         dcc.Store(id="portfolio-capital-store", storage_type="local", data={"capital": 100000, "currency": "USD"}),
+        
+        # Shared stores for prediction modal (also in predictions.py)
+        # These are needed for the modal to work from simulations tab
+        dcc.Store(id="prediction-detail-cache", data={}),
+        dcc.Store(id="current-prediction-id", data=None),
+        dcc.Store(id="refresh-loading-state", data={}),
+        
         dbc.Container([
             # Portfolio Settings Section (collapsible)
             dbc.Row([
@@ -352,7 +360,31 @@ def create_layout():
                     dbc.Button("Resimulate All", id="btn-confirm-resimulate-simulations", color="primary")
                 ])
             ], id="modal-resimulate-all-simulations", is_open=False)
-        ], fluid=True)
+        ], fluid=True),
+        
+        # Prediction Details Modal (shared with predictions tab)
+        # Must be included here so sim-detail-btn can open it
+        create_prediction_modal(),
+        
+        # Toast for refresh feedback (shared with predictions)
+        dbc.Toast(
+            id="refresh-toast",
+            header="Performance Update",
+            is_open=False,
+            dismissable=True,
+            icon="info",
+            duration=3000,
+            style={
+                "position": "fixed",
+                "top": 66,
+                "right": 10,
+                "width": 350,
+                "zIndex": 9999,
+                "backgroundColor": "#1e1e1e",
+                "border": "1px solid #444",
+                "boxShadow": "0 4px 8px rgba(0,0,0,0.3)"
+            }
+        )
     ])
 
 
