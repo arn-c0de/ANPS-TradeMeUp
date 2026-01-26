@@ -362,6 +362,37 @@ def get_statistics_metrics(engine, date_range=None, granularity="all"):
 
             avg_quality_24h = round(avg_quality_24h, 2) if avg_quality_24h is not None else None
 
+
+            # Calculate overall prediction performance (revenue %)
+            # Query outcomes with actual_return directly
+            outcomes_query = db.query(PredictionOutcome).join(
+                Prediction, PredictionOutcome.prediction_id == Prediction.prediction_id
+            ).filter(
+                PredictionOutcome.actual_return.isnot(None)
+            )
+            
+            if start_date:
+                outcomes_query = outcomes_query.filter(Prediction.created_at >= start_date)
+            if end_date:
+                outcomes_query = outcomes_query.filter(Prediction.created_at <= end_date)
+            
+            outcomes = outcomes_query.all()
+            
+            total_return_pct = 0.0
+            valid_predictions_count = 0
+            
+            for outcome in outcomes:
+                try:
+                    if outcome.actual_return is not None and abs(outcome.actual_return) > 0.001:
+                        # actual_return is already stored as percentage (e.g., -17.03 = -17.03%)
+                        total_return_pct += outcome.actual_return
+                        valid_predictions_count += 1
+                except Exception as e:
+                    logger.debug(f"Error calculating performance: {e}")
+                    pass
+            
+            # Calculate average return across all predictions
+            avg_prediction_performance = (total_return_pct / valid_predictions_count) if valid_predictions_count > 0 else 0.0
         
 
         def metric_card(icon, label, value, value_class, meta_left, meta_right):
@@ -402,6 +433,21 @@ def get_statistics_metrics(engine, date_range=None, granularity="all"):
 
 
 
+
+        
+        # Format prediction performance for metric card
+        if valid_predictions_count > 0:
+            perf_sign = "+" if avg_prediction_performance >= 0 else ""
+            perf_value = f"{perf_sign}{avg_prediction_performance:.2f}%"
+            perf_meta_left = f"{valid_predictions_count} tracked"
+            perf_meta_right = "Performance"
+        else:
+            perf_value = "—"
+            perf_meta_left = "0 tracked"
+            perf_meta_right = "No data yet"
+
+
+
         return html.Div([
 
             dbc.Row([
@@ -437,6 +483,10 @@ def get_statistics_metrics(engine, date_range=None, granularity="all"):
                 dbc.Col(metric_card("🧪", "Simulations", f"{total_simulations:,}", "text-primary",
 
                                     f"+{simulations_1h} 1h", f"+{simulations_24h} 24h"), xs=6, sm=4, md=2),
+
+                dbc.Col(metric_card("💰", "Revenue", perf_value, 
+                                    "text-success" if valid_predictions_count > 0 and avg_prediction_performance > 0 else "text-danger" if valid_predictions_count > 0 and avg_prediction_performance < 0 else "text-secondary",
+                                    perf_meta_left, perf_meta_right), xs=6, sm=4, md=2),
 
             ], className="g-2 mb-2")
 

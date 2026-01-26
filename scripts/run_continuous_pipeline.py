@@ -440,6 +440,22 @@ class ContinuousPipeline:
             pred_results = predictions.process_batch(limit=self.batch_sizes['prediction'])
             logger.info(f"Predictions: {pred_results}")
 
+            # Phase 10.5: Auto-Process New Predictions (Performance & Simulations)
+            activity_logger.log_phase(10.5, "Auto-Processing Predictions")
+            try:
+                from src.services.auto_prediction_processor import auto_processor
+                # Process predictions from last iteration (check_interval + buffer)
+                lookback_minutes = int(self.check_interval / 60) + 10
+                auto_stats = auto_processor.process_new_predictions(self.db, lookback_minutes=lookback_minutes)
+                
+                if auto_stats['total_found'] > 0:
+                    logger.info(f"Auto-processed {auto_stats['total_found']} predictions: "
+                              f"{auto_stats['outcomes_created']} outcomes, "
+                              f"{auto_stats['simulations_created']} simulations")
+            except Exception as e:
+                logger.warning(f"Auto-processing failed: {e}")
+                # Continue pipeline even if auto-processing fails
+
             # ===== NEW PHASES (Phase 2 Agents) =====
 
             # Phase 11: Trading Simulation (predictions vs market)

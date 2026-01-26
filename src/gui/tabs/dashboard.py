@@ -5,29 +5,39 @@ Dashboard Tab - Overview and Key Metrics
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
+import logging
 
+import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.graph_objects as go
-from dash import dcc, html, Input, Output
+from dash import dcc, html, Input, Output, State
 from sqlalchemy import desc, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from src.gui.utils.callbacks import safe_callback
 from src.models.raw_news import RawNews
 from src.models.database import engine
 from src.models.data_quality import DataQualityScore
 from src.models.processed_news import ProcessedNews
-from src.models.predictions import Prediction
+from src.models.predictions import Prediction, PredictionOutcome
 from src.models.analysis import MarketRegime, SurpriseScore, FactVerification
 from src.models.trading_simulation import TradingSimulation
 from src.gui.components import create_metric_card
+from src.gui.helpers.prediction_details_popup import create_prediction_modal
 from src.config.settings import VERSION
+
+logger = logging.getLogger(__name__)
 
 
 def create_layout():
     """Create dashboard tab layout"""
-    return dbc.Container([
+    return html.Div([
+        # Hidden stores for prediction modal
+        dcc.Store(id="prediction-detail-cache", data={}),
+        dcc.Store(id="current-prediction-id", data=None),
+        
+        dbc.Container([
         dbc.Row([
             dbc.Col([
                 html.Div(id="dashboard-metrics")
@@ -41,7 +51,7 @@ def create_layout():
                         html.Div(
                             id="recent-news-table",
                             style={
-                                'maxHeight': '400px',
+                                'maxHeight': '420px',
                                 'overflowY': 'auto',
                                 'overflowX': 'hidden'
                             }
@@ -51,10 +61,42 @@ def create_layout():
             ], width=8),
             dbc.Col([
                 dbc.Card([
-                    dbc.CardHeader(html.H5("🌡️ Current Market Regime")),
+                    dbc.CardHeader(html.Small("🌡️ Current Market Regime", className="fw-bold", style={"fontSize": "0.85rem"}), className="py-1"),
                     dbc.CardBody([
                         html.Div(id="market-regime-display")
-                    ])
+                    ], className="py-2")
+                ], className="mb-2"),
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.Div([
+                            html.Small("🏆 Top Performers", className="fw-bold mb-1 d-block", style={"fontSize": "0.85rem"}),
+                            dcc.Dropdown(
+                                id="top-performers-timeframe",
+                                options=[
+                                    {'label': '1h', 'value': '1h'},
+                                    {'label': '12h', 'value': '12h'},
+                                    {'label': '24h', 'value': '24h'},
+                                    {'label': '5d', 'value': '5d'},
+                                    {'label': '30d', 'value': '30d'},
+                                    {'label': '1y', 'value': '1y'},
+                                    {'label': 'All', 'value': 'all'}
+                                ],
+                                value='24h',
+                                clearable=False,
+                                style={"fontSize": "0.7rem", "height": "24px", "minHeight": "24px"}
+                            )
+                        ])
+                    ], className="py-1"),
+                    dbc.CardBody([
+                        html.Div(
+                            id="top-performers-list",
+                            style={
+                                'maxHeight': '180px',
+                                'overflowY': 'auto',
+                                'overflowX': 'hidden'
+                            }
+                        )
+                    ], className="py-1 px-2")
                 ])
             ], width=4)
         ], className="mb-3"),
@@ -99,7 +141,11 @@ def create_layout():
                 ])
             ], width=12)
         ])
-    ], fluid=True)
+        ], fluid=True),
+        
+        # Prediction Details Modal (shared)
+        create_prediction_modal()
+    ])
 
 
 def get_metrics(engine):
@@ -250,8 +296,8 @@ def get_market_regime(engine):
             
             if not regime:
                 return html.Div([
-                    html.P("🌡️ No market regime data yet", className="text-muted mb-2"),
-                    html.Small("Run Agent 5 (Regime Detection) to generate regime data", className="text-muted")
+                    html.Small("🌡️ No market regime data yet", className="text-muted mb-1", style={"fontSize": "0.75rem"}),
+                    html.Small("Run Agent 5 (Regime Detection)", className="text-muted", style={"fontSize": "0.65rem"})
                 ])
             
             # Extract data within session context to avoid lazy loading issues
@@ -268,32 +314,37 @@ def get_market_regime(engine):
         
             return html.Div([
                 html.Div([
-                    html.Strong("Volatility: "),
+                    html.Small("Volatility: ", className="text-muted", style={"fontSize": "0.75rem"}),
                     dbc.Badge(
                         vol_regime.upper(),
                         color=vol_colors.get(vol_regime, "secondary"),
-                        className="ms-2"
+                        text_color="dark",
+                        className="ms-1",
+                        style={"fontSize": "0.65rem"}
                     )
-                ], className="mb-2"),
+                ], className="mb-1"),
                 html.Div([
-                    html.Strong("Trend: "),
+                    html.Small("Trend: ", className="text-muted", style={"fontSize": "0.75rem"}),
                     dbc.Badge(
                         trend_regime.upper(),
                         color=trend_colors.get(trend_regime, "secondary"),
-                        className="ms-2"
+                        text_color="dark",
+                        className="ms-1",
+                        style={"fontSize": "0.65rem"}
                     )
-                ], className="mb-2"),
+                ], className="mb-1"),
                 html.Div([
-                    html.Strong("Risk Appetite: "),
-                    dbc.Badge(risk_appetite.upper(), color="info", className="ms-2")
-                ], className="mb-2"),
+                    html.Small("Risk Appetite: ", className="text-muted", style={"fontSize": "0.75rem"}),
+                    dbc.Badge(risk_appetite.upper(), color="info", text_color="dark", className="ms-1", style={"fontSize": "0.65rem"})
+                ], className="mb-1"),
                 html.Div([
-                    html.Strong("Liquidity: "),
-                    dbc.Badge(liquidity.upper(), color="primary", className="ms-2")
-                ], className="mb-3"),
+                    html.Small("Liquidity: ", className="text-muted", style={"fontSize": "0.75rem"}),
+                    dbc.Badge(liquidity.upper(), color="primary", text_color="dark", className="ms-1", style={"fontSize": "0.65rem"})
+                ], className="mb-2"),
                 html.Small(
                     f"Detected: {created_str}",
-                    className="text-muted"
+                    className="text-muted",
+                    style={"fontSize": "0.65rem"}
                 )
             ])
     except Exception as e:
@@ -394,6 +445,227 @@ def get_live_agent_activity():
         return html.Div([
             html.Span("⚠️ ", className="text-warning"),
             html.Small(f"Error reading activity log: {str(e)}", className="text-muted")
+        ])
+
+
+def get_top_performers(engine, timeframe='24h', limit=10):
+    """Get top performing simulations with validity check based on horizon"""
+    try:
+        with Session(engine, expire_on_commit=False) as db:
+            now = datetime.utcnow()
+            
+            # Calculate timeframe cutoff
+            timeframe_map = {
+                '1h': timedelta(hours=1),
+                '12h': timedelta(hours=12),
+                '24h': timedelta(hours=24),
+                '5d': timedelta(days=5),
+                '30d': timedelta(days=30),
+                '1y': timedelta(days=365),
+                'all': timedelta(days=10000)  # Effectively no limit
+            }
+            cutoff = now - timeframe_map.get(timeframe, timedelta(hours=24))
+            
+            # Horizon validity map (how long a prediction is valid)
+            horizon_validity = {
+                '1d': timedelta(days=1),
+                '5d': timedelta(days=5),
+                '20d': timedelta(days=20)
+            }
+            
+            # Query simulations with eager loading (including prediction outcomes)
+            query = db.query(TradingSimulation).options(
+                joinedload(TradingSimulation.entity),
+                joinedload(TradingSimulation.prediction).joinedload(Prediction.outcome)
+            ).filter(
+                TradingSimulation.created_at >= cutoff,
+                TradingSimulation.decision != 'hold',  # Only active positions
+                TradingSimulation.expected_return_pct.isnot(None)
+            )
+            
+            simulations = query.all()
+            
+            # Filter for validity based on prediction date + horizon
+            valid_sims = []
+            for sim in simulations:
+                # Skip simulations without real market data
+                # Check if simulation has valid outcome data with non-zero returns
+                has_valid_data = False
+                
+                # Check actual_return_pct from simulation (may be outdated)
+                if sim.actual_return_pct is not None and abs(sim.actual_return_pct) > 0.001:
+                    has_valid_data = True
+                
+                # Check outcome data (more reliable, from performance calculation)
+                if sim.prediction and sim.prediction.outcome:
+                    outcome = sim.prediction.outcome[0] if isinstance(sim.prediction.outcome, list) and len(sim.prediction.outcome) > 0 else None
+                    if outcome and outcome.actual_return is not None and abs(outcome.actual_return) > 0.001:
+                        has_valid_data = True
+                
+                # Skip if no valid market data (excludes $0.0000 cases)
+                if not has_valid_data:
+                    continue
+                
+                if sim.prediction:
+                    pred_created = sim.prediction.created_at
+                    horizon = sim.horizon
+                    
+                    # Check if prediction is still valid
+                    if horizon in horizon_validity:
+                        validity_end = pred_created + horizon_validity[horizon]
+                        if now <= validity_end:
+                            valid_sims.append(sim)
+                    else:
+                        # Unknown horizon, include it
+                        valid_sims.append(sim)
+                else:
+                    # No prediction link, include it
+                    valid_sims.append(sim)
+            
+            if not valid_sims:
+                return html.Div([
+                    html.Small("No valid simulations in this timeframe", className="text-muted text-center d-block my-2", style={"fontSize": "0.75rem"}),
+                    html.Small("Run simulations to see top performers", className="text-muted", style={"fontSize": "0.65rem"})
+                ], className="text-center")
+            
+            # Sort by expected return (descending), then by risk (ascending)
+            valid_sims.sort(
+                key=lambda s: (
+                    -(s.expected_return_pct or 0),  # Higher return first
+                    s.risk_score or 1.0              # Lower risk second
+                ),
+            )
+            
+            # Deduplicate by entity - keep only the best simulation per firm
+            seen_entities = {}
+            deduplicated_sims = []
+            for sim in valid_sims:
+                entity_id = sim.entity_id
+                if entity_id not in seen_entities:
+                    seen_entities[entity_id] = True
+                    deduplicated_sims.append(sim)
+            
+            # Take top performers (max 10 for display)
+            top_sims = deduplicated_sims[:min(limit, 10)]
+            
+            items = []
+            for i, sim in enumerate(top_sims, 1):
+                entity = sim.entity
+                
+                # Get actual performance from PredictionOutcome
+                actual_performance = None
+                time_ago_str = ""
+                if sim.prediction and sim.prediction.outcome:
+                    outcome = sim.prediction.outcome[0] if isinstance(sim.prediction.outcome, list) and len(sim.prediction.outcome) > 0 else None
+                    if outcome and outcome.actual_return is not None:
+                        actual_performance = outcome.actual_return
+                        
+                        # Calculate time ago
+                        if outcome.evaluation_timestamp:
+                            time_diff = now - outcome.evaluation_timestamp.replace(tzinfo=None)
+                            if time_diff.days > 0:
+                                time_ago_str = f"{time_diff.days}d ago"
+                            elif time_diff.seconds > 3600:
+                                time_ago_str = f"{time_diff.seconds // 3600}h ago"
+                            elif time_diff.seconds > 60:
+                                time_ago_str = f"{time_diff.seconds // 60}m ago"
+                            else:
+                                time_ago_str = "just now"
+                
+                # Calculate time remaining
+                if sim.prediction:
+                    pred_created = sim.prediction.created_at
+                    horizon = sim.horizon
+                    if horizon in horizon_validity:
+                        validity_end = pred_created + horizon_validity[horizon]
+                        time_left = validity_end - now
+                        
+                        if time_left.days > 0:
+                            time_left_str = f"{time_left.days}d left"
+                        elif time_left.seconds > 3600:
+                            time_left_str = f"{time_left.seconds // 3600}h left"
+                        else:
+                            time_left_str = f"{time_left.seconds // 60}m left"
+                    else:
+                        time_left_str = "N/A"
+                else:
+                    time_left_str = "N/A"
+                
+                # Color coding
+                decision_color = {
+                    "buy": "success",
+                    "sell": "danger"
+                }.get(sim.decision, "secondary")
+                
+                risk_color = "success" if sim.risk_score and sim.risk_score < 0.3 else "warning" if sim.risk_score and sim.risk_score < 0.6 else "danger"
+                
+                return_color = "text-success" if sim.expected_return_pct and sim.expected_return_pct > 0 else "text-danger"
+                actual_color = "text-success" if actual_performance and actual_performance > 0 else "text-danger" if actual_performance and actual_performance < 0 else "text-muted"
+                
+                items.append(
+                    html.Div([
+                        html.Div([
+                            html.Div([
+                                html.Span(f"#{i}", className="text-muted me-1", style={"fontSize": "0.65rem", "fontWeight": "bold"}),
+                                dbc.Button(
+                                    entity.entity_name if entity else sim.entity_id,
+                                    id={"type": "top-perf-detail-btn", "index": str(sim.prediction_id)},
+                                    color="link",
+                                    className="p-0 text-primary fw-bold text-decoration-none",
+                                    style={"fontSize": "0.75rem", "border": "none", "background": "none"},
+                                    title="View prediction details"
+                                ),
+                                dbc.Badge(sim.decision.upper(), color=decision_color, text_color="dark", className="ms-1", style={"fontSize": "0.6rem", "padding": "2px 4px"})
+                            ], className="d-flex align-items-center mb-1"),
+                            html.Div([
+                                html.Div([
+                                    html.Span("Exp: ", className="text-muted", style={"fontSize": "0.65rem"}),
+                                    html.Span(
+                                        f"{sim.expected_return_pct:+.2f}%" if sim.expected_return_pct else "N/A",
+                                        className=f"{return_color} fw-bold",
+                                        style={"fontSize": "0.7rem"}
+                                    )
+                                ], className="me-2"),
+                                html.Div([
+                                    html.Span("Risk: ", className="text-muted", style={"fontSize": "0.65rem"}),
+                                    html.Span(
+                                        f"{sim.risk_score:.2f}" if sim.risk_score else "N/A",
+                                        className=f"text-{risk_color} fw-bold",
+                                        style={"fontSize": "0.7rem"}
+                                    )
+                                ], className="me-2")
+                            ], className="d-flex flex-wrap mb-1"),
+                            # Actual Performance Row
+                            html.Div([
+                                html.Span("📊 ", style={"fontSize": "0.65rem"}),
+                                html.Span(
+                                    f"{actual_performance:+.2f}%" if actual_performance is not None else "—",
+                                    className=f"{actual_color} fw-bold",
+                                    style={"fontSize": "0.7rem"}
+                                ),
+                                html.Span(f" ({time_ago_str})" if time_ago_str else "", className="text-muted", style={"fontSize": "0.6rem", "marginLeft": "3px"})
+                            ], className="mb-1"),
+                            html.Div([
+                                html.Span(sim.horizon or "N/A", className="text-info me-2", style={"fontSize": "0.65rem"}),
+                                html.Span(
+                                    f"⏱️ {time_left_str}",
+                                    className="text-muted",
+                                    style={"fontSize": "0.6rem"}
+                                )
+                            ], className="d-flex")
+                        ], className="py-1 px-1"),
+                        html.Hr(className="my-0", style={"opacity": "0.3"}) if i < len(top_sims) else None
+                    ])
+                )
+            
+            return html.Div(items)
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return html.Div([
+            html.Small("⚠️ Error loading top performers", className="text-warning mb-1 d-block", style={"fontSize": "0.75rem"}),
+            html.Small(f"Error: {str(e)}", className="text-muted", style={"fontSize": "0.65rem"})
         ])
 
 
@@ -510,3 +782,115 @@ def register_callbacks(app):
             margin=dict(l=40, r=40, t=40, b=40),
         )
         return fig
+
+    @app.callback(
+        Output("top-performers-list", "children"),
+        [Input("interval-component", "n_intervals"),
+         Input("top-performers-timeframe", "value")]
+    )
+    @safe_callback(default_return=html.Div("⚠️ Unable to load top performers", className="text-warning"))
+    def update_top_performers(n, timeframe):
+        return get_top_performers(engine, timeframe=timeframe or '24h', limit=10)
+
+    @app.callback(
+        [Output("prediction-modal", "is_open", allow_duplicate=True),
+         Output("prediction-detail-cache", "data", allow_duplicate=True),
+         Output("current-prediction-id", "data", allow_duplicate=True)],
+        [Input({"type": "top-perf-detail-btn", "index": dash.ALL}, "n_clicks"),
+         Input("close-prediction-modal", "n_clicks")],
+        [State("prediction-modal", "is_open"),
+         State({"type": "top-perf-detail-btn", "index": dash.ALL}, "id")],
+        prevent_initial_call=True
+    )
+    def toggle_top_performer_modal(detail_clicks, close_click, is_open, button_ids):
+        """Open/close prediction detail modal from top performers"""
+        import json
+        import dash
+        from dash import callback_context
+        
+        if not callback_context.triggered:
+            return dash.no_update, dash.no_update, dash.no_update
+        
+        trigger_id = callback_context.triggered[0]["prop_id"]
+        trigger_value = callback_context.triggered[0].get("value")
+        
+        # Skip if no actual click (None or 0)
+        if trigger_value is None or trigger_value == 0:
+            return dash.no_update, dash.no_update, dash.no_update
+        
+        # Close button clicked
+        if "close-prediction-modal" in trigger_id:
+            return False, dash.no_update, dash.no_update
+        
+        # Detail button clicked
+        if "top-perf-detail-btn" in trigger_id and ".n_clicks" in trigger_id:
+            try:
+                id_str = trigger_id.split('.')[0]
+                id_dict = json.loads(id_str)
+                prediction_id = id_dict.get("index")
+                
+                if prediction_id:
+                    logger.info(f"Opening modal for prediction: {prediction_id}")
+                    # Load live performance to get price data
+                    return True, {"prediction_id": prediction_id, "load_performance": True}, prediction_id
+            except Exception as e:
+                logger.error(f"Error parsing top performer button: {e}")
+        
+        return dash.no_update, dash.no_update, dash.no_update
+
+    @app.callback(
+        [Output("prediction-modal-title", "children", allow_duplicate=True),
+         Output("prediction-modal-body", "children", allow_duplicate=True)],
+        [Input("prediction-detail-cache", "data")],
+        [State("prediction-modal", "is_open")],
+        prevent_initial_call=True
+    )
+    def update_modal_content_from_dashboard(cached_data, is_open):
+        """Update modal content from dashboard (top performers)"""
+        from src.gui.helpers.prediction_details_popup import get_prediction_details
+        from dash import callback_context
+        
+        # Only update if modal is actually open AND cache data changed
+        if not is_open:
+            raise dash.exceptions.PreventUpdate
+            
+        if not cached_data or "prediction_id" not in cached_data:
+            raise dash.exceptions.PreventUpdate
+        
+        prediction_id = cached_data["prediction_id"]
+        load_performance = cached_data.get("load_performance", False)
+        
+        logger.info(f"Updating modal content for prediction: {prediction_id}")
+        
+        # If loading live performance, update all predictions for this entity
+        if load_performance:
+            try:
+                with Session(engine) as db:
+                    # Get the prediction to find entity_id
+                    pred = db.query(Prediction).filter(
+                        Prediction.prediction_id == prediction_id
+                    ).first()
+                    
+                    if pred and pred.entity_id:
+                        logger.info(f"📊 Batch-updating all predictions for {pred.entity_id}")
+                        
+                        from src.services.auto_prediction_processor import auto_processor
+                        update_stats = auto_processor.update_all_predictions_for_entity(
+                            db,
+                            pred.entity_id
+                        )
+                        
+                        logger.info(f"✅ Batch update complete: {update_stats['updated']}/{update_stats['total_found']} predictions updated")
+            except Exception as e:
+                logger.error(f"Error in batch update: {e}")
+                # Continue anyway to show modal
+        
+        title, body = get_prediction_details(
+            engine,
+            prediction_id,
+            load_performance=load_performance,
+            portfolio_capital=100000,
+            currency="USD",
+            risk_adjustment=0.3
+        )
+        return title, body

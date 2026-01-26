@@ -184,6 +184,19 @@ def main():
         logger.info(f"📊 Prediction Stats: {pred_stats}")
         activity_logger.log_agent_success("Prediction Agent", pred_results.get('generated', 0))
 
+        # ===== AUTO-PROCESS NEW PREDICTIONS =====
+        print_section("AUTO-PROCESSING: Calculate Performance & Simulations")
+        logger.info("🔄 Auto-processing new predictions (last 60 minutes)...")
+        
+        from src.services.auto_prediction_processor import auto_processor
+        auto_stats = auto_processor.process_new_predictions(db, lookback_minutes=60)
+        
+        logger.info(f"✅ Auto-processed {auto_stats['total_found']} predictions:")
+        logger.info(f"   - Outcomes created: {auto_stats['outcomes_created']}")
+        logger.info(f"   - Simulations created: {auto_stats['simulations_created']}")
+        if auto_stats['errors'] > 0:
+            logger.warning(f"   - Errors: {auto_stats['errors']}")
+
         # ===== PHASE 9: TRADING SIMULATION =====
         activity_logger.log_phase(9, "Trading Simulation (Agent 8.5)")
         print_section("PHASE 9: Trading Simulation (Agent 8.5)")

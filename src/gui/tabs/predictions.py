@@ -751,6 +751,30 @@ def register_callbacks(app):
         currency = currency or "USD"
         risk_adjustment = risk_adjustment if risk_adjustment is not None else 0.3
 
+        # If loading live performance, update all predictions for this entity
+        if load_performance:
+            try:
+                with Session(_engine) as db:
+                    # Get the prediction to find entity_id
+                    from src.models.predictions import Prediction
+                    pred = db.query(Prediction).filter(
+                        Prediction.prediction_id == prediction_id
+                    ).first()
+                    
+                    if pred and pred.entity_id:
+                        logger.info(f"📊 Batch-updating all predictions for {pred.entity_id}")
+                        
+                        from src.services.auto_prediction_processor import auto_processor
+                        update_stats = auto_processor.update_all_predictions_for_entity(
+                            db,
+                            pred.entity_id
+                        )
+                        
+                        logger.info(f"✅ Batch update complete: {update_stats['updated']}/{update_stats['total_found']} predictions updated")
+            except Exception as e:
+                logger.error(f"Error in batch update: {e}")
+                # Continue anyway to show modal
+
         title, body = get_prediction_details(
             _engine,
             prediction_id,
