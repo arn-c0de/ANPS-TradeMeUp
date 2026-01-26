@@ -1,4 +1,4 @@
-# ANPS-TradeMeUp 🚀
+# ANPS-TradeMeUp
 
 <div align="center">
   <img src="images/ANPS-LOGO.png" alt="ANPS Logo" height="80px">
@@ -13,35 +13,37 @@
 
 ---
 
-## Quick TL;DR (for new users) ✅
-- TradeMeUp converts financial news into probabilistic market predictions using a modular multi-agent pipeline.
-- Start the GUI quickly with `start_gui.bat` (Windows) and explore dashboards & live charts.
-- For development and production setup, follow the **Installation** section further down.
+## Quick Start
+
+TradeMeUp converts financial news into probabilistic market predictions using a modular multi-agent pipeline. Start the GUI quickly with `start_gui.bat` (Windows) and explore dashboards and live charts. For development and production setup, follow the **Installation** section below.
 
 ---
 
-## What is ANPS-TradeMeUp? 💡
-ANPS-TradeMeUp (AI News Prediction System) is an MVP-grade pipeline that ingests news, extracts events/entities using LLMs, scores impact & surprise, and produces short-to-medium term market predictions. It includes a Dash GUI for real-time monitoring and a FastAPI backend.
+## What is ANPS-TradeMeUp?
 
-## Highlights & Quick Features ✨
+ANPS-TradeMeUp (AI News Prediction System) is an MVP-grade pipeline that ingests news, extracts events/entities using LLMs, scores impact and surprise, and produces short-to-medium term market predictions. It includes a Dash GUI for real-time monitoring and a FastAPI backend.
+
+## Features
+
 - Modular multi-agent architecture (ingest → understand → analyse → predict)
-- LLM-based content understanding + entity/ticker mapping
+- LLM-based content understanding and entity/ticker mapping
 - Impact, surprise, and regime scoring
 - XGBoost prediction baseline with multi-horizon forecasts
 - Dash GUI: Dashboard, Live Charts, Agent Control, System Health
 
 ---
 
-## Screenshots 📸
+## Screenshots
+
 - Main dashboard (news, metrics, market regime)
 - Live charts (multi-ticker, multi-horizon)
-- Statistics & health pages
+- Statistics and health pages
 
-(See images in `images/screenshots/`)
+See images in `images/screenshots/`
 
 ---
 
-## Quick Start (3 steps) ⚡
+## Quick Start
 1. Clone:
    ```bash
    git clone https://github.com/arn-c0de/ANPS-TradeMeUp.git
@@ -62,7 +64,7 @@ That's enough to explore the GUI and view sample dashboards. For a full developm
 
 ---
 
-## Installation & Full Setup (Detailed) 🔧
+## Installation & Full Setup
 Prerequisites:
 - Python 3.11+
 - Docker & Docker Compose
@@ -104,7 +106,7 @@ Full steps:
 
 ---
 
-## Development Notes & Project Status 🧭
+## Development Notes & Project Status
 - **Phase:** Phase 1 - MVP Core
 - **Progress:** 16 of 17 agents implemented (active development)
 - Recent: GUI improvements, central error handling, and added agent init tests.
@@ -113,7 +115,7 @@ Full implementation details, architecture, and agent breakdown are available dee
 
 ---
 
-## Documentation & Guides 📚
+## Documentation & Guides
 - Quickstart: `QUICKSTART.md`
 - GUI docs: `docs/GUI_README.md`
 - Local setup: `docs/SETUP_LOCAL.md`
@@ -121,7 +123,7 @@ Full implementation details, architecture, and agent breakdown are available dee
 
 ---
 
-## Contributing & Tests 🧪
+## Contributing & Tests
 - Run unit tests:
   ```bash
   pytest tests/unit
@@ -131,22 +133,38 @@ Full implementation details, architecture, and agent breakdown are available dee
   pytest tests/integration
   ```
 
-Please follow the development workflow in `CONTRIBUTING.md` (add if missing).
+Please follow the development workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
 ## Security
+
 If you discover a security vulnerability, please do not file a public issue. Report it by email to `arn-c0de@protonmail.com` or via GitHub Security Advisories at `https://github.com/arn-c0de/ANPS-TradeMeUp/security`. Include steps to reproduce, affected versions, and an assessment of potential impact where possible. The maintainer will acknowledge receipt within 3 business days.
+
+See [SECURITY.md](SECURITY.md) for detailed security policy and best practices.
 
 ---
 
 ## License
 Copyright (c) 2026 arn-c0de. All rights reserved.
 
-Maintainer: `arn-c0de` (<arn-c0de@protonmail.com>)
-Repository: `https://github.com/arn-c0de/ANPS-TradeMeUp`
+**PROPRIETARY SOURCE-AVAILABLE LICENSE**
 
-This is proprietary software. Unauthorized use, copying, modification, or distribution is strictly prohibited. See [LICENSE](LICENSE) for details.
+This software is proprietary and source-available. You may view, clone, and modify this repository solely for the purpose of contributing improvements via pull requests or issues.
+
+**Strictly prohibited without explicit written permission:**
+- Commercial use
+- Redistribution
+- Publication of modified or unmodified versions
+- Use in other software projects
+- Sublicensing or selling
+
+All contributions submitted to this repository become the exclusive property of the copyright holder.
+
+See [LICENSE](LICENSE) for full details.
+
+**Maintainer:** `arn-c0de` (<arn-c0de@protonmail.com>)  
+**Repository:** `https://github.com/arn-c0de/ANPS-TradeMeUp`
 
 ---
 

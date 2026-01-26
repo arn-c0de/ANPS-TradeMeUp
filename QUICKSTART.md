@@ -1,6 +1,6 @@
 # TradeMeUp - Quickstart Guide
 
-**Schnellstart in 5 Minuten** 🚀
+**Quick Start in 5 Minutes**
 
 ## Voraussetzungen
 
@@ -57,7 +57,7 @@ alembic upgrade head
 ## Pipeline ausführen
 
 ```bash
-# CONTINUOUS PIPELINE (Production Mode - NEU! ⚡)
+# CONTINUOUS PIPELINE (Production Mode)
 python scripts/run_continuous_pipeline.py
 # Läuft dauerhaft, prüft alle 5 Minuten auf neue Daten
 # Dynamische Batch-Größen, Auto-Retry, Memory Management
@@ -77,7 +77,7 @@ python scripts/run_full_pipeline.py  # Agents 1-3
 python test_live_logging.py
 ```
 
-## 🔥 Continuous Pipeline - Performance Features
+## Continuous Pipeline - Performance Features
 
 ### Basic Usage
 ```bash
@@ -111,7 +111,7 @@ Memory delta: +12.3MB (now: 904.6MB)
 
 Details: [Continuous Pipeline Performance Guide](docs/CONTINUOUS_PIPELINE_PERFORMANCE.md)
 
-## Dashboard starten (NEU!)
+## Dashboard
 
 ```bash
 # Starte das GUI Dashboard
@@ -122,16 +122,16 @@ Details: [Continuous Pipeline Performance Guide](docs/CONTINUOUS_PIPELINE_PERFOR
 # http://localhost:8050
 
 # Features:
-# - 🔴 Live Agent Activity Monitor
-# - 📋 Real-time Server Logs
-# - 📊 Metrics & Statistics
-# - 📰 News Feed
-# - 🎯 Predictions mit Task Queue
-# - 🎮 Agent Control Panel
-# - ⚡ Task Queue System (verhindert Server-Blockierung)
+# - Live Agent Activity Monitor
+# - Real-time Server Logs
+# - Metrics & Statistics
+# - News Feed
+# - Predictions with Task Queue
+# - Agent Control Panel
+# - Task Queue System (prevents server blocking)
 ```
 
-### Task Queue System (NEU!)
+### Task Queue System
 
 Das Dashboard verwendet ein modernes Task-Queue-System für alle Server-Aktionen:
 
@@ -176,14 +176,14 @@ GET /api/v1/entities/statistics/summary
 
 **8 Agents in 8 Phasen:**
 
-1. **Agent 1**: News holen (RSS, APIs)
-2. **Agent 1.5**: Qualität prüfen (Duplikate, Validierung)
-3. **Agent 2**: NLP Analyse (Sentiment, Events) 🤖 LLM
-4. **Agent 3**: Entities extrahieren (Tickers) 🤖 LLM
-5. **Agent 5**: Market Regime erkennen (VIX, Trends)
-6. **Agent 4.5**: Surprises quantifizieren (Earnings beats)
-7. **Agent 4**: Impact Score berechnen
-8. **Agent 6**: Predictions generieren 📈
+1. **Agent 1**: Fetch news (RSS, APIs)
+2. **Agent 1.5**: Quality check (duplicates, validation)
+3. **Agent 2**: NLP analysis (sentiment, events) - LLM
+4. **Agent 3**: Extract entities (tickers) - LLM
+5. **Agent 5**: Detect market regime (VIX, trends)
+6. **Agent 4.5**: Quantify surprises (earnings beats)
+7. **Agent 4**: Calculate impact score
+8. **Agent 6**: Generate predictions
 
 ## Erwartete Ausgabe
 
@@ -253,13 +253,13 @@ pip install --upgrade -r requirements.txt
 
 **Für Tests: Pipeline mit limit=3 laufen lassen (ca. 3-5 Min)**
 
-## Nächste Schritte
+## Next Steps
 
-1. ✅ Pipeline laufen lassen
-2. ✅ API testen
-3. 🔄 Mehr News holen (limit erhöhen)
-4. 🔄 Agent 12: Backtesting implementieren
-5. 🔄 GUI mit Dash bauen
+1. Run the pipeline
+2. Test the API
+3. Fetch more news (increase limit)
+4. Implement Agent 12: Backtesting
+5. Build GUI with Dash
 
 ## Support
 
@@ -267,4 +267,4 @@ pip install --upgrade -r requirements.txt
 - `.env.local` Konfiguration prüfen
 - Ollama/LLM testen: `scripts/test_llm.py` (wenn erstellt)
 
-**Status:** MVP mit 8 von 17 Agents ✅ (47% Complete)
+**Status:** MVP with 8 of 17 agents (47% Complete)
