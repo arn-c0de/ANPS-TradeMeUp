@@ -1,19 +1,18 @@
 <br/>
-  
+
   ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.128+-009688?logo=fastapi&logoColor=white)
   ![Dash](https://img.shields.io/badge/Dash-3.4.0-3F4F75?logo=plotly&logoColor=white)
   ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
   ![SQLite](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white)
-  ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-1C1C1C?logo=python&logoColor=white)
-  
+  ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-1C1C1C?logo=python&logoColor=white)  
 <br/>
 
-# ANPS-TradeMeUp
-
-<div align="center">
-  <img src="images/ANPS-LOGO.png" alt="ANPS Logo" height="80px">
+<div align="left">
+  <img src="images/ANPS-LOGO.png" alt="ANPS Logo" height="90px">
 </div>
+
+# ANPS-TradeMeUp
 
 ## **ANPS (AI News Prediction System) - Multi-Agent News-Based Market Prediction System**
 
