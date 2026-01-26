@@ -40,8 +40,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Thread-safe counter for progress tracking
+# Thread-safe locks for progress tracking and database writes
 progress_lock = Lock()
+db_write_lock = Lock()  # Serialize database writes for SQLite compatibility
 
 
 def _resimulate_single(sim_data: tuple) -> dict:
@@ -50,6 +51,10 @@ def _resimulate_single(sim_data: tuple) -> dict:
     
     This function is designed to be called by ThreadPoolExecutor workers.
     Each worker creates its own database session and TradingSimulationEngine instance.
+    
+    Note: Database operations are serialized with a lock for SQLite compatibility.
+    SQLite doesn't handle concurrent writes well, so while calculations can happen
+    in parallel, database writes are sequential.
     
     Args:
         sim_data: Tuple of (simulation_id, prediction_id, entity_id, entity_name, horizon, index, total)
@@ -72,60 +77,63 @@ def _resimulate_single(sim_data: tuple) -> dict:
     }
     
     try:
-        # Create isolated database session for this worker
-        with get_scoped_session() as db:
-            # Create isolated TradingSimulationEngine for this worker
-            sim_engine = TradingSimulationEngine()
-            
-            # Load simulation with relationships
-            sim = db.query(TradingSimulation).options(
-                joinedload(TradingSimulation.prediction).joinedload(Prediction.entity)
-            ).filter(TradingSimulation.simulation_id == sim_id).first()
-            
-            if not sim:
-                logger.warning(f"⚠️ Simulation {sim_id} not found, skipping")
-                stats['skipped'] = 1
-                return stats
-            
-            prediction = sim.prediction
-            entity = prediction.entity if prediction else None
-            
-            if not prediction:
-                logger.warning(f"⚠️ Simulation {sim_id} has no prediction, skipping")
-                stats['skipped'] = 1
-                return stats
-            
-            if not entity:
-                logger.warning(f"⚠️ Simulation {sim_id} has no entity, skipping")
-                stats['skipped'] = 1
-                return stats
-            
-            # Log progress (thread-safe)
-            with progress_lock:
-                logger.info(f"🔄 [{index}/{total}] Resimulating {entity_name} ({horizon})...")
-            
-            # Recalculate simulation
-            updated_simulation = sim_engine.simulate_prediction(db, prediction, entity)
-            
-            if updated_simulation:
-                # Commit happens automatically in get_scoped_session context manager
+        # Serialize database operations for SQLite compatibility
+        # SQLite doesn't handle concurrent writes well, so we use a lock
+        with db_write_lock:
+            # Create isolated database session for this worker
+            with get_scoped_session() as db:
+                # Create isolated TradingSimulationEngine for this worker
+                sim_engine = TradingSimulationEngine()
                 
-                decision = updated_simulation.decision
-                expected_return = updated_simulation.expected_return_pct or 0
-                risk_score = updated_simulation.risk_score or 0
-                position_value = updated_simulation.position_value_usd or 0
+                # Load simulation with relationships
+                sim = db.query(TradingSimulation).options(
+                    joinedload(TradingSimulation.prediction).joinedload(Prediction.entity)
+                ).filter(TradingSimulation.simulation_id == sim_id).first()
                 
-                logger.info(
-                    f"✅ [{index}/{total}] Updated {entity_name}: {decision.upper()} "
-                    f"(Return: {expected_return:+.2f}%, Risk: {risk_score:.2f}, "
-                    f"Position: ${position_value:.2f})"
-                )
-                stats['updated'] = 1
-            else:
-                logger.warning(f"⚠️ [{index}/{total}] {entity_name} not updated (may not meet criteria)")
-                stats['skipped'] = 1
-            
-            stats['processed'] = 1
+                if not sim:
+                    logger.warning(f"⚠️ Simulation {sim_id} not found, skipping")
+                    stats['skipped'] = 1
+                    return stats
+                
+                prediction = sim.prediction
+                entity = prediction.entity if prediction else None
+                
+                if not prediction:
+                    logger.warning(f"⚠️ Simulation {sim_id} has no prediction, skipping")
+                    stats['skipped'] = 1
+                    return stats
+                
+                if not entity:
+                    logger.warning(f"⚠️ Simulation {sim_id} has no entity, skipping")
+                    stats['skipped'] = 1
+                    return stats
+                
+                # Log progress (thread-safe)
+                with progress_lock:
+                    logger.info(f"🔄 [{index}/{total}] Resimulating {entity_name} ({horizon})...")
+                
+                # Recalculate simulation
+                updated_simulation = sim_engine.simulate_prediction(db, prediction, entity)
+                
+                if updated_simulation:
+                    # Commit happens automatically in get_scoped_session context manager
+                    
+                    decision = updated_simulation.decision
+                    expected_return = updated_simulation.expected_return_pct or 0
+                    risk_score = updated_simulation.risk_score or 0
+                    position_value = updated_simulation.position_value_usd or 0
+                    
+                    logger.info(
+                        f"✅ [{index}/{total}] Updated {entity_name}: {decision.upper()} "
+                        f"(Return: {expected_return:+.2f}%, Risk: {risk_score:.2f}, "
+                        f"Position: ${position_value:.2f})"
+                    )
+                    stats['updated'] = 1
+                else:
+                    logger.warning(f"⚠️ [{index}/{total}] {entity_name} not updated (may not meet criteria)")
+                    stats['skipped'] = 1
+                
+                stats['processed'] = 1
             
     except Exception as e:
         logger.error(f"❌ Error resimulating {sim_id}: {e}")
@@ -268,6 +276,15 @@ def main():
     if args.workers != max_workers:
         logger.warning(f"⚠️ Capping workers from {args.workers} to {max_workers}")
         args.workers = max_workers
+    
+    # SQLite warning for parallel processing
+    if args.workers > 1:
+        logger.warning("⚠️ NOTE: SQLite has limitations with concurrent access.")
+        logger.warning("⚠️ If you encounter 'disk I/O errors', try:")
+        logger.warning("⚠️   1. Close the GUI/dashboard before running this script")
+        logger.warning("⚠️   2. Use --workers 1 for sequential processing")
+        logger.warning("⚠️   3. Consider upgrading to PostgreSQL for true parallel processing")
+        logger.warning("")
     
     logger.info("=" * 80)
     logger.info("🔄 Starting Trading Simulation Resimulation")
