@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 
 # Application Version
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 
 class Settings(BaseSettings):
