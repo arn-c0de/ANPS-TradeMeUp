@@ -1,196 +1,196 @@
-# Live Market Charts - Implementierung
+# Live Market Charts - Implementation
 
-## ✅ Erfolgreich implementiert
+## ✅ Successfully Implemented
 
-### 📊 Neue Module
+### 📊 New Modules
 
 1. **`src/gui/charts/market_data.py`**
-   - `MarketDataProvider` Klasse für echte Börsendaten
-   - Verwendet `yfinance` für Live-Daten
-   - Funktionen:
-     - `get_live_price()` - Aktuelle Preise, Volumen, Änderungen
-     - `get_historical_data()` - Historische OHLCV-Daten
-     - `get_intraday_data()` - 1-Minuten-Intervall Intraday-Daten
+   - `MarketDataProvider` class for real market data
+   - Uses `yfinance` for live data
+   - Functions:
+     - `get_live_price()` - current price, volume, changes
+     - `get_historical_data()` - historical OHLCV data
+     - `get_intraday_data()` - 1-minute interval intraday data
      - `get_market_indices()` - S&P 500, Dow Jones, NASDAQ, VIX
-     - `search_symbol()` - Symbol-Suche
+     - `search_symbol()` - symbol search
 
 2. **`src/gui/charts/live_charts.py`**
-   - Modulare Chart-Komponenten
-   - Funktionen:
-     - `create_candlestick_chart()` - Candlestick-Chart mit Volumen
-     - `create_line_chart()` - Linien-Chart für Preisbewegung
-     - `create_multi_line_chart()` - Mehrere Aktien vergleichen
-     - `create_price_indicator_card()` - Preis-Indikator mit allen Details
-     - `create_heatmap()` - Korrelations-Heatmap
+   - Modular chart components
+   - Functions:
+     - `create_candlestick_chart()` - candlestick chart with volume
+     - `create_line_chart()` - line chart for price movement
+     - `create_multi_line_chart()` - compare multiple stocks
+     - `create_price_indicator_card()` - price indicator card with details
+     - `create_heatmap()` - correlation heatmap
 
-3. **`src/gui/tabs/charts.py`** (komplett überarbeitet)
-   - Live Market Overview mit Indices (S&P 500, Dow, NASDAQ, VIX)
-   - Stock Symbol Eingabe mit Auto-Update
-   - Timeframe-Auswahl: 1 Tag (1min) bis 5 Jahre
-   - Chart-Typ: Candlestick oder Line Chart
-   - Preis-Indikator Karte mit:
-     - Aktueller Preis mit Änderung
-     - High/Low des Tages
-     - Volumen und Market Cap
-   - Vergleichs-Charts für mehrere Aktien gleichzeitig
+3. **`src/gui/tabs/charts.py`** (fully refactored)
+   - Live Market Overview with indices (S&P 500, Dow, NASDAQ, VIX)
+   - Stock symbol input with auto-update
+   - Timeframe selection: 1 day (1min) up to 5 years
+   - Chart type: Candlestick or Line Chart
+   - Price indicator card showing:
+     - current price with change
+     - day's high/low
+     - volume and market cap
+   - Comparison charts for multiple stocks
 
 ### 🎨 Features
 
 #### Live Market Overview
-- **Market Indices**: Real-time Anzeige von S&P 500, Dow Jones, NASDAQ, VIX
-- **Auto-Refresh**: Alle 30 Sekunden automatische Aktualisierung
+- **Market Indices**: real-time display of S&P 500, Dow Jones, NASDAQ, VIX
+- **Auto-Refresh**: automatic refresh every 30 seconds
 
 #### Stock Charts
 - **Timeframes**:
-  - 1 Tag (1-Minuten-Intervalle) für Intraday-Trading
-  - 5 Tage (5-Minuten-Intervalle)
-  - 1, 3, 6 Monate
-  - 1, 2, 5 Jahre
+  - 1 Day (1-minute intervals) for intraday trading
+  - 5 Days (5-minute intervals)
+  - 1, 3, 6 months
+  - 1, 2, 5 years
 
-- **Chart-Typen**:
-  - **Candlestick**: Professionelle OHLC-Darstellung mit Volumen
-  - **Line Chart**: Einfache Preis-Linie mit Füllung
+- **Chart Types**:
+  - **Candlestick**: professional OHLC display with volume
+  - **Line Chart**: simple price line with fill
 
-- **Preis-Indikator**:
-  - Aktueller Preis in Echtzeit
-  - Änderung absolut und prozentual (grün/rot)
-  - Tages-High und -Low
-  - Handelsvolumen
-  - Market Capitalization
+- **Price Indicator**:
+  - current price in real-time
+  - absolute and percentage change (green/red)
+  - day's high and low
+  - trading volume
+  - market capitalization
 
-#### Vergleichs-Charts
-- Mehrere Aktien gleichzeitig vergleichen
-- Normalisierte Darstellung (% Änderung vom Start)
-- Komma-separierte Symbol-Eingabe (z.B. "AAPL,MSFT,GOOGL")
+#### Comparison Charts
+- Compare multiple stocks at once
+- Normalized view (% change from start)
+- Comma-separated symbol input (e.g., "AAPL,MSFT,GOOGL")
 
 ### 🎨 Dark Theme Styling
-- Hintergrund: `#060606` (fast schwarz)
-- Cards: `#1a1a1a` (dunkelgrau)
-- Neon-Akzente:
-  - Cyan `#00d9ff` für Bullish/Aufwärtsbewegungen
-  - Grün `#00ff88` für Erfolg
-  - Rot `#ff4444` für Bearish/Abwärtsbewegungen
-- Plotly Dark Theme mit transparenten Hintergründen
+- Background: `#060606` (near black)
+- Cards: `#1a1a1a` (dark gray)
+- Neon accents:
+  - Cyan `#00d9ff` for bullish/up moves
+  - Green `#00ff88` for success
+  - Red `#ff4444` for bearish/down moves
+- Plotly dark theme with transparent backgrounds
 
-### 📁 Modulare Struktur
+### 📁 Modular Structure
 ```
 src/gui/charts/
 ├── __init__.py           # Package exports
-├── market_data.py        # Daten-Provider (yfinance)
-└── live_charts.py        # Chart-Komponenten (Plotly)
+├── market_data.py        # Data provider (yfinance)
+└── live_charts.py        # Chart components (Plotly)
 ```
 
-**Vorteile der modularen Struktur:**
-- ✅ Erweiterbar für zukünftige Simulationen
-- ✅ Klare Trennung von Daten und Visualisierung
-- ✅ Wiederverwendbare Chart-Komponenten
-- ✅ Einfach zu testen und zu warten
+**Benefits of the modular structure:**
+- ✅ Extensible for future simulations
+- ✅ Clear separation of data and visualization
+- ✅ Reusable chart components
+- ✅ Easy to test and maintain
 
-## 🚀 Verwendung
+## 🚀 Usage
 
-### Dashboard starten
+### Start the dashboard
 ```bash
 cd "d:\Projects\PYTHON - FOLDER\TradeMeUp"
 .\venv\Scripts\python.exe run_dashboard.py
 ```
 
-### Live Charts öffnen
-1. Dashboard öffnen: http://localhost:8050
-2. Zum Tab "📈 Live Charts" navigieren
+### Open Live Charts
+1. Open the dashboard: http://localhost:8050
+2. Navigate to the "📈 Live Charts" tab
 3. Features:
-   - **Market Overview** zeigt automatisch die großen Indices
-   - **Stock Symbol** eingeben (z.B. AAPL, TSLA, NVDA)
-   - **Timeframe** wählen für verschiedene Zeiträume
-   - **Chart Type** zwischen Candlestick und Line Chart wechseln
-   - **Update Chart** Button klicken oder automatische Updates warten (30s)
-   - **Compare Stocks** mit mehreren Symbolen gleichzeitig
+   - **Market Overview** automatically shows major indices
+   - **Stock Symbol** input (e.g., AAPL, TSLA, NVDA)
+   - **Timeframe** selection for different ranges
+   - **Chart Type** toggle between Candlestick and Line Chart
+   - Click **Update Chart** or wait for automatic updates (30s)
+   - **Compare Stocks** to view multiple symbols at once
 
-### Beliebte Symbole
+### Popular Symbols
 - **Tech**: AAPL (Apple), MSFT (Microsoft), GOOGL (Google), NVDA (Nvidia), TSLA (Tesla)
 - **Indices**: ^GSPC (S&P 500), ^DJI (Dow Jones), ^IXIC (NASDAQ), ^VIX (VIX)
 - **Finance**: JPM (JPMorgan), BAC (Bank of America), GS (Goldman Sachs)
 - **Energy**: XOM (Exxon), CVX (Chevron)
 
-## 🔧 Technische Details
+## 🔧 Technical Details
 
-### Datenquelle
-- **yfinance**: Kostenlose Yahoo Finance API
-- **Echtzeit-Daten**: Verzögerung ca. 15-20 Minuten (kostenlos)
-- **Historische Daten**: Vollständiger Zugriff auf historische OHLCV-Daten
+### Data Source
+- **yfinance**: free Yahoo Finance API wrapper
+- **Real-time data**: ~15-20 minutes delay (free tier)
+- **Historical data**: full access to historical OHLCV data
 
-### Chart-Performance
-- **Caching**: MarketDataProvider implementiert Caching
-- **Intervalle**: 
-  - Market Indices: Alle 30 Sekunden
-  - Main Charts: Auf Knopfdruck oder alle 30 Sekunden
-- **Responsive**: Charts passen sich an Bildschirmgröße an
+### Chart Performance
+- **Caching**: MarketDataProvider implements caching
+- **Intervals**: 
+  - Market indices: every 30 seconds
+  - Main charts: on-demand or every 30 seconds
+- **Responsive**: charts scale to screen size
 
-### Callbacks in app.py
+### Callbacks in `app.py`
 ```python
-# Market Indices (Auto-Update alle 30s)
+# Market Indices (auto-update every 30s)
 @app.callback(Output("market-indices-display", "children"), ...)
 
-# Price Indicator (Update-Button oder Auto-Refresh)
+# Price Indicator (update button or auto-refresh)
 @app.callback(Output("price-indicator-card", "children"), ...)
 
-# Main Chart (Update-Button oder Auto-Refresh)
+# Main Chart (update button or auto-refresh)
 @app.callback(Output("main-price-chart", "children"), ...)
 
-# Comparison Chart (auf Knopfdruck)
+# Comparison Chart (on demand)
 @app.callback(Output("comparison-chart", "children"), ...)
 ```
 
-## 🎯 Zukünftige Erweiterungen
+## 🎯 Future Extensions
 
-Die modulare Struktur ermöglicht einfache Erweiterungen:
+The modular structure enables easy extensions:
 
-### 1. Trading Simulationen
+### 1. Trading Simulations
 ```python
-# Zukünftig in src/gui/charts/simulations.py
+# Future: src/gui/charts/simulations.py
 from src.gui.charts import create_candlestick_chart
 
 def overlay_trades(fig, trades_df):
-    # Simulierte Trades über Live-Chart legen
+    # Overlay simulated trades on the live chart
     pass
 ```
 
-### 2. Technische Indikatoren
+### 2. Technical Indicators
 ```python
-# Zukünftig in src/gui/charts/indicators.py
+# Future: src/gui/charts/indicators.py
 def add_moving_averages(fig, df, periods=[20, 50, 200]):
-    # MA, RSI, MACD, etc. hinzufügen
+    # Add MA, RSI, MACD, etc.
     pass
 ```
 
 ### 3. AI Predictions Overlay
 ```python
-# Zukünftig in src/gui/charts/predictions_overlay.py
+# Future: src/gui/charts/predictions_overlay.py
 def overlay_predictions(fig, predictions_df):
-    # TradeMeUp Vorhersagen über Chart legen
+    # Overlay TradeMeUp predictions on the chart
     pass
 ```
 
 ## 📝 Changelog
 
 ### v1.0.0 - Live Charts Implementation
-- ✅ MarketDataProvider mit yfinance
-- ✅ Candlestick und Line Charts
+- ✅ MarketDataProvider with yfinance
+- ✅ Candlestick and Line Charts
 - ✅ Market Indices (S&P 500, Dow, NASDAQ, VIX)
-- ✅ Preis-Indikator mit allen Details
-- ✅ Multi-Stock-Vergleich
-- ✅ Dark Theme Styling
-- ✅ Auto-Refresh alle 30 Sekunden
-- ✅ Modulare Struktur für Erweiterungen
+- ✅ Price indicator with full details
+- ✅ Multi-stock comparison
+- ✅ Dark theme styling
+- ✅ Auto-refresh every 30 seconds
+- ✅ Modular structure for extensions
 
-## 🐛 Bekannte Issues
-Keine - Dashboard läuft stabil!
+## 🐛 Known Issues
+None - dashboard is stable!
 
-## 💡 Tipps
+## 💡 Tips
 
-1. **Intraday-Trading**: Verwende "1 Day (1min)" für Live-Daytrading-View
-2. **Langfristig**: Verwende "1 Year" oder "5 Years" für langfristige Trends
-3. **Vergleiche**: Nutze Compare-Funktion um Sektor-Performance zu vergleichen
-4. **Symbols**: Alle Yahoo Finance Symbole funktionieren (auch Krypto mit "-USD" Suffix)
+1. **Intraday trading**: Use "1 Day (1min)" for live intraday view
+2. **Long term**: Use "1 Year" or "5 Years" for long-term trends
+3. **Comparisons**: Use the Compare feature to compare sector performance
+4. **Symbols**: All Yahoo Finance symbols work (including crypto with "-USD" suffix)
 
 ## 📧 Support
-Bei Fragen oder Problemen: Siehe Dashboard Logs unter Tab "🔧 System Health"
+If you have questions or issues: check the dashboard logs under the "🔧 System Health" tab
