@@ -117,16 +117,6 @@ TradeMeUp converts financial news into probabilistic market predictions using a 
 
 ---
 
-## Screenshots
-
-- Main dashboard (news, metrics, market regime)
-- Live charts (multi-ticker, multi-horizon)
-- Statistics and health pages
-
-See images in `images/screenshots/`
-
----
-
 ## Quick Start
 1. Clone:
    ```bash
