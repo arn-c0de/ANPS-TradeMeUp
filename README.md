@@ -1,12 +1,28 @@
+<br/>
+  
+  ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+  ![FastAPI](https://img.shields.io/badge/FastAPI-0.128+-009688?logo=fastapi&logoColor=white)
+  ![Dash](https://img.shields.io/badge/Dash-3.4.0-3F4F75?logo=plotly&logoColor=white)
+  ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
+  ![SQLite](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white)
+  ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-1C1C1C?logo=python&logoColor=white)
+  
+<br/>
+
 # ANPS-TradeMeUp
 
 <div align="center">
   <img src="images/ANPS-LOGO.png" alt="ANPS Logo" height="80px">
 </div>
 
-**ANPS (AI News Prediction System) - Multi-Agent News-Based Market Prediction System**
+## **ANPS (AI News Prediction System) - Multi-Agent News-Based Market Prediction System**
 
 > **Note:** This is a private, source-available project currently under active development. Features, APIs, and screenshots may change frequently and are not intended for production use. ⚠️
+
+### What is ANPS-TradeMeUp?
+
+ANPS-TradeMeUp (AI News Prediction System) is an MVP-grade pipeline that ingests news, extracts events/entities using LLMs, scores impact and surprise, and produces short-to-medium term market predictions. It includes a Dash GUI for real-time monitoring and a FastAPI backend.
+
 
 ![Main Dashboard](images/screenshots/1.0.3-dashboard.png)
 ![News Feed](images/screenshots/1.0.3-news.png)
@@ -25,10 +41,6 @@
 TradeMeUp converts financial news into probabilistic market predictions using a modular multi-agent pipeline. Start the GUI quickly with `start_gui.bat` (Windows) and explore dashboards and live charts. For development and production setup, follow the **Installation** section below.
 
 ---
-
-## What is ANPS-TradeMeUp?
-
-ANPS-TradeMeUp (AI News Prediction System) is an MVP-grade pipeline that ingests news, extracts events/entities using LLMs, scores impact and surprise, and produces short-to-medium term market predictions. It includes a Dash GUI for real-time monitoring and a FastAPI backend.
 
 ## Features
 
