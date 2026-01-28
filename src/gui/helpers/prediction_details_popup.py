@@ -8,9 +8,9 @@ prediction information. It can be used by multiple tabs (predictions, simulation
 import logging
 import dash_bootstrap_components as dbc
 from dash import html
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, defer
 from sqlalchemy import desc, and_
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.models.predictions import Prediction, PredictionOutcome
 from src.models.trading_simulation import TradingSimulation
@@ -19,6 +19,7 @@ from src.models.raw_news import RawNews
 from src.models.processed_news import ProcessedNews
 from src.models.analysis import ImpactScore
 from src.services.prediction_performance_service import prediction_performance_service
+from src.utils.json_helpers import ensure_dict as _ensure_dict
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
     from src.services.market_data import MarketDataProvider
     
     # Get direction from prediction
-    probs = pred.direction_probabilities or {}
+    probs = _ensure_dict(pred.direction_probabilities, {})
     predicted_direction = max(probs, key=probs.get) if probs else "flat"
     
     # Initialize variables
@@ -69,8 +70,8 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
         try:
             market_data = MarketDataProvider()
             
-            # Calculate days since prediction
-            days_since = (datetime.now() - pred.timestamp.replace(tzinfo=None)).days if pred.timestamp else 0
+            # Calculate days since prediction (use timezone-aware datetime)
+            days_since = (datetime.now(timezone.utc) - pred.timestamp).days if pred.timestamp else 0
             logger.info(f"   Days since prediction: {days_since}")
             
             # Get historical data since prediction
@@ -91,7 +92,7 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
                 logger.info(f"   Got {len(hist_data)} days of historical data")
                 
                 # Get prediction date
-                prediction_date = pred.timestamp.date() if pred.timestamp else datetime.now().date()
+                prediction_date = pred.timestamp.date() if pred.timestamp else datetime.now(timezone.utc).date()
                 logger.info(f"   Prediction date: {prediction_date}")
                 
                 # Filter data from prediction date onwards
@@ -160,8 +161,8 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
     elif ticker and not load_live_prices:
         logger.info(f"   Skipping live price data for fast loading")
     
-    # Calculate days since prediction
-    days_since = (datetime.now() - pred.timestamp.replace(tzinfo=None)).days if pred.timestamp else 0
+    # Calculate days since prediction (use timezone-aware datetime)
+    days_since = (datetime.now(timezone.utc) - pred.timestamp).days if pred.timestamp else 0
     
     # Calculate actual return from live prices if available, otherwise use saved data
     actual_return_pct = 0
@@ -234,7 +235,7 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
             entity_name = entity.entity_name if entity else pred.entity_id
 
             # Get direction
-            probs = pred.direction_probabilities or {}
+            probs = _ensure_dict(pred.direction_probabilities, {})
             direction = max(probs, key=probs.get) if probs else "unknown"
             direction_emoji = {"up": "🔼", "down": "🔽", "flat": "➡️"}.get(direction, "❓")
 
@@ -307,11 +308,15 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                 logger.info(f"ℹ️ No saved performance and load_performance=False")
 
             # Get related news
-            news_ids = pred.related_news_ids or []
+            news_ids = _ensure_dict(pred.related_news_ids, [])
             if not news_ids:
                 news_content = dbc.Alert("No related news found", color="warning")
             else:
-                news_id = news_ids[0] if isinstance(news_ids, list) else news_ids
+                # Extract first news ID from the array
+                if isinstance(news_ids, list) and len(news_ids) > 0:
+                    news_id = news_ids[0]
+                else:
+                    news_id = news_ids
 
                 # OPTIMIZED: Combine 3 separate queries into single JOIN query
                 # This reduces 3 database roundtrips to just 1
@@ -326,7 +331,7 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                         ImpactScore.news_id == RawNews.news_id,
                         ImpactScore.entity_id == pred.entity_id
                     )
-                ).filter(
+                ).options(defer(ProcessedNews.embedding)).filter(
                     RawNews.news_id == news_id
                 ).first()
                 
@@ -336,7 +341,17 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                 news_content = dbc.Card([
                     dbc.CardHeader(html.Div("📰 News", style={"fontWeight": "bold"}), className="py-1"),
                     dbc.CardBody([
-                        html.Div(raw_news.title if raw_news else "Unknown", className="text-primary mb-1", style={"fontWeight": "500"}),
+                        html.A(
+                            raw_news.title if raw_news else "Unknown",
+                            href=raw_news.url if raw_news and raw_news.url else "#",
+                            target="_blank",
+                            className="text-primary mb-1",
+                            style={"fontWeight": "500", "textDecoration": "none", "display": "block", "cursor": "pointer"}
+                        ) if raw_news and raw_news.url else html.Div(
+                            raw_news.title if raw_news else "Unknown",
+                            className="text-primary mb-1",
+                            style={"fontWeight": "500"}
+                        ),
                         html.Small([
                             html.Strong("Source: "),
                             html.Span(raw_news.source if raw_news else "Unknown"),
@@ -350,11 +365,12 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                         html.Hr(className="my-2") if processed else None,
                         html.Small([
                             html.Strong("Sentiment: "),
-                            html.Span(f"Overall {processed.sentiment.get('overall', 0):.2f}",
-                                     className="text-success" if processed and processed.sentiment.get('overall', 0) > 0 else "text-danger"),
+                            html.Span(f"Overall {_ensure_dict(processed.sentiment, {}).get('overall', 0):.2f}",
+                                     className="text-success" if processed and _ensure_dict(processed.sentiment, {}).get('overall', 0) > 0 else "text-danger"),
                             " | ",
-                            html.Span(f"Market {processed.sentiment.get('market', 0):.2f}",
-                                     className="text-success" if processed and processed.sentiment.get('market', 0) > 0 else "text-danger"),
+                            html.Strong("Confidence: "),
+                            html.Span(f"{_ensure_dict(processed.sentiment, {}).get('confidence', 0):.2f}",
+                                     className="text-info"),
                             " | ",
                             html.Strong("Event: "),
                             dbc.Badge(processed.event_type, color="primary", className="py-0 px-1") if processed.event_type else ""
@@ -368,10 +384,10 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                 ], className="mb-2")
 
             # Expected returns
-            expected = pred.expected_return or {}
+            expected = _ensure_dict(pred.expected_return, {})
 
             # Key drivers
-            drivers = pred.key_drivers or []
+            drivers = _ensure_dict(pred.key_drivers, [])
             drivers_content = dbc.Card([
                 dbc.CardHeader(html.Div("🎯 Key Drivers", style={"fontWeight": "bold"}), className="py-1"),
                 dbc.CardBody([
@@ -717,9 +733,9 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                 divergence_color = "warning" if abs(divergence) > 2 else "secondary"
 
                 cost_bps = simulation.transaction_cost_bps or 0
-                cost_breakdown = simulation.cost_breakdown or {}
-                risk_breakdown = simulation.risk_breakdown or {}
-                sim_metadata = simulation.simulation_metadata or {}
+                cost_breakdown = _ensure_dict(simulation.cost_breakdown, {})
+                risk_breakdown = _ensure_dict(simulation.risk_breakdown, {})
+                sim_metadata = _ensure_dict(simulation.simulation_metadata, {})
 
                 # Extract detailed metrics
                 position_info = sim_metadata.get("position_info", {})

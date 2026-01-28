@@ -2,7 +2,7 @@
 import logging
 import re
 from typing import Dict, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 from sqlalchemy.orm import Session
 import numpy as np
@@ -382,7 +382,7 @@ class SurpriseQuantificationAgent:
                 market_priced_in=surprise['market_priced_in'],
                 true_surprise=surprise['true_surprise'],
                 expected_reaction=surprise['expected_reaction'],
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
             surprise_scores.append(score)
 

@@ -24,8 +24,8 @@ from src.models.predictions import Prediction, PredictionOutcome
 from src.models.analysis import MarketRegime, SurpriseScore, FactVerification
 from src.models.trading_simulation import TradingSimulation
 from src.gui.components import create_metric_card
-from src.gui.helpers.prediction_details_popup import create_prediction_modal
 from src.config.settings import VERSION
+from src.utils.json_helpers import ensure_dict as _ensure_dict
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +33,7 @@ logger = logging.getLogger(__name__)
 def create_layout():
     """Create dashboard tab layout"""
     return html.Div([
-        # Hidden stores for prediction modal
-        dcc.Store(id="prediction-detail-cache", data={}),
-        dcc.Store(id="current-prediction-id", data=None),
+        # Note: Shared stores are now in main app.py layout
         
         dbc.Container([
         dbc.Row([
@@ -141,10 +139,7 @@ def create_layout():
                 ])
             ], width=12)
         ])
-        ], fluid=True),
-        
-        # Prediction Details Modal (shared)
-        create_prediction_modal()
+        ], fluid=True)
     ])
 
 
@@ -152,10 +147,17 @@ def get_metrics(engine):
     """Get dashboard metrics"""
     try:
         with Session(engine) as db:
-            # Use UTC time (naive) for consistency with database timestamps
-            now = datetime.utcnow()  # UTC time without timezone info
+            # Use timezone-aware UTC time for PostgreSQL compatibility
+            from datetime import timezone
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            now = datetime.now(timezone.utc)
             hour_ago = now - timedelta(hours=1)
             day_ago = now - timedelta(hours=24)
+            
+            # Debug: Log the time windows being used
+            logger.debug(f"Dashboard time windows - Now: {now}, Hour ago: {hour_ago}, Day ago: {day_ago}")
             
             # Total counts
             total_news = db.query(func.count(RawNews.news_id)).scalar() or 0
@@ -168,10 +170,17 @@ def get_metrics(engine):
             except Exception:
                 total_simulations = 0
             
+            # Debug: Check latest timestamps
+            latest_news = db.query(RawNews.fetched_at).order_by(RawNews.fetched_at.desc()).first()
+            if latest_news:
+                logger.debug(f"Latest news timestamp: {latest_news[0]}, Type: {type(latest_news[0])}, TZ: {latest_news[0].tzinfo if latest_news[0] else None}")
+            
             # Hourly increments
             news_1h = db.query(func.count(RawNews.news_id)).filter(RawNews.fetched_at >= hour_ago).scalar() or 0
             processed_1h = db.query(func.count(ProcessedNews.news_id)).filter(ProcessedNews.processing_timestamp >= hour_ago).scalar() or 0
             predictions_1h = db.query(func.count(Prediction.prediction_id)).filter(Prediction.created_at >= hour_ago).scalar() or 0
+            
+            logger.debug(f"Dashboard counts - News 1h: {news_1h}, Processed 1h: {processed_1h}, Predictions 1h: {predictions_1h}")
             surprises_1h = db.query(func.count(SurpriseScore.surprise_id)).filter(SurpriseScore.created_at >= hour_ago).scalar() or 0
             fact_checks_1h = db.query(func.count(FactVerification.verification_id)).filter(FactVerification.verified_at >= hour_ago).scalar() or 0
             try:
@@ -301,8 +310,8 @@ def get_market_regime(engine):
                 ])
             
             # Extract data within session context to avoid lazy loading issues
-            # regime is a JSON column with volatility, trend, risk_appetite, liquidity
-            regime_dict = regime.regime if isinstance(regime.regime, dict) else {}
+            # regime is a JSONB column with volatility, trend, risk_appetite, liquidity
+            regime_dict = _ensure_dict(regime.regime, {})
             vol_regime = regime_dict.get('volatility', 'unknown')
             trend_regime = regime_dict.get('trend', 'unknown')
             risk_appetite = regime_dict.get('risk_appetite', 'unknown')
@@ -452,7 +461,9 @@ def get_top_performers(engine, timeframe='24h', limit=10):
     """Get top performing simulations with validity check based on horizon"""
     try:
         with Session(engine, expire_on_commit=False) as db:
-            now = datetime.utcnow()
+            # Use timezone-aware datetime for PostgreSQL compatibility
+            from datetime import timezone
+            now = datetime.now(timezone.utc)
             
             # Calculate timeframe cutoff
             timeframe_map = {
@@ -562,7 +573,7 @@ def get_top_performers(engine, timeframe='24h', limit=10):
                         
                         # Calculate time ago
                         if outcome.evaluation_timestamp:
-                            time_diff = now - outcome.evaluation_timestamp.replace(tzinfo=None)
+                            time_diff = now - outcome.evaluation_timestamp
                             if time_diff.days > 0:
                                 time_ago_str = f"{time_diff.days}d ago"
                             elif time_diff.seconds > 3600:
@@ -760,7 +771,8 @@ def register_callbacks(app):
         Input("interval-component", "n_intervals"),
     )
     def update_performance_chart(n):
-        dates = pd.date_range(end=datetime.now(), periods=30, freq="D")
+        from datetime import timezone
+        dates = pd.date_range(end=datetime.now(timezone.utc), periods=30, freq="D")
         accuracy = [0.65 + (i % 10) * 0.03 for i in range(30)]
         fig = go.Figure()
         fig.add_trace(

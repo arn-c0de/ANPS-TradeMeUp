@@ -88,7 +88,11 @@ def test_cost_calculation_formulas():
     
     for case in test_cases:
         total_bps, breakdown = engine._estimate_costs_bps(
-            case["price"], case["volatility"], case["shares"]
+            price=case["price"],
+            volatility_regime=case["volatility"],
+            predicted_direction="up",
+            horizon="5d",
+            shares=case["shares"]
         )
         print(f"Price: ${case['price']}, Vol: {case['volatility']}, Shares: {case['shares']}")
         print(f"  Total Cost: {total_bps:.1f} bps")
@@ -390,7 +394,7 @@ def test_decision_logic():
     ]
     
     for case in test_cases:
-        decision = engine._calculate_decision(
+        decision, constraint_info = engine._calculate_decision(
             case["direction"],
             case["expected_return"],
             case["confidence"],
@@ -402,6 +406,7 @@ def test_decision_logic():
         print(f"  Direction: {case['direction']}, Expected: {case['expected_return']:+.1f}%")
         print(f"  Confidence: {case['confidence']:.2f}, Risk: {case['risk_score']:.2f}, Cost Ratio: {case['cost_ratio']:.2f}")
         print(f"  Decision: {decision.upper()}")
+        print(f"  Constraints: {constraint_info}")
         
         assert decision == case["expected_decision"], \
             f"Expected {case['expected_decision']}, got {decision}"

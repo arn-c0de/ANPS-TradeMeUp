@@ -9,7 +9,7 @@ OPTIMIZED VERSION:
 """
 import logging
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 from pathlib import Path
 import pickle
@@ -140,7 +140,7 @@ class PredictionAgent:
                     'p75': expected_mean + 0.01,
                     'p95': expected_mean + 0.03
                 },
-                'confidence': max(probas),
+                'confidence': float(max(probas)),
                 'key_drivers': key_drivers
             }
 
@@ -504,7 +504,7 @@ class PredictionAgent:
                 key_drivers=result['key_drivers'],
                 model_version=self.model_version,
                 related_news_ids=[news_id],
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
 
             logger.debug(

@@ -25,10 +25,14 @@ def apply_migration():
         with engine.connect() as conn:
             logger.info("Starting migration: add stop loss and take profit fields")
             
-            # Check if columns already exist (SQLite-compatible)
+            # Check if columns already exist (PostgreSQL)
             try:
-                result = conn.execute(text("PRAGMA table_info(trading_simulations)"))
-                columns = [row[1] for row in result.fetchall()]  # column name is at index 1
+                result = conn.execute(text("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'trading_simulations'
+                """))
+                columns = [row[0] for row in result.fetchall()]
                 
                 if 'stop_loss_price' in columns:
                     logger.info("Migration already applied - columns exist")
@@ -73,10 +77,10 @@ def apply_migration():
                 "ALTER TABLE trading_simulations ADD COLUMN risk_reward_ratio FLOAT"
             ))
             
-            # Add exit strategy JSON field
+            # Add exit strategy JSONB field
             logger.info("Adding exit_strategy column...")
             conn.execute(text(
-                "ALTER TABLE trading_simulations ADD COLUMN exit_strategy JSON"
+                "ALTER TABLE trading_simulations ADD COLUMN exit_strategy JSONB"
             ))
             
             # Create index (IF NOT EXISTS is supported for CREATE INDEX)

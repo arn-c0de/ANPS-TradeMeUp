@@ -14,7 +14,7 @@ import logging
 
 import os
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from pathlib import Path
 
@@ -32,7 +32,7 @@ from dash import html
 
 from sqlalchemy import func, desc, and_, or_
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 
 
@@ -88,7 +88,7 @@ def get_statistics_metrics(engine, date_range=None, granularity="all"):
 
             # Simple COUNT queries - these are fast and don't need complex optimization
 
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             hour_ago = now - timedelta(hours=1)
 
@@ -1223,15 +1223,15 @@ def get_entity_sentiment_chart(engine, date_range=None, timeframe="30d"):
 
                 if timeframe == "7d":
 
-                    start_date = datetime.utcnow() - timedelta(days=7)
+                    start_date = datetime.now(timezone.utc) - timedelta(days=7)
 
                 elif timeframe == "30d":
 
-                    start_date = datetime.utcnow() - timedelta(days=30)
+                    start_date = datetime.now(timezone.utc) - timedelta(days=30)
 
                 elif timeframe == "90d":
 
-                    start_date = datetime.utcnow() - timedelta(days=90)
+                    start_date = datetime.now(timezone.utc) - timedelta(days=90)
 
             
 

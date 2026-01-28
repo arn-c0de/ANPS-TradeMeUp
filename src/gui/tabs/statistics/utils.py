@@ -3,7 +3,7 @@ Statistics Tab - Utility Functions
 Date handling and range resolution utilities
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 
 def _coerce_datetime(value, is_end=False):
@@ -48,7 +48,7 @@ def _resolve_stats_date_range(start_date, end_date, active_filter):
                 except ValueError:
                     hours = None
             if hours:
-                end = datetime.utcnow()
+                end = datetime.now(timezone.utc)
                 start = end - timedelta(hours=hours)
                 return (start, end)
     if start_date or end_date:

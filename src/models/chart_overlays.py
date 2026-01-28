@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import Column, String, Float, Boolean, DateTime, Index
 import uuid
 
-from src.models.database import Base
+from src.models.database import Base, utc_now
 from src.models.types import GUID
 
 
@@ -20,8 +20,8 @@ class ChartOverlay(Base):
     name = Column(String(100))  # Optional label/name
     color = Column(String(20), nullable=False)  # Hex color code
     visible = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=datetime.utcnow)
 
     # Composite index for fast lookups
     __table_args__ = (
