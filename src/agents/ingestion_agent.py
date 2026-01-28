@@ -3,7 +3,7 @@ import hashlib
 import logging
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 import feedparser
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from src.models.raw_news import RawNews
+from src.models.database import utc_now
 from src.utils.activity_logger import activity_logger
 from src.config.settings import VERSION
 
@@ -140,9 +141,9 @@ class IngestionAgent:
                     # Extract published date
                     published_at = None
                     if hasattr(entry, 'published_parsed'):
-                        published_at = datetime(*entry.published_parsed[:6])
+                        published_at = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
                     else:
-                        published_at = datetime.utcnow()
+                        published_at = utc_now()
 
                     # Extract text (summary or description)
                     full_text = entry.get('summary', entry.get('description', ''))
@@ -204,7 +205,7 @@ class IngestionAgent:
                 full_text=article.full_text,
                 url=article.url,
                 published_at=article.published_at,
-                fetched_at=datetime.utcnow(),
+                fetched_at=utc_now(),
                 content_hash=content_hash,
                 author=article.author,
                 language=article.language,
@@ -363,7 +364,7 @@ class IngestionAgent:
 
         # Get recent articles (last 24 hours)
         from datetime import timedelta
-        yesterday = datetime.utcnow() - timedelta(days=1)
+        yesterday = utc_now() - timedelta(days=1)
         recent_count = self.db.query(RawNews).filter(
             RawNews.fetched_at >= yesterday
         ).count()

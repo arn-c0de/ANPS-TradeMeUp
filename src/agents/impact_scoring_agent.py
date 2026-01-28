@@ -10,7 +10,7 @@ OPTIMIZED VERSION:
 import logging
 import math
 from typing import Dict, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 from sqlalchemy.orm import Session
 
@@ -251,7 +251,13 @@ class ImpactScoringAgent:
 
         News becomes less relevant over time.
         """
-        hours_old = (datetime.utcnow() - published_at).total_seconds() / 3600
+        # Use timezone-aware datetime for PostgreSQL compatibility
+        now = datetime.now(timezone.utc)
+        # Ensure published_at is timezone-aware
+        if published_at.tzinfo is None:
+            published_at = published_at.replace(tzinfo=timezone.utc)
+        
+        hours_old = (now - published_at).total_seconds() / 3600
 
         # Exponential decay: exp(-λ * hours)
         # λ = 0.05 means half-life of ~14 hours
@@ -410,7 +416,7 @@ class ImpactScoringAgent:
                             confidence=result['confidence'],
                             time_horizon=result['time_horizon'],
                             expected_volatility_impact=result['expected_volatility_impact'],
-                            created_at=datetime.utcnow()
+                            created_at=datetime.now(timezone.utc)
                         )
 
                         impact_scores.append(impact_score)

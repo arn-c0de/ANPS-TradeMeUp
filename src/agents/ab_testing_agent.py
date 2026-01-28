@@ -1,7 +1,7 @@
 """Agent 13: A/B Testing Framework - Test and compare model variants."""
 import logging
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import numpy as np
@@ -49,13 +49,13 @@ class ABTestingAgent:
             Test configuration
         """
         test_config = {
-            'test_id': f"test_{test_name}_{datetime.utcnow().timestamp()}",
+            'test_id': f"test_{test_name}_{datetime.now(timezone.utc).timestamp()}",
             'test_name': test_name,
             'model_a': model_a,
             'model_b': model_b,
             'traffic_split': traffic_split,
-            'start_date': datetime.utcnow(),
-            'end_date': datetime.utcnow() + timedelta(days=duration_days),
+            'start_date': datetime.now(timezone.utc),
+            'end_date': datetime.now(timezone.utc) + timedelta(days=duration_days),
             'status': 'active'
         }
 
@@ -85,7 +85,7 @@ class ABTestingAgent:
         Returns:
             Test results with statistical significance
         """
-        cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
         # Get predictions for both models
         predictions_a = self.db.query(Prediction).join(

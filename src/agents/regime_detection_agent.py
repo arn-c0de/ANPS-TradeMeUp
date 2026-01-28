@@ -1,7 +1,7 @@
 """Agent 5: Market Regime Detection Agent."""
 import logging
 from typing import Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 from sqlalchemy.orm import Session
 import warnings
@@ -10,6 +10,7 @@ import yfinance as yf
 import numpy as np
 
 from src.models.analysis import MarketRegime
+from src.utils.json_helpers import clean_numpy_types
 
 logger = logging.getLogger(__name__)
 
@@ -286,14 +287,14 @@ class RegimeDetectionAgent:
             # Detect regime
             result = self.detect_regime()
 
-            # Create regime record
+            # Create regime record (convert numpy types for PostgreSQL compatibility)
             regime = MarketRegime(
                 regime_id=uuid.uuid4(),
-                timestamp=datetime.utcnow(),
-                regime=result['regime'],
-                regime_probabilities=result['regime_probabilities'],
-                regime_metadata=result['regime_metadata'],
-                created_at=datetime.utcnow()
+                timestamp=datetime.now(timezone.utc),
+                regime=clean_numpy_types(result['regime']),
+                regime_probabilities=clean_numpy_types(result['regime_probabilities']),
+                regime_metadata=clean_numpy_types(result['regime_metadata']),
+                created_at=datetime.now(timezone.utc)
             )
 
             # Save to database
@@ -348,7 +349,7 @@ class RegimeDetectionAgent:
         current = self.get_current_regime()
 
         # Regime distribution (last 30 days)
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
         recent_regimes = self.db.query(MarketRegime).filter(
             MarketRegime.timestamp >= thirty_days_ago
         ).all()

@@ -5,20 +5,24 @@
 ## Voraussetzungen
 
 - Python 3.11+
+- **Docker & Docker Compose** (für PostgreSQL)
 - **Ollama** (lokal) ODER **OpenAI API Key**
 
 ## Installation
 
 ```bash
-# 1. Virtual Environment
+# 1. PostgreSQL mit pgvector starten
+docker-compose up -d
+
+# 2. Virtual Environment
 python -m venv venv
 venv\Scripts\activate  # Windows
 # source venv/bin/activate  # Linux/Mac
 
-# 2. Dependencies installieren
+# 3. Dependencies installieren
 pip install -r requirements.txt
 
-# 3. Ollama starten (wenn lokal)
+# 4. Ollama starten (wenn lokal)
 ollama serve
 ollama pull mistral  # oder llama2
 ```
@@ -28,6 +32,9 @@ ollama pull mistral  # oder llama2
 Erstelle `.env.local`:
 
 ```bash
+# Database (PostgreSQL required)
+DATABASE_URL=postgresql://trademeup_user:trademeup_pass@localhost:5432/trademeup
+
 # Für Ollama (lokal, kostenlos)
 LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
@@ -36,22 +43,35 @@ OLLAMA_MODEL=mistral
 # Für OpenAI (schneller, kostet $)
 # LLM_PROVIDER=openai
 # OPENAI_API_KEY=sk-...
-
-# Database
-DATABASE_URL=sqlite:///./trademeup.db
 ```
 
 ## Database Setup
 
 ```bash
-# Alembic initialisieren
-alembic init migrations  # Falls noch nicht vorhanden
-
-# Migration erstellen
-alembic revision --autogenerate -m "Initial schema"
-
-# Migration ausführen
+# Migrations ausführen (erstellt alle Tabellen + Indexes)
 alembic upgrade head
+
+# Optional: Daten von SQLite migrieren (falls vorhanden)
+python scripts/migrate_sqlite_to_postgresql.py
+```
+
+## Database Management
+
+```bash
+# PostgreSQL stoppen
+docker-compose down
+
+# Logs anzeigen
+docker-compose logs -f postgres
+
+# Backup erstellen
+docker exec trademeup_postgres pg_dump -U trademeup_user trademeup > backup.sql
+
+# Backup wiederherstellen
+docker exec -i trademeup_postgres psql -U trademeup_user trademeup < backup.sql
+
+# Performance Benchmark
+python scripts/benchmark_postgresql.py
 ```
 
 ## Pipeline ausführen
@@ -232,10 +252,11 @@ curl http://localhost:11434/api/tags
 ollama serve
 ```
 
-### SQLite Fehler
+### PostgreSQL Fehler
 ```bash
 # Database neu erstellen:
-rm trademeup.db
+docker-compose down -v  # Löscht auch Volumes
+docker-compose up -d
 alembic upgrade head
 ```
 
@@ -247,9 +268,16 @@ pip install --upgrade -r requirements.txt
 
 ## Performance-Tipps
 
+### LLM Performance
 - **Ollama**: ~30-60 Sek pro Artikel (lokal, kostenlos)
 - **OpenAI gpt-3.5**: ~5-10 Sek pro Artikel (~$0.002/Artikel)
 - **OpenAI gpt-4**: ~10-20 Sek pro Artikel (~$0.02/Artikel)
+
+### Database Performance
+- **PostgreSQL mit JSONB**: 30-50% schneller als SQLite bei komplexen Queries
+- **pgvector**: Native Vektor-Suche für Embeddings (10-20x schneller als JSON-Array-Vergleiche)
+- **GIN Indexes**: Schnelle JSON-Feld-Abfragen
+- **Connection Pooling**: Optimiert für gleichzeitige Agent-Zugriffe
 
 **Für Tests: Pipeline mit limit=3 laufen lassen (ca. 3-5 Min)**
 

@@ -9,7 +9,7 @@ OPTIMIZED VERSION:
 """
 import logging
 from typing import Dict, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from sqlalchemy.orm import Session
 
@@ -211,7 +211,7 @@ Respond ONLY with JSON."""
                 existing.confidence = analysis.get('confidence', 0.0)
                 existing.embedding = analysis.get('embedding', [])
                 existing.llm_metadata = analysis.get('llm_metadata', {})
-                existing.processing_timestamp = datetime.utcnow()
+                existing.processing_timestamp = datetime.now(timezone.utc)
 
                 logger.info(
                     f"Updated article {article.news_id}: "
@@ -233,7 +233,7 @@ Respond ONLY with JSON."""
                     confidence=analysis.get('confidence', 0.0),
                     embedding=analysis.get('embedding', []),
                     llm_metadata=analysis.get('llm_metadata', {}),
-                    processing_timestamp=datetime.utcnow()
+                    processing_timestamp=datetime.now(timezone.utc)
                 )
 
                 logger.info(
@@ -294,7 +294,7 @@ Respond ONLY with JSON."""
                 'provider': self.llm.provider,
                 'model': self.llm.model,
                 'temperature': 0.1,
-                'timestamp': datetime.utcnow().isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
 
             return analysis
@@ -325,7 +325,7 @@ Respond ONLY with JSON."""
                     'model': self.llm.model,
                     'error': str(e),
                     'fallback': True,
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': datetime.now(timezone.utc).isoformat()
                 }
             }
         except Exception as e:
@@ -350,10 +350,11 @@ Respond ONLY with JSON."""
             ).group_by(ProcessedNews.event_type).all()
 
             # Average sentiment
+            # PostgreSQL uses ->> operator for JSONB text extraction
             avg_sentiment = db.query(
                 func.avg(
                     func.cast(
-                        func.json_extract(ProcessedNews.sentiment, '$.overall'),
+                        ProcessedNews.sentiment.op('->>')('overall'),
                         Float
                     )
                 )

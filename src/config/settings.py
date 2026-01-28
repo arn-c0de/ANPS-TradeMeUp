@@ -29,10 +29,10 @@ class Settings(BaseSettings):
         alias="CORS_ORIGINS"
     )
 
-    # Database - supports both SQLite and PostgreSQL
-    # Use absolute path for SQLite to avoid multiple databases
+    # Database - PostgreSQL required
+    # Use docker-compose up -d to start PostgreSQL with pgvector
     database_url: str = Field(
-        default=f"sqlite:///{Path(__file__).parent.parent.parent / 'trademeup.db'}", 
+        default="postgresql://trademeup_user:trademeup_pass@localhost:5432/trademeup", 
         alias="DATABASE_URL"
     )
 

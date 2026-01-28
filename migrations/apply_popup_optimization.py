@@ -83,11 +83,11 @@ def apply_migration():
             
             for i, stmt in enumerate(statements, 1):
                 try:
-                    # Skip PRAGMA statements for non-SQLite databases
+                    # Skip PRAGMA statements (SQLite-specific, not needed for PostgreSQL)
                     if stmt.strip().upper().startswith('PRAGMA'):
-                        logger.debug(f"Statement {i}: PRAGMA (SQLite-specific)")
-                        conn.execute(text(stmt))
-                        executed += 1
+                        logger.debug(f"Statement {i}: PRAGMA (skipping - PostgreSQL doesn't use PRAGMA)")
+                        skipped += 1
+                        continue
                     elif stmt.strip().upper().startswith('SELECT'):
                         # Verification queries - execute but don't count
                         result = conn.execute(text(stmt))
@@ -125,18 +125,18 @@ def apply_migration():
         # Verify indexes were created
         logger.info("\nVerifying indexes...")
         with engine.connect() as conn:
-            # Check for our specific indexes
+            # Check for our specific indexes (PostgreSQL)
             result = conn.execute(text("""
-                SELECT name, tbl_name 
-                FROM sqlite_master 
-                WHERE type = 'index' 
-                AND name IN (
+                SELECT indexname, tablename 
+                FROM pg_indexes 
+                WHERE schemaname = 'public'
+                AND indexname IN (
                     'idx_predictions_entity_id',
                     'idx_trading_simulations_prediction_created',
                     'idx_raw_news_news_id',
                     'idx_entities_entity_id'
                 )
-                ORDER BY tbl_name, name
+                ORDER BY tablename, indexname
             """))
             
             indexes = result.fetchall()

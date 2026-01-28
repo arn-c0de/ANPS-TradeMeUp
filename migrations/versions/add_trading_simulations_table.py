@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 from src.models.types import GUID
 
 
@@ -35,9 +36,9 @@ def upgrade() -> None:
         sa.Column('confidence', sa.Float(), nullable=True),
         sa.Column('calibrated_confidence', sa.Float(), nullable=True),
         sa.Column('transaction_cost_bps', sa.Float(), nullable=True),
-        sa.Column('cost_breakdown', sa.JSON(), nullable=True),
-        sa.Column('risk_breakdown', sa.JSON(), nullable=True),
-        sa.Column('simulation_metadata', sa.JSON(), nullable=True),
+        sa.Column('cost_breakdown', JSONB(), nullable=True),
+        sa.Column('risk_breakdown', JSONB(), nullable=True),
+        sa.Column('simulation_metadata', JSONB(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(['prediction_id'], ['predictions.prediction_id'], ),
         sa.ForeignKeyConstraint(['entity_id'], ['entities.entity_id'], ),

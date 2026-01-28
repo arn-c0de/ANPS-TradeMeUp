@@ -1,9 +1,10 @@
 """Database model for raw news articles."""
 from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, JSON, Index
+from sqlalchemy import Column, String, Text, DateTime, Index
+from sqlalchemy.dialects.postgresql import JSONB
 import uuid
 
-from src.models.database import Base
+from src.models.database import Base, utc_now
 from src.models.types import GUID
 
 
@@ -16,15 +17,15 @@ class RawNews(Base):
     source = Column(String(100), nullable=False)
     source_url = Column(String(500))
     published_at = Column(DateTime(timezone=True), nullable=False)
-    fetched_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    fetched_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
     title = Column(Text, nullable=False)
     full_text = Column(Text, nullable=False)
     url = Column(Text, unique=True, nullable=False)
     language = Column(String(10))
     content_hash = Column(String(64), unique=True)  # SHA-256 hash
     author = Column(String(200))
-    metadata_ = Column("metadata", JSON)  # Renamed to avoid SQLAlchemy reserved name
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    metadata_ = Column("metadata", JSONB)  # Renamed to avoid SQLAlchemy reserved name
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     # Indexes for performance
     __table_args__ = (

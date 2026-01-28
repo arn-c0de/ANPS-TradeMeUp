@@ -1,10 +1,11 @@
 """Database models for analysis results."""
 from datetime import datetime
-from sqlalchemy import Column, String, Float, JSON, DateTime, ForeignKey, Index, Integer
+from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Index, Integer
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 import uuid
 
-from src.models.database import Base
+from src.models.database import Base, utc_now
 from src.models.types import GUID
 
 
@@ -17,11 +18,11 @@ class ImpactScore(Base):
     news_id = Column(GUID, ForeignKey('raw_news.news_id'), nullable=False)
     entity_id = Column(String(50), ForeignKey('entities.entity_id'), nullable=False)
     impact_score = Column(Float, nullable=False)  # 0-1 scale
-    impact_breakdown = Column(JSON)  # Detailed component scores
+    impact_breakdown = Column(JSONB)  # Detailed component scores
     confidence = Column(Float)
     time_horizon = Column(String(20))  # short_term, medium_term, long_term
     expected_volatility_impact = Column(Float)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     # Relationships
     news = relationship("RawNews", backref="impact_scores")
@@ -52,7 +53,7 @@ class SurpriseScore(Base):
     market_priced_in = Column(Float)
     true_surprise = Column(Float)
     expected_reaction = Column(String(50))
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     # Relationships
     news = relationship("RawNews", backref="surprise_scores")
@@ -68,10 +69,10 @@ class MarketRegime(Base):
 
     regime_id = Column(GUID, primary_key=True, default=uuid.uuid4)
     timestamp = Column(DateTime(timezone=True), nullable=False)
-    regime = Column(JSON, nullable=False)  # {volatility, trend, risk_appetite, etc.}
-    regime_probabilities = Column(JSON)
-    regime_metadata = Column(JSON)  # VIX, breadth, etc.
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    regime = Column(JSONB, nullable=False)  # {volatility, trend, risk_appetite, etc.}
+    regime_probabilities = Column(JSONB)
+    regime_metadata = Column(JSONB)  # VIX, breadth, etc.
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     # Indexes
     __table_args__ = (
@@ -93,7 +94,7 @@ class SignalDecayModel(Base):
     half_life_days = Column(Float)
     effective_window_days = Column(Integer)
     model_type = Column(String(50))  # exponential, power_law, etc.
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     # Relationships
     news = relationship("RawNews", backref="signal_decay")
@@ -109,9 +110,9 @@ class FactVerification(Base):
 
     verification_id = Column(GUID, primary_key=True, default=uuid.uuid4)
     news_id = Column(GUID, ForeignKey('raw_news.news_id'), nullable=False)
-    claims_verified = Column(JSON, nullable=False)  # List of verified claims
+    claims_verified = Column(JSONB, nullable=False)  # List of verified claims
     contradictions_found = Column(Integer, default=0)  # Boolean as int
-    contradiction_details = Column(JSON)  # Details of contradictions
+    contradiction_details = Column(JSONB)  # Details of contradictions
     credibility_score = Column(Float, nullable=False)  # 0-1 scale
     verification_method = Column(String(50))  # llm_cross_check, manual, etc.
     verified_at = Column(DateTime(timezone=True), nullable=False)

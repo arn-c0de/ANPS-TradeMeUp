@@ -10,7 +10,7 @@ Can be called after new predictions are created to ensure they are fully process
 
 import logging
 from typing import List, Dict
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
@@ -134,7 +134,7 @@ class AutoPredictionProcessor:
         """
         from datetime import timedelta
         
-        cutoff_time = datetime.utcnow() - timedelta(minutes=lookback_minutes)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
         
         logger.info(f"🔍 Looking for predictions created after {cutoff_time.strftime('%Y-%m-%d %H:%M')}")
         

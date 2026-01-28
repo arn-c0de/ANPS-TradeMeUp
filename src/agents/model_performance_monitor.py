@@ -1,7 +1,7 @@
 """Agent 12.5: Model Performance Monitor - Track and analyze model performance."""
 import logging
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import numpy as np
@@ -41,7 +41,7 @@ class ModelPerformanceMonitor:
         Returns:
             Performance metrics
         """
-        cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
         # Fetch predictions with outcomes
         predictions = self.db.query(Prediction).join(
@@ -183,7 +183,7 @@ class ModelPerformanceMonitor:
 
         return {
             'model_version': model_version,
-            'generated_at': datetime.utcnow().isoformat(),
+            'generated_at': datetime.now(timezone.utc).isoformat(),
             'performance_7d': metrics_7d,
             'performance_30d': metrics_30d,
             'performance_90d': metrics_90d,
