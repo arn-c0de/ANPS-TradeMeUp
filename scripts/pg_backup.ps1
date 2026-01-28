@@ -36,9 +36,45 @@ $PgDump = if ($PgBin -match 'pg_dump.exe$') { $PgBin } else { Join-Path $PgBin '
 if (-not (Test-Path -Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Force | Out-Null }
 
 # Get password securely
+# Priority: explicit $env:PGPASSWORD (if UseEnvPassword), then parse DATABASE_URL from .env.local/.env (if present), otherwise prompt
+$PlainPassword = $null
 if ($UseEnvPassword -and $env:PGPASSWORD) {
     $PlainPassword = $env:PGPASSWORD
-} else {
+}
+
+# Try to auto-load from .env.local or .env (same as application)
+if (-not $PlainPassword) {
+    $projectRoot = (Get-Location).ProviderPath
+    # If script is inside scripts/, look one level up
+    if ((Split-Path -Leaf $projectRoot) -eq 'scripts') { $projectRoot = Split-Path $projectRoot -Parent }
+    $envCandidates = @(Join-Path $projectRoot '.env.local', Join-Path $projectRoot '.env')
+    foreach ($envFile in $envCandidates) {
+        if (Test-Path $envFile) {
+            try {
+                $content = Get-Content $envFile | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' -and -not $_.StartsWith('#') }
+                foreach ($line in $content) {
+                    if ($line -match '^[\s]*DATABASE_URL\s*=') {
+                        $dburl = $line -replace '^[\s]*DATABASE_URL\s*=\s*', ''
+                        # remove surrounding quotes
+                        $dburl = $dburl.Trim("'", '"')
+                        $m = [regex]::Match($dburl, '^[^:]+:\/\/(?<user>[^:]+):(?<pass>[^@]+)@')
+                        if ($m.Success) {
+                            $PlainPassword = $m.Groups['pass'].Value
+                            Write-Host "Using database password from $envFile" -ForegroundColor Green
+                            break
+                        }
+                    }
+                }
+                if ($PlainPassword) { break }
+            } catch {
+                # ignore file read errors
+            }
+        }
+    }
+}
+
+if (-not $PlainPassword) {
+    # Last fallback: interactive prompt
     $SecurePwd = Read-Host -Prompt "Postgres password for $User@$Host" -AsSecureString
     $PlainPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePwd))
 }
