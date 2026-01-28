@@ -140,9 +140,10 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
                 # Try to get real-time current price (more accurate than historical close)
                 try:
                     live_price_data = market_data.get_live_price(ticker)
-                    if live_price_data and 'current_price' in live_price_data:
-                        live_current_price = live_price_data['current_price']
-                        if live_current_price > 0:
+                    if live_price_data:
+                        # Support multiple provider key names for compatibility
+                        live_current_price = live_price_data.get('price') or live_price_data.get('current_price') or live_price_data.get('currentPrice') or live_price_data.get('currentPrice')
+                        if live_current_price and live_current_price > 0:
                             logger.info(f"   Got live price: ${live_current_price:.2f} (vs historical ${current_price:.2f})")
                             current_price = live_current_price
                             
@@ -215,9 +216,10 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
         risk_adjustment: Risk adjustment factor (0-1)
 
     Returns:
-        Tuple of (title, body_content)
+        Tuple of (title, body_content, sync_trigger) where sync_trigger is a dict to notify UI refresh or None
     """
     try:
+        sync_trigger = None
         with Session(engine) as db:
             # OPTIMIZED: Get prediction with eager loading for entity in single query
             # This eliminates N+1 query problem by using JOINs
@@ -278,6 +280,8 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                             db.commit()
                             tr = performance.get('total_return_pct')
                             logger.info(f"✅ Saved updated performance: {tr:.2f}%" if tr is not None else "✅ Saved updated performance: N/A")
+                            # Notify UI to refresh predictions table
+                            sync_trigger = {"prediction_id": prediction_id, "ts": datetime.now(timezone.utc).isoformat()}
                         except Exception as save_error:
                             logger.warning(f"Could not save updated performance: {save_error}")
                             db.rollback()
@@ -299,6 +303,8 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                             db.commit()
                             tr = performance.get('total_return_pct')
                             logger.info(f"✅ Saved new performance: {tr:.2f}%" if tr is not None else "✅ Saved new performance: N/A")
+                            # Notify UI to refresh predictions table
+                            sync_trigger = {"prediction_id": prediction_id, "ts": datetime.now(timezone.utc).isoformat()}
                         except Exception as save_error:
                             logger.warning(f"Could not save performance: {save_error}")
                             db.rollback()
@@ -482,6 +488,7 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                                             " → ",
                                             html.Strong("Now: "),
                                             html.Span(_format_price_ui(performance['current_price']), className=f"text-{return_color}"),
+                                            html.Span(f" ({performance['timestamp'].strftime('%Y-%m-%d %H:%M')})" if performance.get('timestamp') else "", className="text-muted"),
                                             html.Span(f"({_format_price_ui(performance['current_price'] - performance['prediction_price'])})", className=f"text-{return_color}")
                                         ], className="d-block")
                                     ], width=6),
@@ -1093,10 +1100,10 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                 ], className="mt-2")
             ], fluid=True)
 
-            return title, body
+            return title, body, sync_trigger
 
     except Exception as e:
-        return "Error", dbc.Alert(f"Error loading prediction details: {str(e)}", color="danger")
+        return "Error", dbc.Alert(f"Error loading prediction details: {str(e)}", color="danger"), None
 
 
 def create_prediction_modal():

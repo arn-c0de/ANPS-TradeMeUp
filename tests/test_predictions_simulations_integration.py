@@ -57,7 +57,7 @@ def test_prediction_details_with_simulation():
             from src.models.database import engine
 
             # Test loading details without performance (fast)
-            title, body = get_prediction_details(engine, prediction.prediction_id, load_performance=False)
+            title, body, _ = get_prediction_details(engine, prediction.prediction_id, load_performance=False)
 
             logger.info(f"✓ Prediction details loaded successfully")
             logger.info(f"  Title type: {type(title)}")

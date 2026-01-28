@@ -193,17 +193,25 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
         refreshing_prediction_id: ID of prediction currently being refreshed (for visual feedback)
     """
     try:
-        with Session(engine, expire_on_commit=False) as db:
-            # Use eager loading to fetch entity and outcome in single query (fixes N+1 problem)
-            query = db.query(Prediction).options(
-                joinedload(Prediction.entity),
-                joinedload(Prediction.outcome)
-            ).join(
-                Entity, Prediction.entity_id == Entity.entity_id
-            ).order_by(desc(Prediction.created_at))
+        # CRITICAL: Use a new connection to ensure we bypass any stale transaction state in the connection pool
+        # This is essential for seeing data committed by background workers
+        with engine.connect() as connection:
+            with Session(bind=connection) as db:
+                # If refreshing, expire cache to ensure we get fresh data instead of stale cached objects
+                if refreshing_prediction_id:
+                    logger.info(f"🔄 Expiring session cache before loading predictions (refreshing: {refreshing_prediction_id})")
+                    db.expire_all()
+                
+                # Use eager loading to fetch entity and outcome in single query (fixes N+1 problem)
+                query = db.query(Prediction).options(
+                    joinedload(Prediction.entity),
+                    joinedload(Prediction.outcome)
+                ).join(
+                    Entity, Prediction.entity_id == Entity.entity_id
+                ).order_by(desc(Prediction.created_at))
 
-            # Filter by selected horizon
-            query = query.filter(Prediction.horizon == horizon)
+                # Filter by selected horizon
+                query = query.filter(Prediction.horizon == horizon)
 
             # Apply filters
             if entity_filter:
@@ -230,7 +238,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                 query = query.filter(Prediction.confidence >= min_confidence / 100)
 
             predictions = query.limit(200).all()
-            
+
             # Filter by surprise score if needed
             if surprise_filter and surprise_filter != 'all':
                 filtered_preds = []
@@ -491,6 +499,9 @@ def register_callbacks(app):
         """Update predictions table with filters (removed interval for performance)"""
         date_range = (start_date, end_date) if start_date or end_date else None
         refreshing_id = loading_state.get("prediction_id") if loading_state else None
+        # If a simulation/modal action provided a sync trigger with a prediction_id, use it for visual feedback
+        if sim_sync and isinstance(sim_sync, dict) and sim_sync.get('prediction_id'):
+            refreshing_id = sim_sync.get('prediction_id')
         return get_predictions_table(
             _engine,
             entity_filter=entities,
@@ -606,47 +617,18 @@ def register_callbacks(app):
             id_dict = json.loads(id_str)
             prediction_id = id_dict.get("index")
             if prediction_id:
+                # IMPORTANT: Refactor task to use the centralized service, which is known to work correctly in the popup
+                from src.services.prediction_performance_service import prediction_performance_service
                 def refresh_task():
+                    """Wrapper task to call the centralized performance calculation and saving service."""
                     try:
-                        with Session(_engine) as db:
-                            pred = db.query(Prediction).filter(Prediction.prediction_id == prediction_id).first()
-                            if not pred:
-                                return {"status": "error", "error": "Prediction not found"}
-                            entity = db.query(Entity).filter(Entity.entity_id == pred.entity_id).first()
-                            if not entity:
-                                return {"status": "error", "error": "Entity not found"}
-                            outcome = db.query(PredictionOutcome).filter(
-                                PredictionOutcome.prediction_id == prediction_id
-                            ).first()
-                            if not outcome:
-                                outcome = PredictionOutcome(
-                                    outcome_id=uuid.uuid4(),
-                                    prediction_id=prediction_id,
-                                    actual_return=0,
-                                    error=0,
-                                    direction_correct=False,
-                                    within_confidence_interval=True,
-                                    sharpe_contribution=0,
-                                    evaluation_timestamp=datetime.now(timezone.utc),
-                                    created_at=datetime.now(timezone.utc)
-                                )
-                                db.add(outcome)
-                                db.flush()
-                            performance = _format_saved_performance(pred, entity, outcome, load_live_prices=True)
-                            if not performance:
-                                return {"status": "error", "error": "Could not calculate performance"}
-                            outcome.actual_return = performance.get('total_return_pct', 0)
-                            outcome.error = abs(performance.get('total_return_pct', 0))
-                            outcome.direction_correct = performance.get('is_correct', False)
-                            outcome.evaluation_timestamp = datetime.now(timezone.utc)
-                            db.commit()
-                            return {
-                                "status": "success",
-                                "total_return_pct": performance.get('total_return_pct', 0),
-                                "is_correct": performance.get('is_correct', False)
-                            }
+                        # This service handles its own session and commits internally
+                        result = prediction_performance_service.calculate_and_save_performance(
+                            _engine, prediction_id
+                        )
+                        return result
                     except Exception as e:
-                        logger.error(f"Error in refresh_task for {prediction_id}: {e}", exc_info=True)
+                        logger.error(f"Error in refresh_task wrapper for {prediction_id}: {e}", exc_info=True)
                         return {"status": "error", "error": str(e)}
 
                 queue_mgr = get_task_queue()
@@ -693,8 +675,6 @@ def register_callbacks(app):
         if status is None or status in [TaskStatus.PENDING, TaskStatus.RUNNING]:
             raise PreventUpdate
         try:
-            import time
-            time.sleep(0.2)  # small delay to allow task result propagation
             date_range = (start_date, end_date) if start_date or end_date else None
             table = get_predictions_table(
                 _engine,
@@ -728,28 +708,37 @@ def register_callbacks(app):
             return dash.no_update, True, "Error displaying results", "danger", {}
 
     @app.callback(
-        [Output("prediction-modal-title", "children"),
-         Output("prediction-modal-body", "children")],
+        [Output("prediction-modal-title", "children", allow_duplicate=True),
+         Output("prediction-modal-body", "children", allow_duplicate=True),
+         Output("simulation-sync-trigger", "data", allow_duplicate=True)],
         [Input("prediction-detail-cache", "data")],
         [State("prediction-modal", "is_open"),
          State("portfolio-capital-input", "value"),
          State("portfolio-currency-dropdown", "value"),
-         State("portfolio-risk-adjustment", "value")],
+         State("portfolio-risk-adjustment", "value"),
+         State("portfolio-capital-store", "data")],
         prevent_initial_call=True
     )
-    def update_modal_content(cached_data, is_open, portfolio_capital, currency, risk_adjustment):
-        """Update modal content from cached prediction_id with portfolio context"""
+    def update_modal_content(cached_data, is_open, portfolio_capital, currency, risk_adjustment, portfolio_store):
+        """Update modal content from cached prediction_id with portfolio context (handles both predictions and dashboard tabs)"""
         if not is_open or not cached_data or "prediction_id" not in cached_data:
-            return dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update
         prediction_id = cached_data["prediction_id"]
         load_performance = cached_data.get("load_performance", False)
 
-        # Use default values if portfolio settings not configured
-        portfolio_capital = portfolio_capital or 100000
-        currency = currency or "USD"
-        risk_adjustment = risk_adjustment if risk_adjustment is not None else 0.3
+        # Use portfolio-capital-store if available (dashboard), otherwise use inputs (predictions tab)
+        if portfolio_store and isinstance(portfolio_store, dict):
+            portfolio_capital = portfolio_store.get("capital", portfolio_capital or 100000)
+            currency = portfolio_store.get("currency", currency or "USD")
+            risk_adjustment = portfolio_store.get("risk_adjustment", risk_adjustment if risk_adjustment is not None else 0.3)
+        else:
+            # Use default values if portfolio settings not configured
+            portfolio_capital = portfolio_capital or 100000
+            currency = currency or "USD"
+            risk_adjustment = risk_adjustment if risk_adjustment is not None else 0.3
 
         # If loading live performance, update all predictions for this entity
+        sync_trigger = None
         if load_performance:
             try:
                 with Session(_engine) as db:
@@ -773,7 +762,7 @@ def register_callbacks(app):
                 logger.error(f"Error in batch update: {e}")
                 # Continue anyway to show modal
 
-        title, body = get_prediction_details(
+        title, body, sync = get_prediction_details(
             _engine,
             prediction_id,
             load_performance=load_performance,
@@ -781,4 +770,5 @@ def register_callbacks(app):
             currency=currency,
             risk_adjustment=risk_adjustment
         )
-        return title, body
+        # If the modal action saved or updated performance, notify the predictions table to refresh
+        return title, body, sync if sync is not None else dash.no_update

@@ -41,7 +41,7 @@ def test_compact_modal():
             logger.info(f"Testing with prediction: {prediction.prediction_id}")
 
             # Test loading details without performance (fast)
-            title, body = get_prediction_details(engine, prediction.prediction_id, load_performance=False)
+            title, body, _ = get_prediction_details(engine, prediction.prediction_id, load_performance=False)
 
             logger.info(f"✓ Modal loaded successfully")
 
