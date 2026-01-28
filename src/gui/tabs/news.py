@@ -218,7 +218,7 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
                         html.Div([
                             dbc.Badge(raw_news.source, color="secondary", className="me-2 badge-sm"),
                             html.Small(
-                                raw_news.fetched_at.strftime("%H:%M") if raw_news.fetched_at else "N/A", 
+                                raw_news.fetched_at.strftime("%d.%m.%Y %H:%M") if raw_news.fetched_at else "N/A", 
                                 className="text-muted"
                             )
                         ], className="d-flex align-items-center")
