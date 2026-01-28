@@ -28,7 +28,6 @@ def create_layout():
     return html.Div([
         dcc.Store(id="sim-delete-status"),
         dcc.Store(id="sim-filter-sync-store", data={"entities": None, "horizon": None}),
-        dcc.Store(id="portfolio-capital-store", storage_type="local", data={"capital": 100000, "currency": "USD"}),
         
         # Shared stores for prediction modal (also in predictions.py)
         # These are needed for the modal to work from simulations tab
@@ -1144,22 +1143,32 @@ def register_callbacks(app):
             ), dash.no_update, dash.no_update
 
     @app.callback(
-        Output("portfolio-summary-display", "children"),
+        [Output("portfolio-summary-display", "children"),
+         Output("portfolio-capital-store", "data")],
         [Input("portfolio-capital-input", "value"),
          Input("portfolio-currency-dropdown", "value"),
          Input("portfolio-risk-adjustment", "value")]
     )
     def update_portfolio_summary(capital, currency, risk_adj):
+        # Update store data
+        store_data = {
+            "capital": capital or 100000,
+            "currency": currency or "USD",
+            "risk_adjustment": risk_adj if risk_adj is not None else 0.3
+        }
+        
         if not capital or capital <= 0:
-            return html.Small("Enter depot capital to see summary", className="text-muted fst-italic")
+            return html.Small("Enter depot capital to see summary", className="text-muted fst-italic"), store_data
 
         currency_symbol = {"EUR": "\u20AC", "USD": "$", "GBP": "\u00A3"}.get(currency, currency)
         risk_adj_pct = (risk_adj or 0.3) * 100
 
-        return html.Div([
+        summary = html.Div([
             html.Small("Portfolio Summary:", className="text-muted d-block mb-1"),
             html.Div([
                 html.Strong(f"{currency_symbol}{capital:,.0f}", className="text-success d-block"),
                 html.Small(f"Risk Adjustment: {risk_adj_pct:.0f}%", className="text-muted")
             ])
         ])
+        
+        return summary, store_data
