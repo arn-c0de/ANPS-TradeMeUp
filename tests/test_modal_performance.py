@@ -35,7 +35,7 @@ with SessionLocal() as db:
 
 # Now test get_prediction_details WITHOUT load_performance=True
 print("\n🔍 Testing modal display (load_performance=False)...")
-title, body = predictions.get_prediction_details(
+title, body, _ = predictions.get_prediction_details(
     engine, 
     pred_with_outcome.prediction_id, 
     load_performance=False  # This is what happens when modal opens
