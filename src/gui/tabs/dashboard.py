@@ -842,10 +842,11 @@ def register_callbacks(app):
         [Output("prediction-modal-title", "children", allow_duplicate=True),
          Output("prediction-modal-body", "children", allow_duplicate=True)],
         [Input("prediction-detail-cache", "data")],
-        [State("prediction-modal", "is_open")],
+        [State("prediction-modal", "is_open"),
+         State("portfolio-capital-store", "data")],
         prevent_initial_call=True
     )
-    def update_modal_content_from_dashboard(cached_data, is_open):
+    def update_modal_content_from_dashboard(cached_data, is_open, portfolio_store):
         """Update modal content from dashboard (top performers)"""
         from src.gui.helpers.prediction_details_popup import get_prediction_details
         from dash import callback_context
@@ -860,7 +861,17 @@ def register_callbacks(app):
         prediction_id = cached_data["prediction_id"]
         load_performance = cached_data.get("load_performance", False)
         
-        logger.info(f"Updating modal content for prediction: {prediction_id}")
+        # Get portfolio settings from store or use defaults
+        portfolio_capital = 100000
+        currency = "USD"
+        risk_adjustment = 0.3
+        
+        if portfolio_store and isinstance(portfolio_store, dict):
+            portfolio_capital = portfolio_store.get("capital", 100000)
+            currency = portfolio_store.get("currency", "USD")
+            risk_adjustment = portfolio_store.get("risk_adjustment", 0.3)
+        
+        logger.info(f"Updating modal content for prediction: {prediction_id} (Portfolio: {currency}{portfolio_capital:,.0f})")
         
         # If loading live performance, update all predictions for this entity
         if load_performance:
@@ -889,8 +900,8 @@ def register_callbacks(app):
             engine,
             prediction_id,
             load_performance=load_performance,
-            portfolio_capital=100000,
-            currency="USD",
-            risk_adjustment=0.3
+            portfolio_capital=portfolio_capital,
+            currency=currency,
+            risk_adjustment=risk_adjustment
         )
         return title, body

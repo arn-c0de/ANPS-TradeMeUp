@@ -462,6 +462,7 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                                         html.Small([
                                             html.Strong("Entry: "),
                                             html.Span(_format_price_ui(performance['prediction_price'])),
+                                            html.Span(f" ({pred.timestamp.strftime('%Y-%m-%d %H:%M')})" if pred.timestamp else "", className="text-muted"),
                                             " → ",
                                             html.Strong("Now: "),
                                             html.Span(_format_price_ui(performance['current_price']), className=f"text-{return_color}"),
