@@ -1,13 +1,14 @@
 """Agent 7: Meta-Strategy Agent - Ensemble predictions from multiple models."""
 import logging
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 import numpy as np
 
 from src.models.predictions import Prediction
 from src.models.entities import Entity
 from src.models.database import SessionLocal
+from src.utils.json_helpers import ensure_dict
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ class MetaStrategyAgent:
 
         db = SessionLocal()
         try:
-            cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
             # Get all predictions with outcomes
             predictions = db.query(Prediction).join(
@@ -109,7 +110,7 @@ class MetaStrategyAgent:
     def _check_accuracy(self, prediction: Prediction, outcome) -> bool:
         """Check if prediction was correct."""
         # Extract predicted direction from direction_probabilities
-        probs = prediction.direction_probabilities or {}
+        probs = ensure_dict(prediction.direction_probabilities, {})
         predicted_dir = max(probs, key=probs.get) if probs else 'flat'
         
         actual_return = outcome.actual_return
@@ -139,7 +140,7 @@ class MetaStrategyAgent:
         db = SessionLocal()
         try:
             # Get recent predictions from all models
-            cutoff = datetime.utcnow() - timedelta(hours=24)
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
 
             model_predictions = db.query(Prediction).filter(
                 Prediction.entity_id == entity_id,
@@ -176,7 +177,7 @@ class MetaStrategyAgent:
             ensemble = Prediction(
                 entity_id=entity_id,
                 horizon=horizon,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 model_version='meta_ensemble',
                 direction_probabilities={
                     'up': direction_votes['up'] / sum(direction_votes.values()),
@@ -192,7 +193,7 @@ class MetaStrategyAgent:
                 },
                 confidence=ensemble_confidence,
                 model_contributions={'model_weights': weights},
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
 
             db.add(ensemble)

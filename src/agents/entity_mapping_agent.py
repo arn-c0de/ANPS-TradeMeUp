@@ -10,7 +10,7 @@ OPTIMIZED VERSION:
 import logging
 import re
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from sqlalchemy.orm import Session
 import warnings
@@ -570,7 +570,7 @@ Respond ONLY with JSON."""
                                 exposure_type=exposure_type,
                                 confidence=confidence,
                                 mention_count=mention_count,
-                                created_at=datetime.utcnow()
+                                created_at=datetime.now(timezone.utc)
                             )
                             mappings.append(mapping)
 
@@ -597,7 +597,7 @@ Respond ONLY with JSON."""
                             exposure_type='indirect',
                             confidence=confidence,
                             mention_count=mention_count,
-                            created_at=datetime.utcnow()
+                            created_at=datetime.now(timezone.utc)
                         )
                         mappings.append(mapping)
 
@@ -625,7 +625,7 @@ Respond ONLY with JSON."""
                                 exposure_type='indirect',
                                 confidence=confidence,
                                 mention_count=mention_count,
-                                created_at=datetime.utcnow()
+                                created_at=datetime.now(timezone.utc)
                             )
                             mappings.append(mapping)
 
@@ -678,7 +678,7 @@ Respond ONLY with JSON."""
                 entity_type=entity_type,
                 entity_name=entity_name,
                 metadata=metadata or {},
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
             logger.debug(f"Preparing new entity: {entity_id} ({entity_name})")
             return entity

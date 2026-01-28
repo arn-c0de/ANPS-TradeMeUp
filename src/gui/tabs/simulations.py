@@ -4,7 +4,7 @@ Simulations Tab - View trading simulation outcomes
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta, timezone
 
 import dash
 from dash import ALL, MATCH, Input, Output, State, dcc, html
@@ -18,7 +18,7 @@ from src.models.entities import Entity
 from src.models.predictions import Prediction
 from src.models.database import engine as _engine, get_scoped_session
 from src.utils.activity_logger import activity_logger
-from src.gui.helpers.prediction_details_popup import create_prediction_modal
+from src.utils.json_helpers import ensure_dict as _ensure_dict
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +29,7 @@ def create_layout():
         dcc.Store(id="sim-delete-status"),
         dcc.Store(id="sim-filter-sync-store", data={"entities": None, "horizon": None}),
         
-        # Shared stores for prediction modal (also in predictions.py)
-        # These are needed for the modal to work from simulations tab
-        dcc.Store(id="prediction-detail-cache", data={}),
-        dcc.Store(id="current-prediction-id", data=None),
-        dcc.Store(id="refresh-loading-state", data={}),
+        # Note: Shared stores are now in main app.py layout
         
         dbc.Container([
             # Portfolio Settings Section (collapsible)
@@ -361,10 +357,6 @@ def create_layout():
             ], id="modal-resimulate-all-simulations", is_open=False)
         ], fluid=True),
         
-        # Prediction Details Modal (shared with predictions tab)
-        # Must be included here so sim-detail-btn can open it
-        create_prediction_modal(),
-        
         # Toast for refresh feedback (shared with predictions)
         dbc.Toast(
             id="refresh-toast",
@@ -409,11 +401,13 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                 if start:
                     if isinstance(start, str):
                         start = datetime.fromisoformat(start).date()
-                    query = query.filter(TradingSimulation.created_at >= datetime.combine(start, datetime.min.time()))
+                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+                    query = query.filter(TradingSimulation.created_at >= start_dt)
                 if end:
                     if isinstance(end, str):
                         end = datetime.fromisoformat(end).date()
-                    query = query.filter(TradingSimulation.created_at <= datetime.combine(end, datetime.max.time()))
+                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+                    query = query.filter(TradingSimulation.created_at <= end_dt)
 
             simulations = query.limit(200).all()
 
@@ -456,7 +450,7 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                 position_size = sim.position_size_pct
 
                 # Extract penny stock info from metadata
-                sim_metadata = sim.simulation_metadata or {}
+                sim_metadata = _ensure_dict(sim.simulation_metadata, {})
                 penny_stock_info = sim_metadata.get("penny_stock_info", {})
                 is_penny_stock = penny_stock_info.get("is_penny_stock", False)
                 is_ultra_penny = penny_stock_info.get("is_ultra_penny_stock", False)
@@ -492,15 +486,16 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
 
                 # Build detailed cost tooltip
                 cost_breakdown_text = f"Total: {cost_bps:.1f} bps"
-                if sim.cost_breakdown:
+                cost_breakdown = _ensure_dict(sim.cost_breakdown, {})
+                if cost_breakdown:
                     cost_breakdown_text = (
-                        f"Commission: {sim.cost_breakdown.get('commission_bps', 0):.1f} bps\n"
-                        f"Spread: {sim.cost_breakdown.get('spread_bps', 0):.1f} bps\n"
-                        f"Slippage: {sim.cost_breakdown.get('slippage_bps', 0):.1f} bps\n"
-                        f"Market Impact: {sim.cost_breakdown.get('market_impact_bps', 0):.1f} bps\n"
+                        f"Commission: {cost_breakdown.get('commission_bps', 0):.1f} bps\n"
+                        f"Spread: {cost_breakdown.get('spread_bps', 0):.1f} bps\n"
+                        f"Slippage: {cost_breakdown.get('slippage_bps', 0):.1f} bps\n"
+                        f"Market Impact: {cost_breakdown.get('market_impact_bps', 0):.1f} bps\n"
                         f"Overnight: {overnight_bps:.1f} bps\n"
                         f"Borrow: {borrow_bps:.1f} bps\n"
-                        f"Regulatory: {sim.cost_breakdown.get('regulatory_bps', 0):.1f} bps\n"
+                        f"Regulatory: {cost_breakdown.get('regulatory_bps', 0):.1f} bps\n"
                         f"─────────────\n"
                         f"Total: {cost_bps:.1f} bps"
                     )
@@ -673,13 +668,11 @@ def get_prediction_entity_options(engine, date_range=None):
                 
                 # Filter predictions by date range
                 if start:
-                    query = query.filter(
-                        Prediction.created_at >= datetime.combine(start, datetime.min.time())
-                    )
+                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+                    query = query.filter(Prediction.created_at >= start_dt)
                 if end:
-                    query = query.filter(
-                        Prediction.created_at <= datetime.combine(end, datetime.max.time())
-                    )
+                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+                    query = query.filter(Prediction.created_at <= end_dt)
 
             # Group by entity to get counts
             query = query.group_by(Entity.entity_id, Entity.entity_name).having(
@@ -731,13 +724,11 @@ def get_entity_options(engine, date_range=None):
                 
                 # Filter simulations by date range
                 if start:
-                    query = query.filter(
-                        TradingSimulation.created_at >= datetime.combine(start, datetime.min.time())
-                    )
+                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+                    query = query.filter(TradingSimulation.created_at >= start_dt)
                 if end:
-                    query = query.filter(
-                        TradingSimulation.created_at <= datetime.combine(end, datetime.max.time())
-                    )
+                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+                    query = query.filter(TradingSimulation.created_at <= end_dt)
 
             # Group by entity to get counts
             query = query.group_by(Entity.entity_id, Entity.entity_name)
@@ -867,16 +858,20 @@ def register_callbacks(app):
                     if start_date:
                         start = datetime.fromisoformat(start_date) if isinstance(start_date, str) else start_date
                         if hasattr(start, "date") and not isinstance(start, datetime):
-                            start = datetime.combine(start, datetime.min.time())
+                            start = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+                        elif isinstance(start, datetime) and start.tzinfo is None:
+                            start = start.replace(tzinfo=timezone.utc)
                     else:
-                        start = datetime(2020, 1, 1)  # Default far past
+                        start = datetime(2020, 1, 1, tzinfo=timezone.utc)  # Default far past
                     
                     if end_date:
                         end = datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
                         if hasattr(end, "date") and not isinstance(end, datetime):
-                            end = datetime.combine(end, datetime.max.time())
+                            end = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+                        elif isinstance(end, datetime) and end.tzinfo is None:
+                            end = end.replace(tzinfo=timezone.utc)
                     else:
-                        end = datetime.utcnow()  # Default to now
+                        end = datetime.now(timezone.utc)  # Default to now
                     
                     # Validate date range
                     if start > end:
@@ -896,7 +891,7 @@ def register_callbacks(app):
             filter_sync_data = {
                 "entities": entities if entities and len(entities) > 0 else None,
                 "horizon": horizon if horizon != "all" else None,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             return dbc.Alert(
                 f"Created {stats['created']} simulations, updated {stats['updated']}, skipped {stats['skipped']}, errors {stats['errors']}",
@@ -956,7 +951,7 @@ def register_callbacks(app):
                     "count": count,
                     "remaining": remaining,
                     "deleted": True,
-                    "ts": datetime.utcnow().isoformat()
+                    "ts": datetime.now(timezone.utc).isoformat()
                 }
             except Exception as e:
                 logger.error("Error clearing all simulations: %s", e)
@@ -966,7 +961,7 @@ def register_callbacks(app):
                     "action": "clear_all",
                     "error": str(e),
                     "deleted": False,
-                    "ts": datetime.utcnow().isoformat()
+                    "ts": datetime.now(timezone.utc).isoformat()
                 }
         if not n_clicks or not any(n_clicks):
             raise PreventUpdate
@@ -991,7 +986,7 @@ def register_callbacks(app):
             if success:
                 disabled_states = [False] * len(button_ids)
                 disabled_states[target_index] = True
-                return disabled_states, {"simulation_id": simulation_id, "deleted": True, "ts": datetime.utcnow().isoformat()}
+                return disabled_states, {"simulation_id": simulation_id, "deleted": True, "ts": datetime.now(timezone.utc).isoformat()}
             return [False] * len(button_ids), dash.no_update
         except Exception as e:
             logger.error("Error deleting simulation: %s", e)
@@ -1120,7 +1115,7 @@ def register_callbacks(app):
                 
                 # Create sync trigger to notify predictions tab
                 sync_trigger = {
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "updated_count": updated_count,
                     "total": total
                 }

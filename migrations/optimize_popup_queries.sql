@@ -7,11 +7,8 @@
 -- Expected improvement: 25-30% faster popup loading
 -- Run this after database_hardening.sql
 --
--- Compatible with: SQLite 3.35+, PostgreSQL 12+
+-- PostgreSQL-only version (SQLite support removed)
 -- ==========================================
-
--- Enable foreign keys (SQLite)
-PRAGMA foreign_keys = ON;
 
 -- 1. PREDICTIONS TABLE INDEXES
 -- ==========================================
@@ -68,40 +65,23 @@ ON entities(entity_id);
 -- 6. VERIFY INDEXES WERE CREATED
 -- ==========================================
 
--- SQLite: Check popup-specific indexes
+-- PostgreSQL: Check popup-specific indexes
 SELECT 
     'Popup Optimization Indexes Created:' AS status,
-    name,
-    tbl_name
+    tablename, 
+    indexname 
 FROM 
-    sqlite_master
+    pg_indexes 
 WHERE 
-    type = 'index'
-    AND name IN (
+    schemaname = 'public'
+    AND indexname IN (
         'idx_predictions_entity_id',
         'idx_trading_simulations_prediction_created',
         'idx_raw_news_news_id',
         'idx_entities_entity_id'
     )
 ORDER BY 
-    tbl_name, name;
-
--- PostgreSQL alternative:
--- SELECT 
---     'Popup Optimization Indexes Created:' AS status,
---     tablename, 
---     indexname 
--- FROM 
---     pg_indexes 
--- WHERE 
---     indexname IN (
---         'idx_predictions_entity_id',
---         'idx_trading_simulations_prediction_created',
---         'idx_raw_news_news_id',
---         'idx_entities_entity_id'
---     )
--- ORDER BY 
---     tablename, indexname;
+    tablename, indexname;
 
 -- 7. ANALYZE TABLES (Update Query Planner Statistics)
 -- ==========================================

@@ -15,6 +15,7 @@ import dash_bootstrap_components as dbc
 from src.config.settings import VERSION
 from src.gui.components import create_navbar
 from src.gui.callbacks import register_charts_callbacks, register_common_callbacks
+from src.gui.helpers.prediction_details_popup import create_prediction_modal
 from src.gui.tabs import (
     dashboard,
     predictions,
@@ -34,6 +35,9 @@ app = dash.Dash(
     external_stylesheets=[dbc.themes.CYBORG],
     suppress_callback_exceptions=True,
     assets_ignore="react_suppress\\.js|chart_splitters\\.js",
+    # Improve asset loading reliability
+    serve_locally=True,
+    compress=False,  # Disable compression to avoid cache issues during dev
 )
 
 app.title = f"ANPS-TradeMeUp v{VERSION} - AI Trading Intelligence"
@@ -75,7 +79,17 @@ app.layout = html.Div([
     dcc.Store(id="delete-action-store", data={"action": None, "params": None}),
     dcc.Store(id="rss-fetch-status-store", data=None),
     dcc.Store(id="portfolio-capital-store", storage_type="local", data={"capital": 100000, "currency": "USD", "risk_adjustment": 0.3}),
+    
+    # Shared stores for prediction modal (used by multiple tabs)
+    dcc.Store(id="prediction-detail-cache", data={}),
+    dcc.Store(id="current-prediction-id", data=None),
+    dcc.Store(id="refresh-loading-state", data={}),
+    dcc.Store(id="simulation-sync-trigger", data={}),
+    
     html.Button(id='refresh-all-panels', style={'display': 'none'}),
+    
+    # Shared prediction details modal (used by dashboard, predictions, simulations tabs)
+    create_prediction_modal(),
     
     create_navbar(),
     dbc.Container([

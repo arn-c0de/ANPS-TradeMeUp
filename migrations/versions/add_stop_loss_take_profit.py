@@ -1,17 +1,17 @@
 """Add stop loss and take profit fields to trading_simulations
 
 Revision ID: add_stop_loss_tp
-Revises: 
+Revises: enhanced_sim_risk
 Create Date: 2026-01-26
 
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision = 'add_stop_loss_tp'
-down_revision = None  # Update this to point to the previous migration
+down_revision = 'enhanced_sim_risk'
 branch_labels = None
 depends_on = None
 
@@ -38,7 +38,7 @@ def upgrade():
     
     # Add exit strategy metadata
     op.add_column('trading_simulations', 
-        sa.Column('exit_strategy', sa.JSON(), nullable=True))
+        sa.Column('exit_strategy', JSONB(), nullable=True))
     
     # Create index on stop_loss_type for filtering
     op.create_index(

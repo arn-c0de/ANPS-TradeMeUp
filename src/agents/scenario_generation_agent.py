@@ -1,7 +1,7 @@
 """Agent 7.5: Scenario Generation Agent - Generate market scenarios and stress tests."""
 import logging
 from typing import Dict, List
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from src.models.analysis import MarketRegime
@@ -77,8 +77,8 @@ class ScenarioGenerationAgent:
             raise ValueError(f"Unknown scenario type: {scenario_type}")
 
         scenario = self.SCENARIOS[scenario_type].copy()
-        scenario['generated_at'] = datetime.utcnow().isoformat()
-        scenario['scenario_id'] = f"{scenario_type}_{datetime.utcnow().timestamp()}"
+        scenario['generated_at'] = datetime.now(timezone.utc).isoformat()
+        scenario['scenario_id'] = f"{scenario_type}_{datetime.now(timezone.utc).timestamp()}"
 
         logger.info(f"Generated scenario: {scenario['name']}")
 

@@ -84,10 +84,11 @@ def create_layout():
 
 def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None):
     """Get news feed with filters"""
+    from sqlalchemy.orm import defer
     with Session(engine) as db:
         query = db.query(RawNews, ProcessedNews).outerjoin(
             ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-        )
+        ).options(defer(ProcessedNews.embedding))
         
         # Apply filters
         if sources:

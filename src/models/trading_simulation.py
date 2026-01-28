@@ -1,10 +1,11 @@
 """Database model for trading simulation results."""
 from datetime import datetime
 import uuid
-from sqlalchemy import Column, String, Float, JSON, DateTime, ForeignKey, Index
+from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
-from src.models.database import Base
+from src.models.database import Base, utc_now
 from src.models.types import GUID
 
 
@@ -30,7 +31,7 @@ class TradingSimulation(Base):
     transaction_cost_bps = Column(Float)
     overnight_cost_bps = Column(Float)  # NEW: Overnight financing costs
     borrow_cost_bps = Column(Float)  # NEW: Short-selling borrow costs
-    cost_breakdown = Column(JSON)
+    cost_breakdown = Column(JSONB)
 
     # Position metrics
     position_size_pct = Column(Float)  # NEW: Position size as % of portfolio
@@ -44,12 +45,12 @@ class TradingSimulation(Base):
     take_profit_price = Column(Float)  # Target take profit price
     take_profit_pct = Column(Float)  # Take profit distance as percentage
     risk_reward_ratio = Column(Float)  # Risk/reward ratio
-    exit_strategy = Column(JSON)  # Detailed exit strategy metadata
+    exit_strategy = Column(JSONB)  # Detailed exit strategy metadata
 
     # Risk and metadata
-    risk_breakdown = Column(JSON)
-    simulation_metadata = Column(JSON)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    risk_breakdown = Column(JSONB)
+    simulation_metadata = Column(JSONB)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     prediction = relationship("Prediction", backref="simulations")
     entity = relationship("Entity")

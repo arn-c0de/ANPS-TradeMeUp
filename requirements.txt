@@ -10,6 +10,7 @@ python-multipart>=0.0.21
 sqlalchemy==2.0.25
 alembic==1.18.1
 psycopg2-binary==2.9.9
+pgvector>=0.2.5
 
 # Configuration
 pydantic==2.12.5

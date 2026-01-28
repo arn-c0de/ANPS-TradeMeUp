@@ -1,7 +1,7 @@
 """Agent 2.5: Fact Verification Agent - Verify claims and cross-check facts."""
 import logging
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -78,7 +78,7 @@ class FactVerificationAgent:
                 contradiction_details=contradictions,
                 credibility_score=credibility_score,
                 verification_method='llm_cross_check',
-                verified_at=datetime.utcnow(),
+                verified_at=datetime.now(timezone.utc),
                 verification_notes=verification_notes
             )
 
@@ -99,7 +99,7 @@ class FactVerificationAgent:
                 contradiction_details=[],
                 credibility_score=0.7,  # Neutral default
                 verification_method='fallback',
-                verified_at=datetime.utcnow(),
+                verified_at=datetime.now(timezone.utc),
                 verification_notes=f"Verification failed: {str(e)}"
             )
             return verification
