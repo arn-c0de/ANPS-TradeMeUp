@@ -1,6 +1,6 @@
 """API endpoints for predictions."""
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from src.models.database import get_db
 from src.models.predictions import Prediction
 from src.models.entities import Entity
+from src.utils.json_helpers import ensure_dict
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
@@ -128,14 +129,14 @@ def get_statistics(db: Session = Depends(get_db)):
     # Note: This is SQLite-compatible, for PostgreSQL use jsonb operators
     predictions = db.query(Prediction).all()
 
-    bullish = sum(1 for p in predictions if p.direction_probabilities.get('up', 0) > 0.5)
-    bearish = sum(1 for p in predictions if p.direction_probabilities.get('down', 0) > 0.5)
+    bullish = sum(1 for p in predictions if ensure_dict(p.direction_probabilities, {}).get('up', 0) > 0.5)
+    bearish = sum(1 for p in predictions if ensure_dict(p.direction_probabilities, {}).get('down', 0) > 0.5)
 
     # Average confidence
     avg_confidence = db.query(func.avg(Prediction.confidence)).scalar()
 
     # Recent predictions (last 24h)
-    yesterday = datetime.utcnow() - timedelta(days=1)
+    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
     recent = db.query(Prediction).filter(Prediction.timestamp >= yesterday).count()
 
     return {

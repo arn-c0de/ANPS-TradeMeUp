@@ -1,7 +1,7 @@
 """Agent 1.5: Data Quality Agent - Validates and scores news quality."""
 import logging
 from typing import Dict, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from langdetect import detect, LangDetectException
 
@@ -298,7 +298,7 @@ class DataQualityAgent:
             existing.validation_flags = result['validation_flags']
             existing.quality_issues = result['quality_issues']
             existing.source_reliability_score = result['source_reliability_score']
-            existing.created_at = datetime.utcnow()
+            existing.created_at = datetime.now(timezone.utc)
             return existing
         else:
             # Create new
@@ -309,7 +309,7 @@ class DataQualityAgent:
                 validation_flags=result['validation_flags'],
                 quality_issues=result['quality_issues'],
                 source_reliability_score=result['source_reliability_score'],
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
             return quality_score
 

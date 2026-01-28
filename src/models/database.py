@@ -1,10 +1,21 @@
 """Database connection and session management."""
+from datetime import datetime, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
 
 from src.config.settings import settings
+
+
+def utc_now():
+    """
+    Return timezone-aware UTC datetime for PostgreSQL compatibility.
+    
+    Use this instead of datetime.utcnow() which returns naive datetime.
+    PostgreSQL DateTime(timezone=True) columns require timezone-aware datetimes.
+    """
+    return datetime.now(timezone.utc)
 
 # Create SQLAlchemy engine with larger pool for concurrent GUI callbacks
 engine = create_engine(

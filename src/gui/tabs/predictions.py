@@ -5,7 +5,7 @@ Predictions Tab - View and Filter Predictions
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import dash
 from dash import ALL, Input, Output, State, dcc, html, dash_table
@@ -26,9 +26,9 @@ from src.gui.utils.callbacks import safe_callback
 from src.gui.utils.task_queue import get_task_queue, add_gui_task
 from src.gui.helpers.prediction_details_popup import (
     get_prediction_details,
-    create_prediction_modal,
     _format_saved_performance
 )
+from src.utils.json_helpers import ensure_dict
 
 logger = logging.getLogger(__name__)
 
@@ -155,15 +155,8 @@ def create_layout():
                 ], width=12)
             ]),
 
-            # Hidden stores
-            dcc.Store(id="prediction-detail-cache", data={}),
-            dcc.Store(id="current-prediction-id", data=None),
-            dcc.Store(id="refresh-loading-state", data={}),
-            dcc.Store(id="simulation-sync-trigger", data={})  # Triggered when simulations update
+            # Note: Shared stores are now in main app.py layout
         ], fluid=True),
-
-        # Modal OUTSIDE container for proper z-index and positioning
-        create_prediction_modal(),
 
         # Toast notifications OUTSIDE container
         dbc.Toast(
@@ -222,14 +215,16 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     # Convert string to date if needed
                     if isinstance(start, str):
                         start = datetime.fromisoformat(start).date()
-                    # Start of day
-                    query = query.filter(Prediction.created_at >= datetime.combine(start, datetime.min.time()))
+                    # Start of day (timezone-aware for PostgreSQL)
+                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+                    query = query.filter(Prediction.created_at >= start_dt)
                 if end:
                     # Convert string to date if needed
                     if isinstance(end, str):
                         end = datetime.fromisoformat(end).date()
-                    # End of day (23:59:59)
-                    query = query.filter(Prediction.created_at <= datetime.combine(end, datetime.max.time()))
+                    # End of day (timezone-aware for PostgreSQL)
+                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+                    query = query.filter(Prediction.created_at <= end_dt)
 
             if min_confidence > 0:
                 query = query.filter(Prediction.confidence >= min_confidence / 100)
@@ -287,7 +282,8 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                 entity = pred.entity
 
                 # Get direction from probabilities
-                probs = pred.direction_probabilities or {}
+                # Defensive: handle cases where JSONB is returned as string
+                probs = ensure_dict(pred.direction_probabilities, {})
                 direction = max(probs, key=probs.get) if probs else "unknown"
                 direction_emoji = {"up": "🔼", "down": "🔽", "flat": "➡️"}.get(direction, "❓")
 
@@ -333,8 +329,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     
                     # Format last update time
                     if outcome.evaluation_timestamp:
-                        from datetime import datetime as dt
-                        time_ago = dt.now() - outcome.evaluation_timestamp
+                        time_ago = datetime.now(timezone.utc) - outcome.evaluation_timestamp
                         if time_ago.days > 0:
                             time_str = f"{time_ago.days}d ago"
                         elif time_ago.seconds > 3600:
@@ -630,8 +625,8 @@ def register_callbacks(app):
                                     direction_correct=False,
                                     within_confidence_interval=True,
                                     sharpe_contribution=0,
-                                    evaluation_timestamp=datetime.now(),
-                                    created_at=datetime.now()
+                                    evaluation_timestamp=datetime.now(timezone.utc),
+                                    created_at=datetime.now(timezone.utc)
                                 )
                                 db.add(outcome)
                                 db.flush()
@@ -641,7 +636,7 @@ def register_callbacks(app):
                             outcome.actual_return = performance.get('total_return_pct', 0)
                             outcome.error = abs(performance.get('total_return_pct', 0))
                             outcome.direction_correct = performance.get('is_correct', False)
-                            outcome.evaluation_timestamp = datetime.now()
+                            outcome.evaluation_timestamp = datetime.now(timezone.utc)
                             db.commit()
                             return {
                                 "status": "success",

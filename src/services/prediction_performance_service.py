@@ -2,7 +2,7 @@
 Prediction Performance Service
 Tracks and validates predictions against actual market data
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, List
 from sqlalchemy.orm import Session
 import logging
@@ -20,9 +20,37 @@ except ImportError:
 
 from src.models.predictions import Prediction, PredictionOutcome
 from src.models.entities import Entity
+from src.utils.json_helpers import ensure_dict
 import uuid
 
 logger = logging.getLogger(__name__)
+
+
+def _convert_to_python_type(value):
+    """Convert NumPy/pandas types to Python native types for database compatibility.
+    
+    PostgreSQL doesn't automatically handle NumPy types, so we need to convert them.
+    """
+    if value is None:
+        return None
+    
+    # Handle NumPy scalars (has .item() method)
+    if hasattr(value, 'item'):
+        return value.item()
+    
+    # Handle pandas Timestamp
+    if hasattr(value, 'to_pydatetime'):
+        return value.to_pydatetime()
+    
+    # Already a Python native type
+    if isinstance(value, (int, float, bool, str)):
+        return value
+    
+    # Try to convert to float for numeric values
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return value
 
 
 class PredictionPerformanceService:
@@ -79,8 +107,11 @@ class PredictionPerformanceService:
             if not prediction.created_at:
                 logger.warning(f"No created_at timestamp for prediction")
                 return None
-                
-            days_since_prediction = (datetime.now() - prediction.created_at).days
+            
+            # Use timezone-aware datetime for PostgreSQL compatibility
+            now = datetime.now(timezone.utc)
+            created_at = prediction.created_at if prediction.created_at.tzinfo else prediction.created_at.replace(tzinfo=timezone.utc)
+            days_since_prediction = (now - created_at).days
             period = f"{max(days_since_prediction + 5, 7)}d"  # Add buffer days
             
             logger.debug(f"Fetching {period} historical data for {ticker}")
@@ -147,7 +178,7 @@ class PredictionPerformanceService:
                 'is_correct': is_correct,
                 'strategy_result': strategy_result,
                 'days_since_prediction': days_since_prediction,
-                'timestamp': datetime.now(),
+                'timestamp': datetime.now(timezone.utc),
                 # Additional data
                 'high_since_prediction': hist_data.iloc[closest_idx:]['High'].max() if len(hist_data) > closest_idx else current_price,
                 'low_since_prediction': hist_data.iloc[closest_idx:]['Low'].min() if len(hist_data) > closest_idx else current_price,
@@ -161,7 +192,7 @@ class PredictionPerformanceService:
 
     def _get_predicted_direction(self, prediction: Prediction) -> str:
         """Get the predicted direction from prediction probabilities"""
-        probs = prediction.direction_probabilities or {}
+        probs = ensure_dict(prediction.direction_probabilities, {})
         if not probs:
             return 'unknown'
         
@@ -300,8 +331,15 @@ class PredictionPerformanceService:
             True if saved successfully
         """
         try:
-            actual_return_value = performance_data.get('total_return_pct', 0)
-            is_correct_value = performance_data.get('is_correct', False)
+            # Convert all values from NumPy/pandas types to Python native types
+            actual_return_value = _convert_to_python_type(performance_data.get('total_return_pct', 0))
+            is_correct_value = bool(performance_data.get('is_correct', False))
+            
+            # Ensure we have a valid float
+            if actual_return_value is None:
+                actual_return_value = 0.0
+            else:
+                actual_return_value = float(actual_return_value)
             
             logger.info(f"💾 Saving to DB: prediction_id={prediction_id}, actual_return={actual_return_value}, is_correct={is_correct_value}")
             
@@ -323,7 +361,7 @@ class PredictionPerformanceService:
                         direction_correct=is_correct_value,
                         within_confidence_interval=True,
                         sharpe_contribution=0.0,
-                        evaluation_timestamp=performance_data.get('timestamp', datetime.now())
+                        evaluation_timestamp=_convert_to_python_type(performance_data.get('timestamp', datetime.now(timezone.utc)))
                     )
                 )
                 logger.info(f"✅ Updated existing outcome for prediction {prediction_id} with value {actual_return_value}")
@@ -338,8 +376,8 @@ class PredictionPerformanceService:
                     direction_correct=is_correct_value,
                     within_confidence_interval=True,  # TODO: implement proper check
                     sharpe_contribution=0,  # TODO: calculate
-                    evaluation_timestamp=performance_data.get('timestamp', datetime.now()),
-                    created_at=datetime.now()
+                    evaluation_timestamp=_convert_to_python_type(performance_data.get('timestamp', datetime.now(timezone.utc))),
+                    created_at=datetime.now(timezone.utc)
                 )
                 db_session.add(outcome)
                 logger.info(f"✅ Created new outcome for prediction {prediction_id} with value {actual_return_value}")

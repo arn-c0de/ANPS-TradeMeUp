@@ -4,38 +4,19 @@
 -- Adds constraints, indexes, and security measures
 -- for production stability and data integrity
 --
--- Run this after adding performance indexes
--- Compatible with: SQLite 3.35+, PostgreSQL 12+
+-- PostgreSQL-only version (SQLite support removed)
 --
 -- To apply:
---   SQLite:     sqlite3 trademup.db < database_hardening.sql
---   PostgreSQL: psql -d trademup < database_hardening.sql
+--   psql -d trademeup < database_hardening.sql
 -- ==========================================
 
--- 1. ENABLE FOREIGN KEY CONSTRAINTS (SQLite)
--- ==========================================
--- CRITICAL: SQLite has foreign keys OFF by default!
-PRAGMA foreign_keys = ON;
-
--- For PostgreSQL, foreign keys are always enforced
+-- Note: PostgreSQL enforces foreign keys by default
 
 
 -- 2. ADD CHECK CONSTRAINTS
 -- ==========================================
 -- Ensure data values are within valid ranges
-
--- Quality scores must be between 0 and 1
--- SQLite: Can't add constraints to existing tables, must recreate
--- PostgreSQL: Can use ALTER TABLE ADD CONSTRAINT
-
--- For SQLite, constraints should be added during table creation
--- See models/*.py for model-level constraints
-
--- Predictions: confidence must be 0-1
--- (Already enforced in model if using proper CHECK constraint)
-
--- Impact scores: impact_score must be 0-1
--- (Already enforced in model if using proper CHECK constraint)
+-- Note: Constraints are primarily enforced in model definitions
 
 
 -- 3. ADD UNIQUE CONSTRAINTS (Prevent Duplicates)
@@ -178,21 +159,12 @@ ON DELETE CASCADE;
 -- 10. VERIFY INDEXES WERE CREATED
 -- ==========================================
 
--- SQLite: Check indexes
-SELECT
-    name,
-    tbl_name,
-    sql
-FROM
-    sqlite_master
-WHERE
-    type = 'index'
-    AND name LIKE 'idx_%'
-ORDER BY
-    tbl_name, name;
-
 -- PostgreSQL: Check indexes
--- SELECT tablename, indexname, indexdef FROM pg_indexes WHERE indexname LIKE 'idx_%' ORDER BY tablename;
+SELECT tablename, indexname, indexdef 
+FROM pg_indexes 
+WHERE schemaname = 'public' 
+    AND indexname LIKE 'idx_%' 
+ORDER BY tablename, indexname;
 
 
 -- 11. ANALYZE TABLES (Update Statistics)
@@ -204,10 +176,10 @@ ANALYZE;
 
 -- 12. VACUUM DATABASE (Reclaim Space)
 -- ==========================================
--- SQLite: Rebuild database file
--- Run this periodically, not during migration
+-- PostgreSQL: Reclaim space and update statistics
+-- Run this periodically for maintenance
 
--- VACUUM;  -- Uncomment to run
+-- VACUUM;  -- Uncomment to run during maintenance
 
 
 -- ==========================================

@@ -1,7 +1,7 @@
 """Agent 6.5: Confidence Calibration Agent - Calibrate prediction confidence scores."""
 import logging
 from typing import Dict, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import numpy as np
@@ -43,7 +43,7 @@ class ConfidenceCalibrationAgent:
         """
         db = SessionLocal()
         try:
-            cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
             # Fetch predictions with outcomes
             predictions = db.query(Prediction).join(

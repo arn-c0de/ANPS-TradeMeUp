@@ -1,4 +1,4 @@
-"""Initial schema with SQLite support
+"""Initial schema with PostgreSQL support
 
 Revision ID: 156ce40ea7a5
 Revises:
@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 from src.models.types import GUID
 
 
@@ -26,9 +27,9 @@ def upgrade() -> None:
     sa.Column('model_version', sa.String(length=50), nullable=False),
     sa.Column('evaluation_period_start', sa.DateTime(timezone=True), nullable=False),
     sa.Column('evaluation_period_end', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('metrics', sa.JSON(), nullable=False),
-    sa.Column('regime_breakdown', sa.JSON(), nullable=True),
-    sa.Column('error_analysis', sa.JSON(), nullable=True),
+    sa.Column('metrics', JSONB(), nullable=False),
+    sa.Column('regime_breakdown', JSONB(), nullable=True),
+    sa.Column('error_analysis', JSONB(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('backtest_id')
     )
@@ -36,7 +37,7 @@ def upgrade() -> None:
     sa.Column('entity_id', sa.String(length=50), nullable=False),
     sa.Column('entity_type', sa.String(length=20), nullable=False),
     sa.Column('entity_name', sa.String(length=200), nullable=False),
-    sa.Column('metadata', sa.JSON(), nullable=True),
+    sa.Column('metadata', JSONB(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('entity_id')
     )
@@ -50,16 +51,16 @@ def upgrade() -> None:
     sa.Column('volume', sa.Integer(), nullable=True),
     sa.Column('vwap', sa.Float(), nullable=True),
     sa.Column('volatility_1d', sa.Float(), nullable=True),
-    sa.Column('metadata', sa.JSON(), nullable=True),
+    sa.Column('metadata', JSONB(), nullable=True),
     sa.PrimaryKeyConstraint('ticker', 'timestamp', name='pk_market_data')
     )
     op.create_index('idx_market_data_ticker_time', 'market_data', ['ticker', 'timestamp'], unique=False)
     op.create_table('market_regimes',
     sa.Column('regime_id', GUID(), nullable=False),
     sa.Column('timestamp', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('regime', sa.JSON(), nullable=False),
-    sa.Column('regime_probabilities', sa.JSON(), nullable=True),
-    sa.Column('regime_metadata', sa.JSON(), nullable=True),
+    sa.Column('regime', JSONB(), nullable=False),
+    sa.Column('regime_probabilities', JSONB(), nullable=True),
+    sa.Column('regime_metadata', JSONB(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('regime_id')
     )
@@ -76,7 +77,7 @@ def upgrade() -> None:
     sa.Column('language', sa.String(length=10), nullable=True),
     sa.Column('content_hash', sa.String(length=64), nullable=True),
     sa.Column('author', sa.String(length=200), nullable=True),
-    sa.Column('metadata', sa.JSON(), nullable=True),
+    sa.Column('metadata', JSONB(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('news_id'),
     sa.UniqueConstraint('content_hash'),
@@ -89,8 +90,8 @@ def upgrade() -> None:
     sa.Column('news_id', GUID(), nullable=False),
     sa.Column('quality_score', sa.Float(), nullable=False),
     sa.Column('duplicate_of', GUID(), nullable=True),
-    sa.Column('validation_flags', sa.JSON(), nullable=False),
-    sa.Column('quality_issues', sa.JSON(), nullable=True),
+    sa.Column('validation_flags', JSONB(), nullable=False),
+    sa.Column('quality_issues', JSONB(), nullable=True),
     sa.Column('source_reliability_score', sa.Float(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['duplicate_of'], ['raw_news.news_id'], ),
@@ -103,7 +104,7 @@ def upgrade() -> None:
     sa.Column('entity_to', sa.String(length=50), nullable=False),
     sa.Column('relationship_type', sa.String(length=50), nullable=False),
     sa.Column('strength', sa.Float(), nullable=True),
-    sa.Column('metadata', sa.JSON(), nullable=True),
+    sa.Column('metadata', JSONB(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['entity_from'], ['entities.entity_id'], ),
     sa.ForeignKeyConstraint(['entity_to'], ['entities.entity_id'], ),
@@ -114,7 +115,7 @@ def upgrade() -> None:
     sa.Column('news_id', GUID(), nullable=False),
     sa.Column('entity_id', sa.String(length=50), nullable=False),
     sa.Column('impact_score', sa.Float(), nullable=False),
-    sa.Column('impact_breakdown', sa.JSON(), nullable=True),
+    sa.Column('impact_breakdown', JSONB(), nullable=True),
     sa.Column('confidence', sa.Float(), nullable=True),
     sa.Column('time_horizon', sa.String(length=20), nullable=True),
     sa.Column('expected_volatility_impact', sa.Float(), nullable=True),
@@ -143,14 +144,14 @@ def upgrade() -> None:
     sa.Column('entity_id', sa.String(length=50), nullable=False),
     sa.Column('timestamp', sa.DateTime(timezone=True), nullable=False),
     sa.Column('horizon', sa.String(length=10), nullable=False),
-    sa.Column('direction_probabilities', sa.JSON(), nullable=False),
-    sa.Column('expected_return', sa.JSON(), nullable=False),
+    sa.Column('direction_probabilities', JSONB(), nullable=False),
+    sa.Column('expected_return', JSONB(), nullable=False),
     sa.Column('confidence', sa.Float(), nullable=False),
     sa.Column('calibrated_confidence', sa.Float(), nullable=True),
-    sa.Column('model_contributions', sa.JSON(), nullable=True),
-    sa.Column('key_drivers', sa.JSON(), nullable=True),
+    sa.Column('model_contributions', JSONB(), nullable=True),
+    sa.Column('key_drivers', JSONB(), nullable=True),
     sa.Column('model_version', sa.String(length=50), nullable=False),
-    sa.Column('related_news_ids', sa.JSON(), nullable=True),
+    sa.Column('related_news_ids', JSONB(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['entity_id'], ['entities.entity_id'], ),
     sa.PrimaryKeyConstraint('prediction_id')
@@ -161,13 +162,13 @@ def upgrade() -> None:
     sa.Column('news_id', GUID(), nullable=False),
     sa.Column('summary_short', sa.Text(), nullable=True),
     sa.Column('summary_medium', sa.Text(), nullable=True),
-    sa.Column('key_facts', sa.JSON(), nullable=True),
-    sa.Column('sentiment', sa.JSON(), nullable=True),
+    sa.Column('key_facts', JSONB(), nullable=True),
+    sa.Column('sentiment', JSONB(), nullable=True),
     sa.Column('event_type', sa.String(length=50), nullable=True),
     sa.Column('event_subtype', sa.String(length=100), nullable=True),
     sa.Column('confidence', sa.Float(), nullable=True),
-    sa.Column('embedding', sa.JSON(), nullable=True),
-    sa.Column('llm_metadata', sa.JSON(), nullable=True),
+    sa.Column('embedding', JSONB(), nullable=True),
+    sa.Column('llm_metadata', JSONB(), nullable=True),
     sa.Column('processing_timestamp', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['news_id'], ['raw_news.news_id'], ),
     sa.PrimaryKeyConstraint('news_id')

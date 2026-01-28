@@ -3,7 +3,7 @@ Testing Tab - Individual Agent Testing and Health Checks
 Modular design for easy expansion as new agents are added
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 import traceback
 
 import dash
@@ -493,7 +493,12 @@ def run_agent_specific_test(agent, agent_key):
                 }
 
             # Validate cost estimation and decision logic
-            total_bps, breakdown = agent._estimate_costs_bps(price=150.0, volatility_regime="medium")
+            total_bps, breakdown = agent._estimate_costs_bps(
+                price=150.0, 
+                volatility_regime="medium",
+                predicted_direction="up",
+                horizon="5d"
+            )
             if total_bps <= 0 or not breakdown:
                 return {
                     "success": False,
@@ -501,7 +506,7 @@ def run_agent_specific_test(agent, agent_key):
                     "cost_breakdown": breakdown,
                 }
 
-            decision = agent._calculate_decision(
+            decision, constraint_info = agent._calculate_decision(
                 predicted_direction="up",
                 expected_return_pct=2.0,
                 confidence=0.8,
@@ -513,6 +518,7 @@ def run_agent_specific_test(agent, agent_key):
                     "success": False,
                     "message": f"Unexpected decision outcome: {decision}",
                     "decision": decision,
+                    "constraint_info": constraint_info,
                 }
 
             # Validate market snapshot handling with stubbed provider
@@ -522,7 +528,7 @@ def run_agent_specific_test(agent, agent_key):
                         "symbol": ticker,
                         "price": 123.45,
                         "change_percent": 0.12,
-                        "timestamp": datetime.utcnow(),
+                        "timestamp": datetime.now(timezone.utc),
                     }
 
             agent.market_data_provider = _StaticMarketDataProvider()

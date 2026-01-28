@@ -1,7 +1,7 @@
 """Agent 5.6: Correlation Analysis Agent - Analyze entity correlations and relationships."""
 import logging
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import numpy as np
@@ -55,7 +55,7 @@ class CorrelationAnalysisAgent:
         if cache_key in self._correlation_cache:
             return self._correlation_cache[cache_key]
 
-        cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
         # Fetch price data for both entities
         data_1 = db.query(MarketData).filter(
@@ -177,7 +177,7 @@ class CorrelationAnalysisAgent:
                     strength=abs(rel['correlation']),
                     direction='positive' if rel['correlation'] > 0 else 'negative',
                     metadata={'lookback_days': 90},
-                    created_at=datetime.utcnow()
+                    created_at=datetime.now(timezone.utc)
                 )
                 relationship_objects.append(relationship)
 

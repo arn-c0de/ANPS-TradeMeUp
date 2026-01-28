@@ -1,5 +1,5 @@
 """Trading simulation engine that converts predictions into trade decisions."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 import logging
 import json
@@ -16,6 +16,7 @@ from src.services.prediction_performance_service import PredictionPerformanceSer
 from src.services.market_data import MarketDataProvider
 from src.simulations.risk_calculations import RiskCalculator, RiskInputs
 from src.simulations.exit_strategy import ExitStrategyCalculator
+from src.utils.json_helpers import ensure_dict, to_python_type, clean_numpy_types
 
 logger = logging.getLogger(__name__)
 
@@ -125,9 +126,8 @@ class TradingSimulationEngine:
         Returns:
             Expected return as percentage (e.g., 2.0 for 2%)
         """
-        expected_return = prediction.expected_return or {}
-        if not isinstance(expected_return, dict):
-            return 0.0
+        # Handle case where expected_return might be a JSON string (from SQLite migration)
+        expected_return = ensure_dict(prediction.expected_return, {})
 
         mean_value = expected_return.get("mean", 0.0)
         if mean_value is None:
@@ -160,9 +160,12 @@ class TradingSimulationEngine:
         return float(result)
 
     def _get_predicted_direction(self, prediction: Prediction) -> str:
-        probabilities = prediction.direction_probabilities or {}
+        # Handle case where probabilities might be a JSON string (from SQLite migration)
+        probabilities = ensure_dict(prediction.direction_probabilities, {})
+        
         if not probabilities:
             return "flat"
+        
         return max(probabilities, key=probabilities.get)
 
     def _get_latest_regime(self, db: Session) -> Optional[MarketRegime]:
@@ -659,6 +662,12 @@ class TradingSimulationEngine:
         else:
             # Don't default to expected - leave as None to indicate missing data
             pass
+        
+        # Convert numpy types to Python native types for PostgreSQL compatibility
+        actual_return_pct = to_python_type(actual_return_pct)
+        divergence_pct = to_python_type(divergence_pct)
+        expected_return_pct = to_python_type(expected_return_pct)
+        confidence = to_python_type(confidence)
 
         regime = self._get_latest_regime(db)
         volatility_regime = None
@@ -689,12 +698,12 @@ class TradingSimulationEngine:
             if existing:
                 logger.warning(f"Invalid/too-small price for {entity.entity_id} ({price}) - clearing existing simulation values")
                 existing.decision = "hold"
-                existing.expected_return_pct = self._get_expected_return_pct(prediction)
+                existing.expected_return_pct = to_python_type(self._get_expected_return_pct(prediction))
                 existing.actual_return_pct = None
                 existing.divergence_pct = None
                 existing.risk_score = None
-                existing.confidence = prediction.confidence
-                existing.calibrated_confidence = prediction.calibrated_confidence
+                existing.confidence = to_python_type(prediction.confidence)
+                existing.calibrated_confidence = to_python_type(prediction.calibrated_confidence)
                 existing.transaction_cost_bps = 0.0
                 existing.overnight_cost_bps = None
                 existing.borrow_cost_bps = None
@@ -703,7 +712,7 @@ class TradingSimulationEngine:
                 existing.cost_breakdown = {}
                 existing.risk_breakdown = {}
                 existing.simulation_metadata = {"note": "skipped - invalid/too-small market price", "market_price": price}
-                existing.created_at = datetime.utcnow()
+                existing.created_at = datetime.now(timezone.utc)
                 return existing
 
             logger.warning(f"Skipping simulation for {entity.entity_id}: invalid or missing market price ({price})")
@@ -751,6 +760,12 @@ class TradingSimulationEngine:
         
         # Calculate actual position value based on adjusted size
         position_value = (assumed_portfolio_value * position_size_pct) / 100
+        
+        # Convert numeric values to Python native types for PostgreSQL
+        risk_score = to_python_type(risk_result["risk_score"])
+        position_size_pct = to_python_type(position_size_pct)
+        position_value = to_python_type(position_value)
+        total_cost_bps = to_python_type(total_cost_bps)
 
         position_constraints = {
             "position_size_pct": position_size_pct,
@@ -761,7 +776,7 @@ class TradingSimulationEngine:
             predicted_direction=predicted_direction,
             expected_return_pct=expected_return_pct,
             confidence=confidence,
-            risk_score=risk_result["risk_score"],
+            risk_score=risk_score,
             cost_ratio=cost_ratio,
             position_constraints=position_constraints,
         )
@@ -771,7 +786,7 @@ class TradingSimulationEngine:
             entry_price=price,
             direction=predicted_direction,
             volatility_regime=volatility_regime,
-            risk_score=risk_result["risk_score"],
+            risk_score=risk_score,
             confidence=confidence,
             horizon=prediction.horizon,
             market_data_provider=self.market_data_provider,
@@ -818,27 +833,27 @@ class TradingSimulationEngine:
             existing.expected_return_pct = expected_return_pct
             existing.actual_return_pct = actual_return_pct
             existing.divergence_pct = divergence_pct
-            existing.risk_score = risk_result["risk_score"]
-            existing.confidence = prediction.confidence
-            existing.calibrated_confidence = prediction.calibrated_confidence
+            existing.risk_score = risk_score
+            existing.confidence = confidence
+            existing.calibrated_confidence = to_python_type(prediction.calibrated_confidence)
             existing.transaction_cost_bps = total_cost_bps
-            existing.overnight_cost_bps = cost_breakdown.get("overnight_cost_bps")
-            existing.borrow_cost_bps = cost_breakdown.get("borrow_cost_bps")
+            existing.overnight_cost_bps = to_python_type(cost_breakdown.get("overnight_cost_bps"))
+            existing.borrow_cost_bps = to_python_type(cost_breakdown.get("borrow_cost_bps"))
             existing.position_size_pct = position_size_pct
             existing.position_value_usd = position_value
-            existing.cost_breakdown = cost_breakdown
-            existing.risk_breakdown = risk_result["components"]
+            existing.cost_breakdown = clean_numpy_types(cost_breakdown)
+            existing.risk_breakdown = clean_numpy_types(risk_result["components"])
             # Exit strategy fields
-            existing.stop_loss_price = exit_strategy.get("stop_loss_price")
-            existing.stop_loss_pct = exit_strategy.get("stop_loss_pct")
+            existing.stop_loss_price = to_python_type(exit_strategy.get("stop_loss_price"))
+            existing.stop_loss_pct = to_python_type(exit_strategy.get("stop_loss_pct"))
             existing.stop_loss_type = exit_strategy.get("method")
-            existing.trailing_stop_price = exit_strategy.get("trailing_stop_price")
-            existing.take_profit_price = exit_strategy.get("take_profit_price")
-            existing.take_profit_pct = exit_strategy.get("take_profit_pct")
-            existing.risk_reward_ratio = exit_strategy.get("risk_reward_ratio")
-            existing.exit_strategy = exit_strategy
-            existing.simulation_metadata = simulation_payload
-            existing.created_at = datetime.utcnow()
+            existing.trailing_stop_price = to_python_type(exit_strategy.get("trailing_stop_price"))
+            existing.take_profit_price = to_python_type(exit_strategy.get("take_profit_price"))
+            existing.take_profit_pct = to_python_type(exit_strategy.get("take_profit_pct"))
+            existing.risk_reward_ratio = to_python_type(exit_strategy.get("risk_reward_ratio"))
+            existing.exit_strategy = clean_numpy_types(exit_strategy)
+            existing.simulation_metadata = clean_numpy_types(simulation_payload)
+            existing.created_at = datetime.now(timezone.utc)
             return existing
 
         simulation = TradingSimulation(
@@ -849,34 +864,34 @@ class TradingSimulationEngine:
             expected_return_pct=expected_return_pct,
             actual_return_pct=actual_return_pct,
             divergence_pct=divergence_pct,
-            risk_score=risk_result["risk_score"],
-            confidence=prediction.confidence,
-            calibrated_confidence=prediction.calibrated_confidence,
+            risk_score=risk_score,
+            confidence=confidence,
+            calibrated_confidence=to_python_type(prediction.calibrated_confidence),
             transaction_cost_bps=total_cost_bps,
-            overnight_cost_bps=cost_breakdown.get("overnight_cost_bps"),
-            borrow_cost_bps=cost_breakdown.get("borrow_cost_bps"),
+            overnight_cost_bps=to_python_type(cost_breakdown.get("overnight_cost_bps")),
+            borrow_cost_bps=to_python_type(cost_breakdown.get("borrow_cost_bps")),
             position_size_pct=position_size_pct,
             position_value_usd=position_value,
-            cost_breakdown=cost_breakdown,
-            risk_breakdown=risk_result["components"],
+            cost_breakdown=clean_numpy_types(cost_breakdown),
+            risk_breakdown=clean_numpy_types(risk_result["components"]),
             # Exit strategy fields
-            stop_loss_price=exit_strategy.get("stop_loss_price"),
-            stop_loss_pct=exit_strategy.get("stop_loss_pct"),
+            stop_loss_price=to_python_type(exit_strategy.get("stop_loss_price")),
+            stop_loss_pct=to_python_type(exit_strategy.get("stop_loss_pct")),
             stop_loss_type=exit_strategy.get("method"),
-            trailing_stop_price=exit_strategy.get("trailing_stop_price"),
-            take_profit_price=exit_strategy.get("take_profit_price"),
-            take_profit_pct=exit_strategy.get("take_profit_pct"),
-            risk_reward_ratio=exit_strategy.get("risk_reward_ratio"),
-            exit_strategy=exit_strategy,
-            simulation_metadata=simulation_payload,
-            created_at=datetime.utcnow(),
+            trailing_stop_price=to_python_type(exit_strategy.get("trailing_stop_price")),
+            take_profit_price=to_python_type(exit_strategy.get("take_profit_price")),
+            take_profit_pct=to_python_type(exit_strategy.get("take_profit_pct")),
+            risk_reward_ratio=to_python_type(exit_strategy.get("risk_reward_ratio")),
+            exit_strategy=clean_numpy_types(exit_strategy),
+            simulation_metadata=clean_numpy_types(simulation_payload),
+            created_at=datetime.now(timezone.utc),
         )
         db.add(simulation)
         return simulation
 
     def process_batch(self, limit: int = 50, lookback_days: int = 7) -> Dict:
         """Simulate trades for recent predictions."""
-        cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
         stats = {
             "processed": 0,
             "created": 0,

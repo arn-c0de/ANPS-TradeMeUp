@@ -2,7 +2,7 @@
 import logging
 import math
 from typing import Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -122,7 +122,7 @@ class SignalDecayAgent:
             half_life_days=half_life_days,
             effective_window_days=effective_window_days,
             model_type='exponential',
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
 
         logger.info(
@@ -183,7 +183,7 @@ class SignalDecayAgent:
                 return None
 
             # Calculate time elapsed
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             time_elapsed = now - article.published_at
             hours_elapsed = time_elapsed.total_seconds() / 3600
 
@@ -306,7 +306,7 @@ class SignalDecayAgent:
         from src.models.database import get_scoped_session
         
         with get_scoped_session() as db:
-            cutoff = datetime.utcnow() - timedelta(days=threshold_days)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=threshold_days)
 
             deleted = db.query(SignalDecayModel).filter(
                 SignalDecayModel.created_at < cutoff

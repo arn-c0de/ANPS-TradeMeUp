@@ -1,7 +1,7 @@
 """Exit strategy calculations for stop loss and take profit levels."""
 from typing import Dict, Optional, Tuple
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ class ExitStrategyCalculator:
             "confidence": confidence,
             "horizon": horizon,
             "is_penny_stock": self._is_penny_stock(entry_price),
-            "calculation_timestamp": datetime.utcnow().isoformat()
+            "calculation_timestamp": datetime.now(timezone.utc).isoformat()
         }
 
         return result

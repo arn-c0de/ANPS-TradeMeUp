@@ -1,10 +1,11 @@
 """Database models for predictions and outcomes."""
 from datetime import datetime
-from sqlalchemy import Column, String, Float, Boolean, JSON, DateTime, ForeignKey, Index, Integer, PrimaryKeyConstraint
+from sqlalchemy import Column, String, Float, Boolean, DateTime, ForeignKey, Index, Integer, PrimaryKeyConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 import uuid
 
-from src.models.database import Base
+from src.models.database import Base, utc_now
 from src.models.types import GUID
 
 
@@ -17,15 +18,15 @@ class Prediction(Base):
     entity_id = Column(String(50), ForeignKey('entities.entity_id'), nullable=False)
     timestamp = Column(DateTime(timezone=True), nullable=False)
     horizon = Column(String(10), nullable=False)  # 1d, 5d, 20d
-    direction_probabilities = Column(JSON, nullable=False)  # {up, flat, down}
-    expected_return = Column(JSON, nullable=False)  # {mean, median, p25, p75, p95}
+    direction_probabilities = Column(JSONB, nullable=False)  # {up, flat, down}
+    expected_return = Column(JSONB, nullable=False)  # {mean, median, p25, p75, p95}
     confidence = Column(Float, nullable=False)
     calibrated_confidence = Column(Float)
-    model_contributions = Column(JSON)
-    key_drivers = Column(JSON)
+    model_contributions = Column(JSONB)
+    key_drivers = Column(JSONB)
     model_version = Column(String(50), nullable=False)
-    related_news_ids = Column(JSON)  # Array of news UUIDs (stored as JSON for SQLite compat)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    related_news_ids = Column(JSONB)  # Array of news UUIDs
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     # Relationships
     entity = relationship("Entity", backref="predictions")
@@ -54,7 +55,7 @@ class PredictionOutcome(Base):
     within_confidence_interval = Column(Boolean)
     sharpe_contribution = Column(Float)
     evaluation_timestamp = Column(DateTime(timezone=True), nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     # Relationships
     prediction = relationship("Prediction", backref="outcome")
@@ -77,10 +78,10 @@ class BacktestResult(Base):
     model_version = Column(String(50), nullable=False)
     evaluation_period_start = Column(DateTime(timezone=True), nullable=False)
     evaluation_period_end = Column(DateTime(timezone=True), nullable=False)
-    metrics = Column(JSON, nullable=False)  # accuracy, sharpe, drawdown, etc.
-    regime_breakdown = Column(JSON)
-    error_analysis = Column(JSON)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    metrics = Column(JSONB, nullable=False)  # accuracy, sharpe, drawdown, etc.
+    regime_breakdown = Column(JSONB)
+    error_analysis = Column(JSONB)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     def __repr__(self):
         return f"<BacktestResult(model={self.model_version}, period={self.evaluation_period_start} to {self.evaluation_period_end})>"
@@ -100,7 +101,7 @@ class MarketData(Base):
     volume = Column(Integer)
     vwap = Column(Float)
     volatility_1d = Column(Float)
-    metadata_ = Column("metadata", JSON)  # Renamed to avoid SQLAlchemy reserved name
+    metadata_ = Column("metadata", JSONB)  # Renamed to avoid SQLAlchemy reserved name
 
     # Composite primary key
     __table_args__ = (

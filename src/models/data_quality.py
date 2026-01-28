@@ -1,10 +1,11 @@
 """Database model for data quality scores."""
 from datetime import datetime
-from sqlalchemy import Column, String, Float, Boolean, JSON, DateTime, ForeignKey, Index
+from sqlalchemy import Column, String, Float, Boolean, DateTime, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 import uuid
 
-from src.models.database import Base
+from src.models.database import Base, utc_now
 from src.models.types import GUID
 
 
@@ -16,10 +17,10 @@ class DataQualityScore(Base):
     news_id = Column(GUID, ForeignKey('raw_news.news_id'), primary_key=True)
     quality_score = Column(Float, nullable=False)  # 0-1 scale
     duplicate_of = Column(GUID, ForeignKey('raw_news.news_id'), nullable=True)
-    validation_flags = Column(JSON, nullable=False)  # Dict of validation results
-    quality_issues = Column(JSON, default=list)  # List of issues found (stored as JSON for SQLite compat)
+    validation_flags = Column(JSONB, nullable=False)  # Dict of validation results
+    quality_issues = Column(JSONB, default=list)  # List of issues found
     source_reliability_score = Column(Float)  # 0-1 scale
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     # Relationships
     news = relationship("RawNews", foreign_keys=[news_id], backref="quality_score")
