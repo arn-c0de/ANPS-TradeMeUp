@@ -142,7 +142,7 @@ def _resimulate_single(sim_data: tuple) -> dict:
     return stats
 
 
-def resimulate_all(db: Session, limit: int = None, workers: int = 8) -> dict:
+def resimulate_all(db: Session, limit: int = None, workers: int = 4) -> dict:
     """
     Recalculate all existing trading simulations using parallel processing.
     
@@ -152,7 +152,7 @@ def resimulate_all(db: Session, limit: int = None, workers: int = 8) -> dict:
     Args:
         db: Database session (used only to fetch simulation list)
         limit: Optional limit on number of simulations to process
-        workers: Number of parallel worker threads (default: 8, optimized for PostgreSQL)
+        workers: Number of parallel worker threads (default: 4 to avoid yfinance rate limits)
         
     Returns:
         dict: Statistics about the resimulation operation
@@ -254,8 +254,8 @@ def main():
     parser.add_argument(
         '--workers',
         type=int,
-        default=8,
-        help='Number of parallel worker threads. PostgreSQL handles concurrent connections efficiently. Use 1 for sequential processing.'
+        default=4,
+        help='Number of parallel worker threads. Reduced default to 4 to avoid yfinance rate limiting. Use 1 for sequential processing.'
     )
     parser.add_argument(
         '--limit',

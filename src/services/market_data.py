@@ -47,6 +47,12 @@ class MarketDataProvider:
         self.cache_timeout = 60  # seconds
         self.cache_max_age = 3600  # 1 hour max for fallback
         
+        # Rate limiting to avoid yfinance "Too Many Requests" errors
+        self._last_request_time = {}
+        self._min_request_interval = 0.1  # 100ms between requests per ticker
+        self._global_last_request = time.time()
+        self._global_min_interval = 0.05  # 50ms between any requests
+        
         # Suppress yfinance logging
         yf_logging.getLogger('yfinance').setLevel(yf_logging.CRITICAL)
 
@@ -73,6 +79,28 @@ class MarketDataProvider:
             # Indices
             '^GSPC': 'S&P 500', '^DJI': 'Dow Jones', '^IXIC': 'NASDAQ', '^RUT': 'Russell 2000'
         }
+    
+    def _rate_limit(self, symbol: str = None):
+        """Apply rate limiting to avoid yfinance throttling
+        
+        Args:
+            symbol: Optional ticker symbol for per-ticker rate limiting
+        """
+        current_time = time.time()
+        
+        # Global rate limit (all requests)
+        time_since_last_global = current_time - self._global_last_request
+        if time_since_last_global < self._global_min_interval:
+            time.sleep(self._global_min_interval - time_since_last_global)
+        self._global_last_request = time.time()
+        
+        # Per-ticker rate limit (if symbol provided)
+        if symbol:
+            if symbol in self._last_request_time:
+                time_since_last = current_time - self._last_request_time[symbol]
+                if time_since_last < self._min_request_interval:
+                    time.sleep(self._min_request_interval - time_since_last)
+            self._last_request_time[symbol] = time.time()
     
     def _get_cached_data(self, symbol: str) -> Optional[Dict]:
         """
@@ -106,6 +134,14 @@ class MarketDataProvider:
         if not symbol or len(symbol) > 10 or symbol.startswith('$'):
             return None
         
+        # Check cache first to avoid unnecessary API calls
+        cached = self._get_cached_data(symbol)
+        if cached:
+            return cached
+        
+        # Apply rate limiting before making API call
+        self._rate_limit(symbol)
+        
         try:
             ticker = yf.Ticker(symbol)
             info = ticker.info
@@ -132,6 +168,10 @@ class MarketDataProvider:
             self.cache[symbol] = data
             return data
         except Exception as e:
+            # Check for rate limiting error
+            if "Too Many Requests" in str(e) or "Rate limit" in str(e):
+                logger.warning(f"⚠️ Rate limited on {symbol}, using cached/saved data if available")
+                return self._get_cached_data(symbol)
             # Only log if it's not a simple "not found" error
             if "404" not in str(e) and "Not Found" not in str(e):
                 logger.debug(f"Error fetching price for {symbol}: {e}")
@@ -158,6 +198,9 @@ class MarketDataProvider:
         # Skip obviously invalid tickers
         if not symbol or len(symbol) > 10 or symbol.startswith('$'):
             return None
+        
+        # Apply rate limiting before making API call
+        self._rate_limit(symbol)
             
         try:
             ticker = yf.Ticker(symbol)
@@ -169,6 +212,10 @@ class MarketDataProvider:
                 
             return df
         except Exception as e:
+            # Check for rate limiting error
+            if "Too Many Requests" in str(e) or "Rate limit" in str(e):
+                logger.warning(f"⚠️ Rate limited on {symbol}, will use cached/saved data")
+                return None
             # Only log if it's not a simple "not found" error
             if "404" not in str(e) and "Not Found" not in str(e) and "delisted" not in str(e):
                 logger.debug(f"Error fetching historical data for {symbol}: {e}")
