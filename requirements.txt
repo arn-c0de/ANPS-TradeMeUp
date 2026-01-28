@@ -27,7 +27,7 @@ lightgbm==4.6.0
 
 # NLP & LLM
 anthropic==0.76.0
-openai==2.15.0
+openai==2.16.0
 sentence-transformers==5.2.0
 langdetect==1.0.9
 
@@ -36,7 +36,7 @@ feedparser==6.0.11
 beautifulsoup4==4.14.3
 requests==2.32.5
 aiohttp==3.13.3
-yfinance==1.0
+yfinance==1.1.0
 
 # Task Queue
 redis==7.1.0
