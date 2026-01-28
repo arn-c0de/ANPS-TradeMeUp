@@ -37,7 +37,9 @@ class TradingSimulationEngine:
         risk_calculator: Optional[RiskCalculator] = None,
         config_path: Optional[str] = None,
     ):
-        self.market_data_provider = market_data_provider or MarketDataProvider()
+        # Use shared market_data instance by default to centralize rate limiting
+        from src.services.market_data import market_data as _global_market_data
+        self.market_data_provider = market_data_provider or _global_market_data
         self.performance_service = performance_service or PredictionPerformanceService()
         self.risk_calculator = risk_calculator or RiskCalculator()
         self._market_cache: Dict[str, Dict] = {}

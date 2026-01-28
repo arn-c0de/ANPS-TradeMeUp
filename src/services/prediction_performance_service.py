@@ -57,8 +57,9 @@ class PredictionPerformanceService:
     """Service to track prediction performance against actual market data"""
 
     def __init__(self):
-        from src.services.market_data import MarketDataProvider
-        self.market_data = MarketDataProvider()
+        # Use the shared market_data instance to centralize rate limiting
+        from src.services.market_data import market_data as _global_market_data
+        self.market_data = _global_market_data
 
     def get_prediction_performance(
         self, 
