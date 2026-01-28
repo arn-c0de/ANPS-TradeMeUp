@@ -28,7 +28,7 @@ from src.gui.helpers.prediction_details_popup import (
     get_prediction_details,
     _format_saved_performance
 )
-from src.utils.json_helpers import ensure_dict
+from src.utils.json_helpers import ensure_dict, ensure_list as _ensure_list
 
 logger = logging.getLogger(__name__)
 
@@ -235,9 +235,11 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
             if surprise_filter and surprise_filter != 'all':
                 filtered_preds = []
                 for pred in predictions:
-                    # Get related news IDs
-                    news_ids = pred.related_news_ids if pred.related_news_ids else []
+                    # Get related news IDs (ensure JSONB arrays or JSON strings are parsed to Python lists)
+                    news_ids = _ensure_list(pred.related_news_ids, [])
                     if news_ids:
+                        # Ensure all IDs are strings (SQLAlchemy IN expects a list/tuple of scalars)
+                        news_ids = [str(n) for n in news_ids]
                         # Check surprise scores for related news
                         surprise_scores = db.query(SurpriseScore).filter(
                             SurpriseScore.news_id.in_(news_ids)
@@ -692,7 +694,7 @@ def register_callbacks(app):
             raise PreventUpdate
         try:
             import time
-            time.sleep(0.5)
+            time.sleep(0.2)  # small delay to allow task result propagation
             date_range = (start_date, end_date) if start_date or end_date else None
             table = get_predictions_table(
                 _engine,
@@ -701,7 +703,8 @@ def register_callbacks(app):
                 min_confidence=min_conf or 0,
                 horizon=horizon or '5d',
                 surprise_filter=surprise_filter or 'all',
-                refreshing_prediction_id=None
+                # Show refreshing state for the specific prediction to force visible reload
+                refreshing_prediction_id=prediction_id
             )
             toast_msg = ""
             toast_icon = "info"
