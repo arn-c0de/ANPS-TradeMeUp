@@ -19,7 +19,7 @@ from src.models.raw_news import RawNews
 from src.models.processed_news import ProcessedNews
 from src.models.analysis import ImpactScore
 from src.services.prediction_performance_service import prediction_performance_service
-from src.utils.json_helpers import ensure_dict as _ensure_dict
+from src.utils.json_helpers import ensure_dict as _ensure_dict, ensure_list as _ensure_list
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +308,7 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                 logger.info(f"ℹ️ No saved performance and load_performance=False")
 
             # Get related news
-            news_ids = _ensure_dict(pred.related_news_ids, [])
+            news_ids = _ensure_list(pred.related_news_ids, [])
             if not news_ids:
                 news_content = dbc.Alert("No related news found", color="warning")
             else:
@@ -387,7 +387,7 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
             expected = _ensure_dict(pred.expected_return, {})
 
             # Key drivers
-            drivers = _ensure_dict(pred.key_drivers, [])
+            drivers = _ensure_list(pred.key_drivers, [])
             drivers_content = dbc.Card([
                 dbc.CardHeader(html.Div("🎯 Key Drivers", style={"fontWeight": "bold"}), className="py-1"),
                 dbc.CardBody([
