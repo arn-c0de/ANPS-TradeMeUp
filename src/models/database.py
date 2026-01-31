@@ -17,9 +17,14 @@ def utc_now():
     """
     return datetime.now(timezone.utc)
 
+# Convert postgresql:// to postgresql+psycopg:// for psycopg3 driver
+database_url = settings.database_url
+if database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
 # Create SQLAlchemy engine with larger pool for concurrent GUI callbacks
 engine = create_engine(
-    settings.database_url,
+    database_url,
     pool_pre_ping=True,
     pool_size=20,  # Increased from 10 to handle concurrent Dash callbacks
     max_overflow=30,  # Increased from 20

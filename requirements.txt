@@ -9,7 +9,7 @@ python-multipart>=0.0.21
 # Database
 sqlalchemy==2.0.25
 alembic==1.18.1
-psycopg2-binary==2.9.9
+psycopg==3.3.2
 pgvector>=0.2.5
 
 # Configuration
@@ -42,9 +42,6 @@ yfinance==1.1.0
 # Task Queue
 redis==7.1.0
 celery==5.6.2
-
-# Workflow
-prefect==3.6.12
 
 # Visualization
 plotly==6.5.2
