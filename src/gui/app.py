@@ -34,7 +34,7 @@ app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.CYBORG],
     suppress_callback_exceptions=True,
-    assets_ignore="react_suppress\\.js|chart_splitters\\.js",
+    assets_ignore="react_suppress\\.js|chart_splitters\\.js|export_a4\\.js",
     # Improve asset loading reliability
     serve_locally=True,
     compress=False,  # Disable compression to avoid cache issues during dev
@@ -61,6 +61,7 @@ app.index_string = '''
             {%config%}
             {%scripts%}
             <script src="/assets/chart_splitters.js"></script>
+            <script src="/assets/export_a4.js"></script>
             {%renderer%}
         </footer>
     </body>

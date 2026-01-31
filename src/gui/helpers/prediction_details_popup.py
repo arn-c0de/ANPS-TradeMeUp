@@ -542,17 +542,19 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                 tp_color = "success"
                 
                 # Calculate position in range (for visual ladder)
-                if entry_price and simulation.stop_loss_price and simulation.take_profit_price:
-                    total_range = abs(simulation.take_profit_price - simulation.stop_loss_price)
-                    if total_range > 0 and current_price:
-                        # Calculate where current price is in the range
-                        if simulation.stop_loss_price < simulation.take_profit_price:
-                            # Long position
-                            current_pct = ((current_price - simulation.stop_loss_price) / total_range) * 100
+                # Progress = Entry → Take Profit (0% = Entry, 100% = TP reached)
+                if entry_price and simulation.take_profit_price and current_price:
+                    total_range = abs(simulation.take_profit_price - entry_price)
+                    if total_range > 0:
+                        # Calculate where current price is relative to entry → take profit
+                        if entry_price < simulation.take_profit_price:
+                            # Long position (UP prediction)
+                            current_pct = ((current_price - entry_price) / total_range) * 100
                         else:
-                            # Short position
-                            current_pct = ((simulation.stop_loss_price - current_price) / total_range) * 100
-                        current_pct = max(0, min(100, current_pct))
+                            # Short position (DOWN prediction)
+                            current_pct = ((entry_price - current_price) / total_range) * 100
+                        # Allow >100% (above TP) and <0% (below entry)
+                        current_pct = max(-20, min(120, current_pct))  # Cap at ±20% beyond range for display
                     else:
                         current_pct = 50
                 else:
@@ -762,6 +764,31 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
                         dbc.Card([
                             dbc.CardHeader(html.Div("🧪 Trading Simulation - Complete Analysis", style={"fontWeight": "bold"}), className="py-1"),
                             dbc.CardBody([
+                                # Timestamp and Horizon
+                                dbc.Row([
+                                    dbc.Col([
+                                        html.Small([
+                                            html.Span("🕒 ", style={"fontSize": "0.9rem"}),
+                                            html.Strong("Simulation Time: ", className="text-muted"),
+                                            html.Span(
+                                                simulation.created_at.strftime("%Y-%m-%d %H:%M:%S") if simulation.created_at else "—",
+                                                className="text-info"
+                                            )
+                                        ], className="me-3")
+                                    ], width="auto"),
+                                    dbc.Col([
+                                        html.Small([
+                                            html.Span("📅 ", style={"fontSize": "0.9rem"}),
+                                            html.Strong("Horizon: ", className="text-muted"),
+                                            dbc.Badge(
+                                                simulation.horizon if simulation.horizon else "—",
+                                                color="secondary",
+                                                className="ms-1"
+                                            )
+                                        ])
+                                    ], width="auto")
+                                ], className="mb-2"),
+
                                 # Top Row: Decision, Risk Score, Returns
                                 dbc.Row([
                                     dbc.Col([
@@ -1115,9 +1142,14 @@ def create_prediction_modal():
     return dbc.Modal([
         dbc.ModalHeader([
             dbc.ModalTitle(id="prediction-modal-title"),
-            dbc.Button("🔄", id="refresh-prediction-detail",
-                      size="sm", color="light", outline=True,
-                      className="ms-2", title="Refresh live data")
+            html.Div([
+                dbc.Button("🔄", id="refresh-prediction-detail",
+                          size="sm", color="light", outline=True,
+                          className="me-2", title="Refresh live data"),
+                dbc.Button("📄", id="export-prediction-a4-png",
+                          size="sm", color="primary", outline=True,
+                          title="Export as DIN A4 PNG", n_clicks=0)
+            ], className="d-flex")
         ], className="d-flex justify-content-between align-items-center"),
         dbc.ModalBody(id="prediction-modal-body", className="prediction-modal-body-scroll"),
         dbc.ModalFooter(
