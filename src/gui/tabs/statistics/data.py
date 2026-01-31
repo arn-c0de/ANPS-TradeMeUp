@@ -3491,17 +3491,37 @@ def get_stock_predictions_detail(engine, stock_symbol):
 
                                     ]),
 
-                                    dbc.Badge(
+                                    html.Span([
 
-                                        f"{total_return:+.2f}%",
+                                        dbc.Badge(
 
-                                        color=return_color,
+                                            f"{total_return:+.2f}%",
 
-                                        className="ms-auto",
+                                            color=return_color,
 
-                                        style={"fontSize": "1rem"}
+                                            className="me-2",
 
-                                    )
+                                            style={"fontSize": "1rem"}
+
+                                        ),
+
+                                        dbc.Button(
+
+                                            "Details",
+
+                                            id={"type": "pred-detail-btn", "index": str(pred.prediction_id)},
+
+                                            size="sm",
+
+                                            color="primary",
+
+                                            outline=True,
+
+                                            title="View full prediction details"
+
+                                        )
+
+                                    ])
 
                                 ], className="d-flex justify-content-between align-items-center")
 
