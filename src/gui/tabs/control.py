@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import sys
+import platform
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +20,60 @@ from src.utils.process_utils import stop_process
 # Get project root
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 logger = logging.getLogger(__name__)
+
+# Detect platform
+IS_WINDOWS = platform.system() == 'Windows'
+IS_LINUX = platform.system() == 'Linux'
+IS_MAC = platform.system() == 'Darwin'
+
+def open_terminal_with_command(script_path, args="", title="TradeMeUp"):
+    """Open a new terminal window and run a command (cross-platform)."""
+    script_path = Path(script_path).absolute()
+    
+    if IS_WINDOWS:
+        # Windows: use 'start' with cmd
+        cmd = f'start "{title}" /D "{Path.cwd()}" "{script_path}" {args}'
+        proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
+        return proc
+    
+    elif IS_LINUX:
+        # Linux: try different terminal emulators
+        terminals = [
+            ['gnome-terminal', '--', 'bash', '-c'],
+            ['xterm', '-hold', '-e'],
+            ['konsole', '--hold', '-e'],
+            ['xfce4-terminal', '--hold', '-e'],
+        ]
+        
+        command = f'{script_path} {args}; exec bash'
+        
+        for term in terminals:
+            try:
+                if subprocess.run(['which', term[0]], capture_output=True).returncode == 0:
+                    if term[0] == 'gnome-terminal':
+                        proc = subprocess.Popen(term + [command], cwd=str(Path.cwd()))
+                    else:
+                        proc = subprocess.Popen(term + [command], cwd=str(Path.cwd()))
+                    return proc
+            except (FileNotFoundError, subprocess.SubprocessError):
+                continue
+        
+        # Fallback: run in background without terminal
+        logger.warning("No terminal emulator found, running in background")
+        proc = subprocess.Popen([str(script_path)] + args.split(), cwd=str(Path.cwd()))
+        return proc
+    
+    elif IS_MAC:
+        # macOS: use Terminal.app
+        command = f'cd {Path.cwd()} && {script_path} {args}'
+        proc = subprocess.Popen(
+            ['osascript', '-e', f'tell application "Terminal" to do script "{command}"'],
+            cwd=str(Path.cwd())
+        )
+        return proc
+    
+    else:
+        raise OSError(f"Unsupported platform: {platform.system()}")
 
 
 def create_layout():
@@ -429,19 +484,21 @@ def register_callbacks(app):
         button_id = ctx.triggered[0]["prop_id"].split(".")[0]
         if button_id == "btn-start-continuous":
             logger.info("Starting continuous pipeline with Python: %s", sys.executable)
-            wrapper_script = Path("scripts/run_continuous_pipeline_wrapper.bat").absolute()
+            
+            # Use platform-specific wrapper
+            if IS_WINDOWS:
+                wrapper_script = Path("scripts/run_continuous_pipeline_wrapper.bat").absolute()
+            else:
+                wrapper_script = Path("scripts/run_continuous_pipeline_wrapper.sh").absolute()
+            
             if not wrapper_script.exists():
                 error_msg = "Wrapper script not found: %s" % wrapper_script
                 activity_logger.log_activity(error_msg, "ERROR")
                 logger.error(error_msg)
                 return dash.no_update
             try:
-                cmd = 'start "ANPS-TradeMeUp Pipeline" /D "%s" "%s" --interval 300' % (
-                    Path.cwd(),
-                    wrapper_script,
-                )
-                process = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
-                logger.info("Started pipeline with command: %s", cmd)
+                process = open_terminal_with_command(wrapper_script, "--interval 300", "ANPS-TradeMeUp Pipeline")
+                logger.info("Started pipeline with PID: %s", process.pid)
                 activity_logger.log_activity(
                     "Continuous Pipeline console opened - Check the new terminal window",
                     "SUCCESS",
@@ -471,15 +528,20 @@ def register_callbacks(app):
         if not n_clicks:
             return dash.no_update
         try:
-            wrapper_script = Path("scripts/run_rss_fetch_wrapper.bat").absolute()
+            # Use platform-specific wrapper
+            if IS_WINDOWS:
+                wrapper_script = Path("scripts/run_rss_fetch_wrapper.bat").absolute()
+            else:
+                wrapper_script = Path("scripts/run_rss_fetch_wrapper.sh").absolute()
+            
             if not wrapper_script.exists():
                 error_msg = "RSS fetch script not found: %s" % wrapper_script
                 activity_logger.log_activity(error_msg, "ERROR")
                 logger.error(error_msg)
                 return {"status": "error", "message": str(error_msg)}
-            cmd = 'start "ANPS-TradeMeUp RSS Fetch" /D "%s" "%s"' % (Path.cwd(), wrapper_script)
-            subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
-            logger.info("RSS fetch terminal opened with command: %s", cmd)
+            
+            process = open_terminal_with_command(wrapper_script, "", "ANPS-TradeMeUp RSS Fetch")
+            logger.info("RSS fetch terminal opened with PID: %s", process.pid)
             activity_logger.log_activity(
                 "RSS Feed Fetch: Terminal window opened - Check the new window",
                 "INFO",
@@ -562,14 +624,19 @@ def register_callbacks(app):
             return dash.no_update
         activity_logger.log_activity("User initiated Full MVP Pipeline from GUI", "INFO")
         activity_logger.log_pipeline_start("ANPS-TradeMeUp MVP Pipeline (GUI)")
-        wrapper = Path("scripts/run_mvp_pipeline_wrapper.bat").absolute()
+        
+        # Use platform-specific wrapper
+        if IS_WINDOWS:
+            wrapper = Path("scripts/run_mvp_pipeline_wrapper.bat").absolute()
+        else:
+            wrapper = Path("scripts/run_mvp_pipeline_wrapper.sh").absolute()
+        
         if not wrapper.exists():
             msg = f"Wrapper script not found: {wrapper}"
             activity_logger.log_activity(msg, "ERROR")
             return {"running": False}, msg, "ERROR", "danger"
         try:
-            cmd = f'start "ANPS-TradeMeUp MVP Pipeline" /D "{Path.cwd()}" "{wrapper}"'
-            proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
+            proc = open_terminal_with_command(wrapper, "", "ANPS-TradeMeUp MVP Pipeline")
         except Exception as e:
             activity_logger.log_agent_error("Full Pipeline (GUI)", str(e))
             return {"running": False}, str(e), "ERROR", "danger"
@@ -592,14 +659,20 @@ def register_callbacks(app):
         if not n_clicks:
             return dash.no_update
         activity_logger.log_activity("User initiated Quick Test from GUI", "INFO")
-        wrapper = Path("scripts/run_mvp_pipeline_wrapper.bat").absolute()
+        
+        # Use platform-specific wrapper
+        if IS_WINDOWS:
+            wrapper = Path("scripts/run_mvp_pipeline_wrapper.bat").absolute()
+        else:
+            wrapper = Path("scripts/run_mvp_pipeline_wrapper.sh").absolute()
+        
         if not wrapper.exists():
             msg = f"Wrapper script not found: {wrapper}"
             activity_logger.log_activity(msg, "ERROR")
             return {"running": False}, msg, "ERROR", "danger"
+        
         try:
-            cmd = f'start "ANPS-TradeMeUp Quick Test" /D "{Path.cwd()}" "{wrapper}" --quick'
-            proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
+            proc = open_terminal_with_command(wrapper, "--quick", "ANPS-TradeMeUp Quick Test")
         except Exception as e:
             activity_logger.log_agent_error("Quick Test (GUI)", str(e))
             return {"running": False}, str(e), "ERROR", "danger"
@@ -623,14 +696,19 @@ def register_callbacks(app):
         if not n_clicks:
             return dash.no_update
         activity_logger.log_activity("User initiated Full Backfill from GUI", "INFO")
-        wrapper = Path("scripts/run_backfill_wrapper.bat").absolute()
+        
+        # Use platform-specific wrapper
+        if IS_WINDOWS:
+            wrapper = Path("scripts/run_backfill_wrapper.bat").absolute()
+        else:
+            wrapper = Path("scripts/run_backfill_wrapper.sh").absolute()
+        
         if not wrapper.exists():
             msg = f"Wrapper script not found: {wrapper}"
             activity_logger.log_activity(msg, "ERROR")
             return {"running": False}, msg, "ERROR", "danger"
         try:
-            cmd = f'start "ANPS-TradeMeUp Backfill" /D "{Path.cwd()}" "{wrapper}" --batch-size {batch_size}'
-            proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
+            proc = open_terminal_with_command(wrapper, f"--batch-size {batch_size}", "ANPS-TradeMeUp Backfill")
         except Exception as e:
             activity_logger.log_agent_error("Backfill (GUI)", str(e))
             return {"running": False}, str(e), "ERROR", "danger"
@@ -654,7 +732,13 @@ def register_callbacks(app):
         if not n_clicks or not selected_phases:
             return dash.no_update
         activity_logger.log_activity("User initiated Selective Backfill from GUI", "INFO")
-        wrapper = Path("scripts/run_backfill_wrapper.bat").absolute()
+        
+        # Use platform-specific wrapper
+        if IS_WINDOWS:
+            wrapper = Path("scripts/run_backfill_wrapper.bat").absolute()
+        else:
+            wrapper = Path("scripts/run_backfill_wrapper.sh").absolute()
+        
         if not wrapper.exists():
             msg = f"Wrapper script not found: {wrapper}"
             activity_logger.log_activity(msg, "ERROR")
@@ -665,8 +749,7 @@ def register_callbacks(app):
             if p not in selected_phases:
                 args.append(f"--skip-{p}")
         try:
-            cmd = f'start "ANPS-TradeMeUp Backfill" /D "{Path.cwd()}" "{wrapper}" {" ".join(args)}'
-            proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
+            proc = open_terminal_with_command(wrapper, " ".join(args), "ANPS-TradeMeUp Backfill")
         except Exception as e:
             activity_logger.log_agent_error("Backfill (GUI)", str(e))
             return {"running": False}, str(e), "ERROR", "danger"
