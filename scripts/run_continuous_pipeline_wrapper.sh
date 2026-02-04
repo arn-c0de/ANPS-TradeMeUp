@@ -1,6 +1,7 @@
 #!/bin/bash
 # Wrapper for Continuous Pipeline - Keeps terminal open on errors
 # Called by GUI to start pipeline in separate console
+# Optimized for GPU memory management
 
 # Change to project root directory
 cd "$(dirname "$0")/.."
@@ -9,6 +10,18 @@ echo "==========================================================================
 echo "TradeMeUp - Continuous Pipeline"
 echo "================================================================================"
 echo ""
+
+# Load environment variables from .env
+if [ -f ".env" ]; then
+    echo "📄 Loading configuration from .env"
+    set -a
+    source .env
+    set +a
+fi
+
+# Configure CUDA/PyTorch for GPU memory management
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export TORCH_CUDA_EMPTY_CACHE=1
 
 # Check if venv Python exists
 if [ ! -f "venv/bin/python" ]; then
@@ -29,6 +42,7 @@ WORK_DIR="$(pwd)"
 echo "Python: $VENV_PYTHON"
 echo "Script: $SCRIPT_PATH"
 echo "Working Dir: $WORK_DIR"
+echo "LLM Provider: ${LLM_PROVIDER:-openai}"
 echo "Arguments: $*"
 echo ""
 echo "Starting pipeline..."

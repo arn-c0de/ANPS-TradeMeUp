@@ -16,6 +16,18 @@ echo ""
 # Change to project directory
 cd "$(dirname "$0")"
 
+# Load environment variables from .env
+if [ -f ".env" ]; then
+    echo "📄 Loading configuration from .env"
+    set -a
+    source .env
+    set +a
+fi
+
+# Configure CUDA/PyTorch for GPU memory management
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export TORCH_CUDA_EMPTY_CACHE=1
+
 # Check if venv exists
 if [ ! -d "venv" ]; then
     echo "📦 Creating virtual environment..."
