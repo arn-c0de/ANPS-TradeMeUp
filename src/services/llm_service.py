@@ -307,7 +307,7 @@ class LLMService:
 
     def get_embedding(self, text: str) -> List[float]:
         """
-        Get text embedding (currently using sentence-transformers as fallback).
+        Get text embedding using configured provider.
 
         Args:
             text: Text to embed
@@ -315,15 +315,35 @@ class LLMService:
         Returns:
             Embedding vector
         """
-        # For now, use sentence-transformers for all providers
-        # This gives consistent embeddings regardless of LLM provider
+        # Use OpenAI embeddings if available
+        if self.provider == "openai" and hasattr(self, 'openai_client'):
+            try:
+                response = self.openai_client.embeddings.create(
+                    model="text-embedding-3-small",
+                    input=text[:8191]  # OpenAI has max input length
+                )
+                return response.data[0].embedding
+            except Exception as e:
+                logger.warning(f"Failed to get embedding from OpenAI: {e}. Falling back to CPU embeddings.")
+        
+        # Fallback: use sentence-transformers on CPU
         try:
+            import torch
             from sentence_transformers import SentenceTransformer
+            
+            # Force CPU to avoid GPU memory overflow
+            device = "cpu"
+            logger.info(f"Loading SentenceTransformer on {device} device")
+            
             model = SentenceTransformer('all-mpnet-base-v2')
-            embedding = model.encode(text, convert_to_numpy=True)
+            model = model.to(device)
+            embedding = model.encode(text, convert_to_numpy=True, device=device)
             return embedding.tolist()
         except ImportError:
             logger.error("sentence-transformers not installed. Run: pip install sentence-transformers")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to generate embedding: {e}")
             raise
 
     def count_tokens(self, text: str) -> int:
