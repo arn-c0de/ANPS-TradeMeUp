@@ -9,7 +9,7 @@ echo "🚀 TradeMeUp - Optimized Pipeline Launcher"
 echo "================================================================================"
 echo ""
 
-# Check Python environment
+echo "📦 Checking Python environment..."
 if [ ! -f "venv/bin/python" ]; then
     echo "❌ ERROR: Virtual environment not found!"
     echo "Create venv: python3 -m venv venv"
@@ -17,13 +17,8 @@ if [ ! -f "venv/bin/python" ]; then
     exit 1
 fi
 
-# Load environment variables from .env
-if [ -f ".env" ]; then
-    echo "📄 Loading configuration from .env"
-    set -a
-    source .env
-    set +a
-fi
+# Note: Do NOT source .env here - Pydantic reads .env.local automatically
+# Sourcing would export complex variables as shell strings, breaking JSON parsing
 
 # Configure CUDA/PyTorch for GPU memory management
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True

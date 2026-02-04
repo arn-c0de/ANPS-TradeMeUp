@@ -16,13 +16,8 @@ echo ""
 # Change to project directory
 cd "$(dirname "$0")"
 
-# Load environment variables from .env
-if [ -f ".env" ]; then
-    echo "📄 Loading configuration from .env"
-    set -a
-    source .env
-    set +a
-fi
+# Note: Do NOT source .env here - Pydantic reads .env.local automatically
+# Sourcing would export CORS_ORIGINS as shell string, breaking JSON parsing
 
 # Configure CUDA/PyTorch for GPU memory management
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
