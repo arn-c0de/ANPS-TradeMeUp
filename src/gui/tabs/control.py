@@ -45,15 +45,13 @@ def open_terminal_with_command(script_path, args="", title="TradeMeUp"):
             ['xfce4-terminal', '--hold', '-e'],
         ]
         
-        command = f'{script_path} {args}; exec bash'
+        # Properly quote script path for paths with spaces
+        command = f'"{script_path}" {args}; exec bash'
         
         for term in terminals:
             try:
                 if subprocess.run(['which', term[0]], capture_output=True).returncode == 0:
-                    if term[0] == 'gnome-terminal':
-                        proc = subprocess.Popen(term + [command], cwd=str(Path.cwd()))
-                    else:
-                        proc = subprocess.Popen(term + [command], cwd=str(Path.cwd()))
+                    proc = subprocess.Popen(term + [command], cwd=str(Path.cwd()))
                     return proc
             except (FileNotFoundError, subprocess.SubprocessError):
                 continue
@@ -64,8 +62,8 @@ def open_terminal_with_command(script_path, args="", title="TradeMeUp"):
         return proc
     
     elif IS_MAC:
-        # macOS: use Terminal.app
-        command = f'cd {Path.cwd()} && {script_path} {args}'
+        # macOS: use Terminal.app (properly quoted for paths with spaces)
+        command = f'cd "{Path.cwd()}" && "{script_path}" {args}'
         proc = subprocess.Popen(
             ['osascript', '-e', f'tell application "Terminal" to do script "{command}"'],
             cwd=str(Path.cwd())
