@@ -29,6 +29,10 @@ IS_LINUX = platform.system() == 'Linux'
 IS_MAC = platform.system() == 'Darwin'
 _CONTINUOUS_PIPELINE_SCRIPT = "scripts/run_continuous_pipeline.py"
 _PIPELINE_ACTIVITY_WINDOW_SECONDS = 900
+_PIPELINE_LOG_FILES = (
+    Path("logs/pipeline_activity.log"),
+    Path("logs/dashboard.log"),
+)
 
 
 def _find_continuous_pipeline_pid():
@@ -53,6 +57,19 @@ def _find_continuous_pipeline_pid():
 def _has_recent_pipeline_activity(window_seconds: int = _PIPELINE_ACTIVITY_WINDOW_SECONDS) -> bool:
     """Infer pipeline activity from the shared DB log stream."""
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+    activity_signals = (
+        "Continuous Pipeline Mode STARTED",
+        "Starting Pipeline Iteration #",
+        "All articles fully processed, waiting",
+        "Pipeline console started",
+        "Pipeline process started",
+        "Full MVP Pipeline console opened",
+        "Quick Test console opened",
+    )
+    stop_signals = (
+        "Continuous Pipeline STOPPED",
+        "Pipeline stopped by user",
+    )
 
     try:
         with SessionLocal() as db:
@@ -67,18 +84,31 @@ def _has_recent_pipeline_activity(window_seconds: int = _PIPELINE_ACTIVITY_WINDO
                 .all()
             )
     except Exception:
-        return False
+        entries = []
 
     for entry in entries:
         message = entry.message or ""
-        if "Continuous Pipeline STOPPED" in message:
+        if any(signal in message for signal in stop_signals):
             return False
-        if (
-            "Continuous Pipeline Mode STARTED" in message
-            or "Starting Pipeline Iteration #" in message
-            or "All articles fully processed, waiting" in message
-        ):
+        if any(signal in message for signal in activity_signals):
             return True
+
+    for log_path in _PIPELINE_LOG_FILES:
+        if not log_path.exists():
+            continue
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()[-120:]
+        except OSError:
+            continue
+
+        for line in reversed(lines):
+            if not line.strip():
+                continue
+            if any(signal in line for signal in stop_signals):
+                return False
+            if any(signal in line for signal in activity_signals):
+                return True
     return False
 
 
@@ -624,7 +654,7 @@ def register_callbacks(app):
     )
     def sync_continuous_pipeline_state(n, current_state):
         state = _resolve_continuous_pipeline_state(current_state)
-        return state, state["running"], not state["running"]
+        return state, state["running"], False
 
     @app.callback(
         Output("rss-fetch-status-store", "data"),
