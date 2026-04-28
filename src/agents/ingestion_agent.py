@@ -19,6 +19,11 @@ from src.utils.activity_logger import activity_logger
 from src.config.settings import VERSION
 
 logger = logging.getLogger(__name__)
+PLACEHOLDER_API_KEYS = {
+    "your_news_api_key_here",
+    "your_alpha_vantage_key_here",
+    "changeme",
+}
 
 
 @dataclass
@@ -276,14 +281,15 @@ class IngestionAgent:
         Returns:
             Number of new articles saved
         """
-        if not api_key:
-            logger.warning("News API key not provided, skipping")
+        normalized_api_key = (api_key or "").strip()
+        if not normalized_api_key or normalized_api_key.lower() in PLACEHOLDER_API_KEYS:
+            logger.info("News API key not configured, skipping News API fetch")
             return 0
 
         url = "https://newsapi.org/v2/everything"
         params = {
             'q': query,
-            'apiKey': api_key,
+            'apiKey': normalized_api_key,
             'language': 'en',
             'sortBy': 'publishedAt',
             'pageSize': 50

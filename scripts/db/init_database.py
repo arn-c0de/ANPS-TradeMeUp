@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-"""
-Initialize Database - Create all tables
-Run this before starting the pipeline for the first time
-"""
-import sys
-from pathlib import Path
+"""Initialize the database schema."""
 
-# Add project root to path
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
+from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 import logging
 
@@ -24,7 +21,16 @@ def init_database():
         # Import after adding to path
         from src.models.database import engine, Base
         # Import models to register them
-        from src.models import raw_news, processed_news, data_quality, entities, analysis, predictions, trading_simulation
+        from src.models import (
+            raw_news,
+            processed_news,
+            data_quality,
+            entities,
+            analysis,
+            predictions,
+            trading_simulation,
+            chart_overlays,
+        )
         
         # Create all tables
         Base.metadata.create_all(bind=engine)

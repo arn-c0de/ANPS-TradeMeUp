@@ -1,19 +1,10 @@
 """Database model for processed news with NLP analysis."""
-from datetime import datetime
-from sqlalchemy import Column, String, Text, Float, DateTime, ForeignKey, Index
+from sqlalchemy import Column, String, Text, Float, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, deferred
-import uuid
 
 from src.models.database import Base, utc_now
 from src.models.types import GUID
-
-# pgvector support (optional)
-try:
-    from pgvector.sqlalchemy import Vector
-    HAS_PGVECTOR = True
-except ImportError:
-    HAS_PGVECTOR = False
 
 
 class ProcessedNews(Base):
@@ -29,9 +20,9 @@ class ProcessedNews(Base):
     event_type = Column(String(50))  # earnings, M&A, regulation, etc.
     event_subtype = Column(String(100))  # More specific classification
     confidence = Column(Float)  # Model confidence 0-1
-    # Use pgvector if available, otherwise JSONB
-    # Deferred loading to avoid loading large embeddings unless explicitly needed
-    embedding = deferred(Column(Vector(768) if HAS_PGVECTOR else JSONB))  # 768-dim vector
+    # Embeddings are currently stored as JSON arrays to match the live schema.
+    # This keeps Docker/bootstrap installs stable across environments.
+    embedding = deferred(Column(JSONB))
     llm_metadata = Column(JSONB)  # Model version, tokens, etc.
     processing_timestamp = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 

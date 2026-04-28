@@ -13,8 +13,9 @@ echo 🚀 TradeMeUp - Starting GUI Dashboard
 echo ================================================================================
 echo.
 
-REM Change to project directory
-cd /d "%~dp0"
+REM Change to project root
+for %%I in ("%~dp0..\..") do set "ROOT_DIR=%%~fI"
+cd /d "%ROOT_DIR%"
 
 REM Check if venv exists
 if not exist "venv\" (
@@ -56,7 +57,7 @@ echo ===========================================================================
 echo 🌐 Starting Dashboard...
 echo ================================================================================
 echo.
-python run_dashboard.py
+python scripts\runtime\run_dashboard.py
 
 REM If dashboard exits, pause to see any errors
 if errorlevel 1 (

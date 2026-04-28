@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    name: Lint and Smoke Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest ruff
+
+      - name: Lint
+        run: |
+          ruff check src scripts tests --select E9,F
+
+      - name: Compile smoke check
+        run: |
+          python -m compileall src scripts
+
+      - name: Run smoke tests
+        env:
+          APP_ENV: ci
+          DATABASE_URL: postgresql://trademeup_user:trademeup_pass@localhost:5432/trademeup
+          LLM_PROVIDER: openai
+          OPENAI_API_KEY: test-key
+          SECRET_KEY: ci-secret
+        run: |
+          pytest tests/test_redaction.py tests/test_api_lifespan_logs.py tests/test_backfill_llm_config.py -q

@@ -59,12 +59,10 @@ def print_llm_config():
         print(f"Ollama URL: {redact_url(settings.ollama_base_url)}")
         print(f"Ollama Model: {settings.ollama_model}")
     elif settings.llm_provider == "openai":
-        # Do NOT print or reveal any portion of the API key. Always print a redacted placeholder.
-        print("OpenAI API Key: [REDACTED]")
+        print(f"OpenAI API Key: {set_status(settings.openai_api_key)}")
         print(f"OpenAI Model: {settings.openai_model}")
     elif settings.llm_provider == "anthropic":
-        # Do NOT print or reveal any portion of the API key. Always print a redacted placeholder.
-        print("Anthropic API Key: [REDACTED]")
+        print(f"Anthropic API Key: {set_status(settings.anthropic_api_key)}")
         print(f"Anthropic Model: {settings.anthropic_model}")
     
     print(f"Database: {redact_url(settings.database_url)}")

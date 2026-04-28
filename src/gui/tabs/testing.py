@@ -352,7 +352,8 @@ def test_agent(agent_key):
         agent_class = getattr(module, class_name)
         
         # Initialize database session (for non-refactored agents)
-        engine = create_engine(settings.database_url)
+        from src.models.database import normalize_database_url
+        engine = create_engine(normalize_database_url(settings.database_url))
         db = Session(engine)
         
         # Initialize agent - REFACTORED agents don't need db parameter

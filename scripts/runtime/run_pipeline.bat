@@ -13,13 +13,14 @@ echo 🤖 TradeMeUp - Starting Agent Pipeline
 echo ================================================================================
 echo.
 
-REM Change to project directory
-cd /d "%~dp0"
+REM Change to project root
+for %%I in ("%~dp0..\..") do set "ROOT_DIR=%%~fI"
+cd /d "%ROOT_DIR%"
 
 REM Check if venv exists
 if not exist "venv\" (
     echo ❌ Virtual environment not found!
-    echo 💡 Please run start_gui.bat first to set up the environment
+    echo 💡 Please run scripts\runtime\start_gui.bat first to set up the environment
     pause
     exit /b 1
 )

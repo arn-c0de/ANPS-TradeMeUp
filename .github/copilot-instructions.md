@@ -6,15 +6,15 @@ Purpose: help an AI code agent quickly become productive in this repo by documen
 - Modular multi-agent pipeline: ingest → understand → analyse → predict → monitor. See agents in `src/agents/*` (e.g. `ingestion_agent.py`, `content_understanding_agent.py`, `prediction_agent.py`).
 - Backend & API: FastAPI entry at `src/api/main.py`.
 - GUI: Dash app at `src/gui/app.py` with tabbed components in `src/gui/tabs/` (Agent Control, Dashboard, Live Charts).
-- Storage & infra: Postgres/Timescale, Redis, MinIO (defined in `docker-compose.yml`), DB migrations in `migrations/` (use `alembic upgrade head`).
+- Storage & infra: Postgres service defined in `docker-compose.yml`, DB migrations in `migrations/` (use `alembic upgrade head`).
 
 2) How to run / developer workflows (examples)
-- Quick GUI (Windows): `start_gui.bat` → open http://localhost:8050 ✅
-- Start infra: `docker-compose up -d` (postgres/redis/minio)
+- Quick GUI (Windows): `python scripts/runtime/run_dashboard.py` or `scripts\runtime\start_gui.bat`
+- Start infra: `docker compose up -d postgres` or `docker compose up --build`
 - Run pipeline (continuous): `python scripts/run_continuous_pipeline.py` or one-shot: `python scripts/run_mvp_pipeline.py`
-- Run DB migrations: `alembic upgrade head` or use provided `init_database.py` helper
+- Run DB migrations: `alembic upgrade head` or use `python scripts/db/init_database.py`
 - Tests: `pytest tests/unit` and `pytest tests/integration`
-- Environment: copy `.env.example` → `.env` (settings are loaded from `.env.local` by `src/config/settings.py`)
+- Environment: copy `.env.example` → `.env.local` (loaded by `src/config/settings.py`)
 
 3) Key integrations & env vars
 - LLMs: unified interface in `src/services/llm_service.py`. Supported providers: `ollama` (local), `openai`, `anthropic`.
@@ -32,7 +32,7 @@ Purpose: help an AI code agent quickly become productive in this repo by documen
 5) Common pitfalls & helpful tips
 - Ollama: if `LLM_PROVIDER=ollama` ensure `ollama serve` is running at `OLLAMA_BASE_URL`.
 - OpenAI: proxy and custom base URL supported (see `llm_service` for proxy checks); invalid proxy ports are detected and disabled.
-- Timescale/Postgres: `docker-compose.yml` spins up `timescaledb`; prefer using the compose stack for integration testing.
+- Postgres: `docker-compose.yml` can run the full stack (`postgres`, `api`, `gui`, `worker`) or just `postgres` for local development.
 - Keep `VERSION` in `src/config/settings.py` in sync with docs/README when releasing.
 
 6) Practical first tasks for AI contributors
