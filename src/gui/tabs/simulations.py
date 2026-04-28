@@ -357,9 +357,9 @@ def create_layout():
             ], id="modal-resimulate-all-simulations", is_open=False)
         ], fluid=True),
         
-        # Toast for refresh feedback (shared with predictions)
+        # Toast for refresh feedback (simulations-specific)
         dbc.Toast(
-            id="refresh-toast",
+            id="simulations-refresh-toast",
             header="Performance Update",
             is_open=False,
             dismissable=True,
