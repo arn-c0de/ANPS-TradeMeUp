@@ -14,8 +14,9 @@ echo "🚀 TradeMeUp - Complete Setup and Launch"
 echo "================================================================================"
 echo ""
 
-# Change to project directory
-cd "$(dirname "$0")"
+# Change to project root
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT_DIR"
 
 # Check Python installation
 echo "🔍 Checking Python installation..."
@@ -100,7 +101,7 @@ case $start_choice in
         echo "🌐 Starting Dashboard..."
         echo "💡 Visit: http://localhost:8050"
         echo ""
-        python run_dashboard.py
+        python scripts/runtime/run_dashboard.py
         ;;
     2)
         echo "🤖 Starting Pipeline..."
@@ -116,7 +117,7 @@ case $start_choice in
         echo "🌐 Starting Dashboard..."
         echo "💡 Visit: http://localhost:8050"
         echo ""
-        python run_dashboard.py
+        python scripts/runtime/run_dashboard.py
         ;;
     *)
         echo "❌ Invalid choice"

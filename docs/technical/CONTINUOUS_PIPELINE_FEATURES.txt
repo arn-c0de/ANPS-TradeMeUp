@@ -151,7 +151,7 @@
 │ 📚 DOCUMENTATION                                                             │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  📄 QUICKSTART.md                      → Quick setup & usage                │
+│  📄 docs/setup/QUICKSTART.md           → Quick setup & usage                │
 │  📄 docs/CONTINUOUS_PIPELINE_PERFORMANCE.md → Full performance guide        │
 │  📄 PERFORMANCE_IMPROVEMENTS_SUMMARY.md → Changes overview                  │
 │  🧪 test_continuous_pipeline.py        → Feature tests                      │

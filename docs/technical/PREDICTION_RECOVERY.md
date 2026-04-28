@@ -1,5 +1,7 @@
 # Prediction Recovery Guide
 
+> Status note: this document describes a historical recovery incident from January 23, 2026. The current codebase uses PostgreSQL, current runtime paths under `scripts/`, and the refactored repository layout.
+
 ## Problem Solved ✅
 
 **Issue**: The pipeline was creating 0 new predictions despite analyzing 2000+ articles.
@@ -57,9 +59,9 @@ Check prediction count:
 python check_predictions.py
 ```
 
-Or quick SQL check:
+Or quick SQL check against PostgreSQL:
 ```bash
-python -c "from sqlalchemy import create_engine, func; from sqlalchemy.orm import Session; from src.models.predictions import Prediction; engine = create_engine('sqlite:///trademeup.db'); db = Session(engine); print(f'Total: {db.query(Prediction).count()}'); [print(f'{h}: {c}') for h,c in db.query(Prediction.horizon, func.count(Prediction.prediction_id)).group_by(Prediction.horizon).all()]"
+python -c "from sqlalchemy import create_engine, func; from sqlalchemy.orm import Session; from src.config.settings import settings; from src.models.predictions import Prediction; engine = create_engine(settings.database_url); db = Session(engine); print(f'Total: {db.query(Prediction).count()}'); [print(f'{h}: {c}') for h,c in db.query(Prediction.horizon, func.count(Prediction.prediction_id)).group_by(Prediction.horizon).all()]"
 ```
 
 ## Expected Behavior (Fixed)

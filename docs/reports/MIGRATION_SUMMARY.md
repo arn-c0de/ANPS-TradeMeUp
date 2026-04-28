@@ -1,5 +1,7 @@
 # SQLite zu PostgreSQL Migration - Zusammenfassung
 
+> Historical snapshot from the SQLite-to-PostgreSQL migration. The referenced migration helpers now live under `archive/legacy/sqlite/`, and the current runtime/docs entrypoints live under `scripts/` and `docs/setup/`.
+
 ## Datum: 2026-02-04
 
 ## ✅ Erfolgreich abgeschlossene Aufgaben
@@ -16,13 +18,13 @@
 - Docker-Container: `trademeup_postgres`
 
 ### 3. Schema-Initialisierung
-- Alle Tabellen erfolgreich mit `init_database.py` erstellt
+- Alle Tabellen erfolgreich mit `scripts/db/init_database.py` erstellt
 - Migrations-Skripte `migrations/init.sql` angewendet
 - 17 Tabellen erstellt
 
 ### 4. Daten-Migration
-- Migrationsskript erstellt: `migrate_sqlite_to_postgres.py`
-- Spezielles Skript für Boolean-Konvertierung: `remigrate_boolean_tables.py`
+- Migrationsskript erstellt: `archive/legacy/sqlite/migrate_sqlite_to_postgres.py`
+- Spezielles Skript für Boolean-Konvertierung: `archive/legacy/sqlite/remigrate_boolean_tables.py`
 - SQLite-Datenbank: `trademeup.db`
 
 #### Migrierte Daten:
@@ -126,8 +128,8 @@ Connection String: postgresql://trademeup_user:trademeup_pass@localhost:5432/tra
 
 3. **Anwendung testen**:
    ```bash
-   venv/bin/python init_database.py  # Sollte bereits existierende Tabellen erkennen
-   venv/bin/python start_gui.bat     # GUI starten
+   venv/bin/python scripts/db/init_database.py  # Sollte bereits existierende Tabellen erkennen
+   venv/bin/python scripts/runtime/run_dashboard.py
    ```
 
 4. **Optional: SQLite-Datenbank archivieren**:

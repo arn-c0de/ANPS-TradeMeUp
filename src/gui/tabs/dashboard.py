@@ -219,7 +219,7 @@ def get_metrics(engine):
                             html.Li([html.Strong("Option 2:"), " Führe aus: ", html.Code("python scripts/run_mvp_pipeline.py")]),
                             html.Li([html.Strong("Option 3:"), " Quick Test: ", html.Code("python scripts/run_ingestion.py")])
                         ]),
-                        html.P(["📖 Mehr Info: ", html.A("QUICKSTART.md", href="#", className="alert-link")], className="mb-0")
+                        html.P(["📖 Mehr Info: ", html.Code("docs/setup/QUICKSTART.md")], className="mb-0")
                     ], color="info", className="shadow")
                 ], width=12)
             ])
