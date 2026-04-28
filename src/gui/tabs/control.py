@@ -7,15 +7,17 @@ import os
 import subprocess
 import sys
 import platform
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import dash
 import dash_bootstrap_components as dbc
 from dash import dcc, html, Input, Output, State
 
+from src.models.database import SessionLocal
+from src.models.system_logs import SystemLog
 from src.utils.activity_logger import activity_logger
-from src.utils.process_utils import stop_process
+from src.utils.process_utils import check_process_running, stop_process
 
 # Get project root
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -25,6 +27,118 @@ logger = logging.getLogger(__name__)
 IS_WINDOWS = platform.system() == 'Windows'
 IS_LINUX = platform.system() == 'Linux'
 IS_MAC = platform.system() == 'Darwin'
+_CONTINUOUS_PIPELINE_SCRIPT = "scripts/run_continuous_pipeline.py"
+_PIPELINE_ACTIVITY_WINDOW_SECONDS = 900
+_PIPELINE_LOG_FILES = (
+    Path("logs/pipeline_activity.log"),
+    Path("logs/dashboard.log"),
+)
+
+
+def _find_continuous_pipeline_pid():
+    """Find a locally visible continuous pipeline process by command line."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            cmdline = proc.info.get("cmdline") or []
+            if not cmdline:
+                continue
+            if _CONTINUOUS_PIPELINE_SCRIPT in " ".join(cmdline) and proc.pid != os.getpid():
+                return proc.pid
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return None
+
+
+def _has_recent_pipeline_activity(window_seconds: int = _PIPELINE_ACTIVITY_WINDOW_SECONDS) -> bool:
+    """Infer pipeline activity from the shared DB log stream."""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+    activity_signals = (
+        "Continuous Pipeline Mode STARTED",
+        "Starting Pipeline Iteration #",
+        "All articles fully processed, waiting",
+        "Pipeline console started",
+        "Pipeline process started",
+        "Full MVP Pipeline console opened",
+        "Quick Test console opened",
+    )
+    stop_signals = (
+        "Continuous Pipeline STOPPED",
+        "Pipeline stopped by user",
+    )
+
+    try:
+        with SessionLocal() as db:
+            entries = (
+                db.query(SystemLog)
+                .filter(
+                    SystemLog.timestamp >= cutoff,
+                    SystemLog.source.in_(["pipeline", "control"]),
+                )
+                .order_by(SystemLog.timestamp.desc())
+                .limit(50)
+                .all()
+            )
+    except Exception:
+        entries = []
+
+    for entry in entries:
+        message = entry.message or ""
+        if any(signal in message for signal in stop_signals):
+            return False
+        if any(signal in message for signal in activity_signals):
+            return True
+
+    for log_path in _PIPELINE_LOG_FILES:
+        if not log_path.exists():
+            continue
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()[-120:]
+        except OSError:
+            continue
+
+        for line in reversed(lines):
+            if not line.strip():
+                continue
+            if any(signal in line for signal in stop_signals):
+                return False
+            if any(signal in line for signal in activity_signals):
+                return True
+    return False
+
+
+def _resolve_continuous_pipeline_state(current_state):
+    """Reconstruct pipeline state from runtime signals instead of only the Dash store."""
+    state = current_state or {}
+    pid = state.get("pid")
+
+    if pid and check_process_running(pid):
+        return {"running": True, "pid": pid}
+
+    local_pid = _find_continuous_pipeline_pid()
+    if local_pid:
+        return {"running": True, "pid": local_pid}
+
+    if _has_recent_pipeline_activity():
+        return {"running": True, "pid": None}
+
+    return {"running": False, "pid": None}
+
+
+def _request_continuous_pipeline_stop():
+    """Send a cross-process stop request through the shared log table."""
+    activity_logger.log_activity(
+        "STOP_REQUEST",
+        "WARNING",
+        source="control",
+        component="continuous_pipeline",
+        details={"requested_at": datetime.now(timezone.utc).isoformat()},
+    )
 
 def open_terminal_with_command(script_path, args="", title="TradeMeUp"):
     """Open a new terminal window and run a command (cross-platform)."""
@@ -508,14 +622,39 @@ def register_callbacks(app):
                 logger.error("Failed to start: %s", e, exc_info=True)
                 return dash.no_update
         if button_id == "btn-stop-continuous":
-            if current_state and current_state.get("pid"):
-                success, message = stop_process(current_state["pid"])
+            resolved_state = _resolve_continuous_pipeline_state(current_state)
+            stop_pid = resolved_state.get("pid")
+            stop_message = None
+
+            if stop_pid:
+                success, message = stop_process(stop_pid)
                 if success:
+                    stop_message = message
                     activity_logger.log_activity("Continuous Pipeline STOPPED: %s" % message, "INFO")
                 else:
                     activity_logger.log_activity("Warning stopping pipeline: %s" % message, "WARNING")
+            _request_continuous_pipeline_stop()
+            if stop_message is None:
+                activity_logger.log_activity(
+                    "Continuous Pipeline stop requested via shared control signal",
+                    "INFO",
+                )
             return ({"running": False, "pid": None}, False, True)
         return dash.no_update
+
+    @app.callback(
+        [
+            Output("continuous-pipeline-state", "data", allow_duplicate=True),
+            Output("btn-start-continuous", "disabled", allow_duplicate=True),
+            Output("btn-stop-continuous", "disabled", allow_duplicate=True),
+        ],
+        Input("interval-component", "n_intervals"),
+        State("continuous-pipeline-state", "data"),
+        prevent_initial_call=True,
+    )
+    def sync_continuous_pipeline_state(n, current_state):
+        state = _resolve_continuous_pipeline_state(current_state)
+        return state, state["running"], False
 
     @app.callback(
         Output("rss-fetch-status-store", "data"),
@@ -556,7 +695,8 @@ def register_callbacks(app):
         State("continuous-pipeline-state", "data"),
     )
     def update_continuous_status(n, state):
-        if state and state.get("running"):
+        resolved_state = _resolve_continuous_pipeline_state(state)
+        if resolved_state.get("running"):
             return html.Div([
                 html.Span("🔄 ", className="text-success"),
                 html.Small("Auto Mode", className="text-success fw-bold"),

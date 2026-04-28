@@ -14,6 +14,7 @@ from src.models.processed_news import ProcessedNews
 from src.models.entities import Entity, NewsEntityMapping, EntityRelationship
 from src.models.analysis import ImpactScore, SurpriseScore, MarketRegime, SignalDecayModel
 from src.models.predictions import Prediction, PredictionOutcome, BacktestResult, MarketData
+from src.models.system_logs import SystemLog
 
 # Import settings
 from src.config.settings import settings

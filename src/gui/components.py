@@ -69,7 +69,6 @@ def create_navbar():
                             id="btn-stop-continuous",
                             color="danger",
                             size="sm",
-                            disabled=True,
                             className="me-2"
                         ),
                         dbc.Button(

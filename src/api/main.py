@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
+    # Attach DB log handler once the app (and therefore DB pool) is ready
+    try:
+        from src.utils.db_log_handler import attach_db_handler
+        attach_db_handler(source="api")
+    except Exception:
+        pass
+
     logger.info("Starting ANPS-TradeMeUp API...")
     logger.info(f"Environment: {settings.app_env}")
     logger.info(f"Database: {redact_url(settings.database_url)}")
