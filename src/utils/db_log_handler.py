@@ -2,6 +2,8 @@
 import logging
 from datetime import datetime, timezone
 
+from src.utils.log_retention import prune_system_logs
+
 _PY_TO_APP_LEVEL = {
     logging.DEBUG:    "DEBUG",
     logging.INFO:     "INFO",
@@ -15,6 +17,7 @@ _NOISY_PREFIXES = (
     "sqlalchemy", "uvicorn", "fastapi", "httpx", "httpcore",
     "urllib3", "asyncio", "yfinance", "hpack", "h2",
 )
+_PRUNE_INTERVAL = 200
 
 
 def _is_noisy(name: str) -> bool:
@@ -33,6 +36,7 @@ class DBLogHandler(logging.Handler):
     def __init__(self, source: str = "system", level: int = logging.INFO):
         super().__init__(level)
         self.source = source[:50]
+        self._write_count = 0
 
     def emit(self, record: logging.LogRecord):
         try:
@@ -64,6 +68,10 @@ class DBLogHandler(logging.Handler):
             with SessionLocal() as db:
                 db.add(entry)
                 db.commit()
+
+            self._write_count += 1
+            if self._write_count % _PRUNE_INTERVAL == 0:
+                prune_system_logs()
         except Exception:
             pass  # never let log handler errors propagate
 
