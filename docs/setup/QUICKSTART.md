@@ -103,6 +103,16 @@ docker compose stop postgres
 docker compose down
 ```
 
+Oder mit dem Hilfsskript:
+
+```bash
+scripts/docker/manage-containers.sh start
+scripts/docker/manage-containers.sh stop
+scripts/docker/manage-containers.sh status
+scripts/docker/manage-containers.sh logs api
+scripts/docker/manage-containers.sh start worker
+```
+
 ## Legacy SQLite migration
 
 SQLite migration helpers are archived and are no longer part of the normal setup flow.
