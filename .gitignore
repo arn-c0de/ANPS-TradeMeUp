@@ -20,6 +20,7 @@ wheels/
 .installed.cfg
 *.egg
 .claude/
+.codex
 
 # Virtual environments
 venv/

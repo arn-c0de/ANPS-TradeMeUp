@@ -12,8 +12,6 @@ Run this script to retroactively calculate performance for all historical predic
 import sys
 import logging
 from pathlib import Path
-from datetime import datetime
-import uuid
 
 # Add project root to path
 project_root = Path(__file__).parent.parent

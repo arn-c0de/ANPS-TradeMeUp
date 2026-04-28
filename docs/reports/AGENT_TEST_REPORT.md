@@ -2,6 +2,8 @@
 **Date:** January 23, 2026  
 **Status:** ✅ ALL AGENTS OPERATIONAL
 
+> Historical snapshot: the repository now uses PostgreSQL as the primary database backend and runtime entrypoints under `scripts/`.
+
 ## Test Summary
 
 ### Initialization Test Results
@@ -42,7 +44,7 @@ All agents successfully initialized and are ready for pipeline execution:
 
 ## Database Status
 
-- **Database:** `trademeup.db` (SQLite)
+- **Database at time of report:** `trademeup.db` (SQLite)
 - **Migration Status:** ✅ Up-to-date
 - **Tables Created:** 16 tables
   - `alembic_version`
@@ -100,7 +102,7 @@ python tests/test_new_agents.py
 
 - **LLM Provider:** Ollama (default)
   - Note: Ollama connection warning can be ignored if not using LLM features
-- **Database:** SQLite (`trademeup.db`)
+- **Database at time of report:** SQLite (`trademeup.db`)
 - **RSS Feeds:** 15 feeds configured
 
 ## Conclusion

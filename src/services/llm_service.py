@@ -1,7 +1,9 @@
 """LLM Service - Unified interface for Ollama, OpenAI, and Anthropic."""
-import logging
-from typing import Optional, Dict, List
 import json
+import logging
+from typing import Dict, List, Optional
+from urllib.parse import urlparse
+
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -9,6 +11,27 @@ from src.config.settings import settings
 from src.utils.redact import redact_url
 
 logger = logging.getLogger(__name__)
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+
+def normalize_openai_base_url(base_url: Optional[str]) -> str:
+    """Return a safe OpenAI base URL, falling back to the official endpoint."""
+    if not base_url:
+        return DEFAULT_OPENAI_BASE_URL
+
+    normalized = base_url.strip()
+    if not normalized:
+        return DEFAULT_OPENAI_BASE_URL
+
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"http", "https"}:
+        logger.warning(
+            "Ignoring invalid OPENAI_BASE_URL without http(s) scheme: %s",
+            normalized,
+        )
+        return DEFAULT_OPENAI_BASE_URL
+
+    return normalized
 
 
 class LLMService:
@@ -40,16 +63,19 @@ class LLMService:
                 import os
                 import httpx
                 
+                openai_base_url = normalize_openai_base_url(settings.openai_base_url)
+
                 # Configure OpenAI client with timeout and proxy support
                 client_kwargs = {
                     "api_key": settings.openai_api_key,
+                    "base_url": openai_base_url,
                     "timeout": 60.0,  # 60 second timeout
                 }
-                
-                # Add custom base URL if configured (for proxies/custom endpoints)
-                if hasattr(settings, 'openai_base_url') and settings.openai_base_url:
-                    client_kwargs["base_url"] = settings.openai_base_url
-                    logger.info(f"Using custom OpenAI base URL: {redact_url(settings.openai_base_url)}")
+
+                if openai_base_url != DEFAULT_OPENAI_BASE_URL:
+                    logger.info(f"Using custom OpenAI base URL: {redact_url(openai_base_url)}")
+                else:
+                    logger.info("Using default OpenAI base URL")
                 
                 # Check proxy configuration
                 http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")

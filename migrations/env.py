@@ -17,12 +17,13 @@ from src.models.predictions import Prediction, PredictionOutcome, BacktestResult
 
 # Import settings
 from src.config.settings import settings
+from src.models.database import normalize_database_url
 
 # this is the Alembic Config object
 config = context.config
 
 # Override sqlalchemy.url with our settings
-config.set_main_option('sqlalchemy.url', settings.database_url)
+config.set_main_option('sqlalchemy.url', normalize_database_url(settings.database_url))
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:

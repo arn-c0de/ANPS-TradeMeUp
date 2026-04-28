@@ -5,6 +5,9 @@ REM Ensures the pipeline runs with the correct Python environment
 echo Starting TradeMeUp Continuous Pipeline...
 echo.
 
+for %%I in ("%~dp0..\..") do set "ROOT_DIR=%%~fI"
+cd /d "%ROOT_DIR%"
+
 REM Check if venv exists
 if not exist "venv\Scripts\python.exe" (
     echo ERROR: Virtual environment not found!

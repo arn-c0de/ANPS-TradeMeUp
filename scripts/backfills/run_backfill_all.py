@@ -1,20 +1,12 @@
-"""
-Master Backfill Script
-Runs all backfill operations in the correct order:
-1. Entity Mappings
-2. Impact Scores  
-3. Surprise Scores
-4. Predictions
-"""
+"""Master backfill script."""
 
-import logging
-import sys
-from pathlib import Path
 from datetime import datetime
+import logging
+from pathlib import Path
+import sys
 
-# Add project root to path
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.agents.entity_mapping_agent import EntityMappingAgent
 from src.agents.impact_scoring_agent import ImpactScoringAgent
