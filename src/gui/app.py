@@ -26,6 +26,7 @@ from src.gui.tabs import (
     system,
     control,
     testing,
+    databases,
 )
 from src.gui.tabs import settings as settings_tab
 
@@ -104,6 +105,7 @@ app.layout = html.Div([
             dbc.Tab(control.create_layout(), label="🎮 Agent Control", tab_id="control", className="text-light"),
             dbc.Tab(testing.create_layout(), label="🧪 Testing", tab_id="testing", className="text-light"),
             dbc.Tab(system.create_layout(), label="🔧 System Health", tab_id="system", className="text-light"),
+            dbc.Tab(databases.create_layout(), label="🗄️ Databases", tab_id="databases", className="text-light"),
             dbc.Tab(settings_tab.create_layout(), label="⚙️ Settings", tab_id="settings", className="text-light")
         ], id="tabs", active_tab="dashboard", persistence=False)
     ], fluid=True)
@@ -120,6 +122,7 @@ statistics.register_callbacks(app)
 testing.register_callbacks(app)
 system.register_callbacks(app)
 settings_tab.register_callbacks(app)
+databases.register_callbacks(app)
 
 if __name__ == "__main__":
     print(f"🚀 Starting ANPS-TradeMeUp Dashboard v{VERSION}...")

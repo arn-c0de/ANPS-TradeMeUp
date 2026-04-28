@@ -12,5 +12,6 @@ from . import system
 from . import control
 from . import testing
 from . import settings
+from . import databases
 
-__all__ = ['dashboard', 'predictions', 'news', 'statistics', 'charts', 'simulations', 'system', 'control', 'testing', 'settings']
+__all__ = ['dashboard', 'predictions', 'news', 'statistics', 'charts', 'simulations', 'system', 'control', 'testing', 'settings', 'databases']
