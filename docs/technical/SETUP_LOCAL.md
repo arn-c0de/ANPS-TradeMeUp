@@ -1,4 +1,6 @@
-# TradeMeUp - Local Setup Guide (ohne Docker)
+# TradeMeUp - Local Setup Guide (without app containers)
+
+> Status note: this guide now assumes PostgreSQL as the active database backend. Older SQLite instructions are obsolete unless you are working on archived migration tasks.
 
 ## Schnellstart für lokale Entwicklung
 
@@ -6,7 +8,7 @@
 
 - **Python 3.11+** installiert
 - **Ollama** (für lokales LLM) ODER **OpenAI API Key**
-- Optional: SQLite (bereits in Python enthalten)
+- Docker or native PostgreSQL 16+ with `pgvector`
 
 ### 2. Ollama Setup (Empfohlen für lokal)
 
@@ -66,15 +68,14 @@ OPENAI_MODEL=gpt-3.5-turbo
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=dein-api-key-hier
 
-# Database (SQLite - funktioniert sofort):
-DATABASE_URL=sqlite:///./trademeup.db
+# Database (PostgreSQL required):
+DATABASE_URL=postgresql://trademeup_user:trademeup_pass@localhost:5432/trademeup
 ```
 
 ### 5. Datenbank initialisieren
 
 ```bash
-# Alembic Migration erstellen
-alembic revision --autogenerate -m "Initial schema"
+docker compose up -d postgres
 
 # Migration ausführen
 alembic upgrade head
@@ -153,11 +154,12 @@ curl http://localhost:11434/api/tags
 ollama serve
 ```
 
-### SQLite Fehler
+### Database reset
 
 ```bash
-# Database neu erstellen:
-rm trademeup.db
+# Reset PostgreSQL schema:
+docker compose down -v
+docker compose up -d postgres
 alembic upgrade head
 ```
 

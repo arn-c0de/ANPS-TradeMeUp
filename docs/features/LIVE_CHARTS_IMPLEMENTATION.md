@@ -90,8 +90,7 @@ src/gui/charts/
 
 ### Start the dashboard
 ```bash
-cd "d:\Projects\PYTHON - FOLDER\TradeMeUp"
-.\venv\Scripts\python.exe run_dashboard.py
+python scripts/runtime/run_dashboard.py
 ```
 
 ### Open Live Charts

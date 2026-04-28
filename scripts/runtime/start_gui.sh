@@ -13,8 +13,9 @@ echo "🚀 TradeMeUp - Starting GUI Dashboard"
 echo "================================================================================"
 echo ""
 
-# Change to project directory
-cd "$(dirname "$0")"
+# Change to project root
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT_DIR"
 
 # Note: Do NOT source .env here - Pydantic reads .env.local automatically
 # Sourcing would export CORS_ORIGINS as shell string, breaking JSON parsing
@@ -63,7 +64,7 @@ echo "==========================================================================
 echo "🌐 Starting Dashboard..."
 echo "================================================================================"
 echo ""
-python run_dashboard.py
+python scripts/runtime/run_dashboard.py
 
 # If dashboard exits with errors
 if [ $? -ne 0 ]; then

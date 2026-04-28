@@ -4,6 +4,9 @@ echo "TradeMeUp - PostgreSQL Setup"
 echo "============================================================"
 echo ""
 
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT_DIR"
+
 # Check if venv exists, create if needed
 if [ ! -d "venv" ]; then
     echo "[1/6] Creating virtual environment..."
@@ -27,7 +30,7 @@ pip install -r requirements.txt --quiet
 echo "✅ Dependencies installed"
 
 echo "[4/6] Testing PostgreSQL connection..."
-python3 test_postgresql_connection.py 2>/dev/null || python test_postgresql_connection.py 2>/dev/null
+python3 scripts/db/test_db_connection.py 2>/dev/null || python scripts/db/test_db_connection.py 2>/dev/null
 
 if [ $? -ne 0 ]; then
     echo ""
@@ -38,7 +41,7 @@ if [ $? -ne 0 ]; then
     echo "  2. Is DATABASE_URL correct in .env.local?"
     echo "  3. Does database 'trademeup' exist?"
     echo ""
-    echo "See POSTGRESQL_SETUP.md for detailed instructions"
+    echo "See docs/setup/POSTGRESQL_SETUP.md for detailed instructions"
     read -p "Press enter to continue..."
     exit 1
 fi
@@ -57,8 +60,8 @@ echo "[SUCCESS] PostgreSQL Setup Complete!"
 echo "============================================================"
 echo ""
 echo "You can now:"
-echo "  1. Start GUI: ./start_gui.sh"
-echo "  2. Run pipeline: ./run_pipeline.sh"
+echo "  1. Start GUI: ./scripts/runtime/start_gui.sh"
+echo "  2. Run pipeline: ./scripts/runtime/run_pipeline.sh"
 echo "  3. Check Docker: sudo docker ps"
 echo ""
 read -p "Press enter to continue..."

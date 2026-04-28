@@ -2,7 +2,8 @@
 # TradeMeUp Pipeline Launcher - Optimized for GPU Memory Management
 # Sets up environment and runs continuous pipeline
 
-cd "$(dirname "$0")"
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT_DIR"
 
 echo "================================================================================"
 echo "🚀 TradeMeUp - Optimized Pipeline Launcher"

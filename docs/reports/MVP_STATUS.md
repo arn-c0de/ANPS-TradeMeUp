@@ -1,5 +1,7 @@
 # 🎉 TradeMeUp MVP - Complete Status Report
 
+> Historical snapshot from January 22, 2026. Several metrics, paths, and infrastructure details below describe the MVP state at that time and do not reflect the current refactored repository layout.
+
 **Date:** January 22, 2026  
 **Status:** ✅ **FUNCTIONAL MVP COMPLETE**
 
@@ -194,10 +196,10 @@ TradeMeUp/
 │   └── run_full_pipeline.py     ✅
 ├── migrations/                   ✅
 ├── tests/                        🚧
-├── trademeup.db                  ✅ (188KB, 14 tables)
+├── trademeup.db                  ✅ (historical SQLite file at report time)
 ├── .env.local                    ✅ (qwen3:8b configured)
 ├── view_results.py               ✅
-├── run_dashboard.py              ✅
+├── scripts/runtime/run_dashboard.py ✅
 ├── PIPELINE_RESULTS.md           ✅
 └── GUI_README.md                 ✅
 ```
@@ -236,7 +238,7 @@ TradeMeUp/
 ### Dash API Changes
 **Problem:** `app.run_server()` obsolete  
 **Solution:** Changed to `app.run()`  
-**Files Fixed:** app.py, run_dashboard.py
+**Files Fixed:** app.py, runtime dashboard entrypoint
 
 ---
 
@@ -294,7 +296,7 @@ TradeMeUp/
 | Document | Purpose | Status |
 |----------|---------|--------|
 | README.md | Project overview | ✅ |
-| QUICKSTART.md | Quick setup guide | ✅ |
+| docs/setup/QUICKSTART.md | Quick setup guide | ✅ |
 | SETUP_LOCAL.md | Local setup instructions | ✅ |
 | Implementation_Plan.md | Original plan | ✅ |
 | COMPLETE_IMPLEMENTATION_CHECKLIST.md | Full roadmap | ✅ Updated |
@@ -325,7 +327,7 @@ python view_results.py
 
 4. **Start Dashboard:**
 ```powershell
-python run_dashboard.py
+python scripts/runtime/run_dashboard.py
 # Open http://localhost:8050
 ```
 

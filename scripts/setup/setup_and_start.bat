@@ -14,8 +14,9 @@ echo 🚀 TradeMeUp - Complete Setup and Launch
 echo ================================================================================
 echo.
 
-REM Change to project directory
-cd /d "%~dp0"
+REM Change to project root
+for %%I in ("%~dp0..\..") do set "ROOT_DIR=%%~fI"
+cd /d "%ROOT_DIR%"
 
 REM Check Python installation
 echo 🔍 Checking Python installation...
@@ -100,7 +101,7 @@ if "%start_choice%"=="1" (
     echo 🌐 Starting Dashboard...
     echo 💡 Visit: http://localhost:8050
     echo.
-    python run_dashboard.py
+    python scripts\runtime\run_dashboard.py
 ) else if "%start_choice%"=="2" (
     echo 🤖 Starting Pipeline...
     echo.
@@ -114,7 +115,7 @@ if "%start_choice%"=="1" (
     echo 🌐 Starting Dashboard...
     echo 💡 Visit: http://localhost:8050
     echo.
-    python run_dashboard.py
+    python scripts\runtime\run_dashboard.py
 ) else (
     echo ❌ Invalid choice
     pause

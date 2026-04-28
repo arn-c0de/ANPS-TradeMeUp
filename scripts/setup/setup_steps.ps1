@@ -1,5 +1,7 @@
 # TradeMeUp PostgreSQL Setup - PowerShell Version
-# Führen Sie diese Datei aus mit: .\setup_steps.ps1
+# Run from the repository root with: .\scripts\setup\setup_steps.ps1
+
+Set-Location (Resolve-Path "$PSScriptRoot\..\..")
 
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "TradeMeUp - PostgreSQL Setup" -ForegroundColor Cyan
@@ -20,7 +22,7 @@ Write-Host "[2/5] Installing pgvector..." -ForegroundColor Green
 & ".\venv\Scripts\pip.exe" install pgvector
 
 Write-Host "[3/5] Testing PostgreSQL connection..." -ForegroundColor Green
-& ".\venv\Scripts\python.exe" test_postgresql_connection.py
+& ".\venv\Scripts\python.exe" scripts\db\test_db_connection.py
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -31,7 +33,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "  2. Is DATABASE_URL correct in .env.local?" -ForegroundColor Yellow
     Write-Host "  3. Does database 'trademeup' exist?" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "See POSTGRESQL_SETUP.md for detailed instructions" -ForegroundColor Cyan
+    Write-Host "See docs/setup/POSTGRESQL_SETUP.md for detailed instructions" -ForegroundColor Cyan
     Read-Host "Press Enter to continue"
     exit 1
 }
@@ -58,7 +60,7 @@ Write-Host "[SUCCESS] PostgreSQL Setup Complete!" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "You can now:" -ForegroundColor Cyan
-Write-Host "  1. Start GUI: .\start_gui.bat" -ForegroundColor White
+Write-Host "  1. Start GUI: .\scripts\runtime\start_gui.bat" -ForegroundColor White
 Write-Host "  2. Run pipeline: python scripts\run_continuous_pipeline.py" -ForegroundColor White
 Write-Host "  3. Benchmark: python scripts\benchmark_postgresql.py" -ForegroundColor White
 Write-Host ""

@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    openai_model: str = Field(default="gpt-3.5-turbo", alias="OPENAI_MODEL")
+    openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
     openai_base_url: str = Field(default="", alias="OPENAI_BASE_URL")  # Optional: for custom endpoints/proxies
 
     # Anthropic

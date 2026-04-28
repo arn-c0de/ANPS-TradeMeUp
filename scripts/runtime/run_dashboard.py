@@ -1,22 +1,23 @@
-"""
-Quick start script for TradeMeUp Dashboard
-"""
+"""Runtime entrypoint for the TradeMeUp dashboard."""
 
-import warnings
-# Suppress pandas deprecation warnings from yfinance library
-warnings.filterwarnings('ignore', category=DeprecationWarning, module='yfinance')
-warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
-
-import sys
+from pathlib import Path
 import os
+import sys
+import warnings
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+# Suppress pandas deprecation warnings from yfinance library
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="yfinance")
+warnings.filterwarnings("ignore", message=".*Timestamp.utcnow.*")
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.gui.app import app
 from src.utils.activity_logger import activity_logger
 
 if __name__ == "__main__":
+    debug_mode = os.getenv("DASH_DEBUG", "").lower() in {"1", "true", "yes"}
+
     # Initialize activity logger with startup message
     activity_logger.log_activity("Dashboard starting...", "INFO")
     activity_logger.log_activity("System ready for pipeline execution", "SUCCESS")
@@ -33,10 +34,10 @@ if __name__ == "__main__":
     
     # Enable hot reload and asset refresh in debug mode
     app.run(
-        debug=True, 
-        host="0.0.0.0", 
+        debug=debug_mode,
+        host="0.0.0.0",
         port=8050,
-        dev_tools_hot_reload=True,
-        dev_tools_ui=True,
+        dev_tools_hot_reload=debug_mode,
+        dev_tools_ui=debug_mode,
         dev_tools_props_check=False  # Disable to reduce console warnings
     )

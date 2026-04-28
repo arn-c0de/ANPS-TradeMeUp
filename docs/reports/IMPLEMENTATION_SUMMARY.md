@@ -1,5 +1,7 @@
 # TradeMeUp - Implementation Summary
 
+> Historical snapshot from January 23, 2026. Current runtime paths and infrastructure are documented in `README.md`, `docs/STRUCTURE.md`, and `docs/setup/`.
+
 ## Date: 2026-01-23
 
 ## Overview

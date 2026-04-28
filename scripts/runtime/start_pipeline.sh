@@ -5,8 +5,9 @@
 echo "Starting TradeMeUp Continuous Pipeline..."
 echo ""
 
-# Change to project directory
-cd "$(dirname "$0")"
+# Change to project root
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT_DIR"
 
 # Check if venv exists
 if [ ! -f "venv/bin/python" ]; then

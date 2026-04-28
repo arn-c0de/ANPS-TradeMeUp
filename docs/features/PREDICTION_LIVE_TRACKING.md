@@ -135,7 +135,7 @@ Mögliche zukünftige Features:
 
 Um die Funktionalität zu testen:
 
-1. **Dashboard starten**: `python run_dashboard.py`
+1. **Start the dashboard**: `python scripts/runtime/run_dashboard.py`
 2. **Predictions Tab öffnen**: Navigiere zu "Predictions"
 3. **Live-Daten prüfen**: Tabelle zeigt automatisch Live-Performance
 4. **Details öffnen**: Klicke "Details" für erweiterte Performance-Metriken

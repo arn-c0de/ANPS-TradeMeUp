@@ -13,13 +13,14 @@ echo "🤖 TradeMeUp - Starting Agent Pipeline"
 echo "================================================================================"
 echo ""
 
-# Change to project directory
-cd "$(dirname "$0")"
+# Change to project root
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT_DIR"
 
 # Check if venv exists
 if [ ! -d "venv" ]; then
     echo "❌ Virtual environment not found!"
-    echo "💡 Please run start_gui.sh first to set up the environment"
+    echo "💡 Please run scripts/runtime/start_gui.sh first to set up the environment"
     read -p "Press enter to continue..."
     exit 1
 fi
