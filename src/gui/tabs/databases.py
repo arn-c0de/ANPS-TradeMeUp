@@ -2,6 +2,7 @@
 
 import json
 import base64
+import re
 import socket
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +34,13 @@ EXPORT_FORMAT = "TradeMeUp-DB-Export"
 EXPORT_FORMAT_VERSION = "1.0"
 PAGE_SIZE = 20
 
+# Security limits
+_MAX_IMPORT_BYTES = 200 * 1024 * 1024   # 200 MB decoded
+_MAX_ROWS_PER_TABLE = 500_000
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
+)
+
 # FK-safe insertion order (parents before children)
 _TABLE_ORDER_EXPORT = [
     "raw_news", "entities",
@@ -63,6 +71,12 @@ _MODEL_MAP = {
     "trading_simulations": TradingSimulation,
 }
 
+
+# Per-model column whitelist — built once at import time, prevents mass-assignment
+_MODEL_COLUMNS: dict[str, frozenset] = {
+    tbl: frozenset(c.name for c in model.__table__.columns)
+    for tbl, model in _MODEL_MAP.items()
+}
 
 # ── JSON helpers ──────────────────────────────────────────────────────────────
 class _DBEncoder(json.JSONEncoder):
@@ -319,18 +333,18 @@ def _cutoff_from_range(timerange: str, custom_start: Optional[str], custom_end: 
     """Return (start_dt, end_dt) or (None, None) for all-time."""
     from datetime import timedelta
     now = datetime.now(timezone.utc)
-    if timerange == "1d":
-        return now - timedelta(days=1), now
-    if timerange == "7d":
-        return now - timedelta(days=7), now
-    if timerange == "30d":
-        return now - timedelta(days=30), now
-    if timerange == "90d":
-        return now - timedelta(days=90), now
+    _map = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
+    if timerange in _map:
+        return now - timedelta(days=_map[timerange]), now
     if timerange == "custom" and custom_start:
-        start = datetime.fromisoformat(custom_start).replace(tzinfo=timezone.utc)
-        end = datetime.fromisoformat(custom_end).replace(tzinfo=timezone.utc) if custom_end else now
-        return start, end
+        try:
+            start = datetime.fromisoformat(custom_start).replace(tzinfo=timezone.utc)
+            end = datetime.fromisoformat(custom_end).replace(tzinfo=timezone.utc) if custom_end else now
+            if start > end:
+                start, end = end, start
+            return start, end
+        except (ValueError, TypeError):
+            return None, None
     return None, None
 
 
@@ -373,17 +387,113 @@ def _export_db(selected_tables: list,
     return json.dumps(export_obj, indent=2, cls=_DBEncoder)
 
 
-def _parse_import_file(content_b64: str) -> Optional[dict]:
+def _parse_import_file(content_b64: str) -> tuple[Optional[dict], Optional[str]]:
+    """Returns (parsed_obj, error_message). Exactly one is None."""
     try:
         if "," in content_b64:
             content_b64 = content_b64.split(",", 1)[1]
+
+        # Size guard before decoding
+        if len(content_b64) > _MAX_IMPORT_BYTES * 4 // 3 + 4:
+            return None, f"File exceeds the {_MAX_IMPORT_BYTES // (1024*1024)} MB import limit."
+
         raw = base64.b64decode(content_b64).decode("utf-8")
+
+        if len(raw.encode()) > _MAX_IMPORT_BYTES:
+            return None, f"File exceeds the {_MAX_IMPORT_BYTES // (1024*1024)} MB import limit."
+
         obj = json.loads(raw)
+
+        if not isinstance(obj, dict):
+            return None, "Invalid file: top-level structure must be a JSON object."
         if obj.get("format") != EXPORT_FORMAT:
-            return None
-        return obj
+            return None, "Invalid file: not a TradeMeUp export (.tmu)."
+        if obj.get("format_version") != EXPORT_FORMAT_VERSION:
+            return None, (
+                f"Unsupported format version '{obj.get('format_version')}'. "
+                f"Expected '{EXPORT_FORMAT_VERSION}'."
+            )
+
+        data = obj.get("data")
+        if not isinstance(data, dict):
+            return None, "Invalid file: 'data' section missing or malformed."
+
+        # Validate per-table structure
+        for tbl, rows in data.items():
+            if tbl not in _MODEL_MAP:
+                # Unknown table — skip silently (forward-compat)
+                continue
+            if not isinstance(rows, list):
+                return None, f"Invalid file: table '{tbl}' must be a list."
+            if len(rows) > _MAX_ROWS_PER_TABLE:
+                return None, (
+                    f"Table '{tbl}' contains {len(rows):,} rows which exceeds the "
+                    f"per-table limit of {_MAX_ROWS_PER_TABLE:,}."
+                )
+            for i, row in enumerate(rows[:5]):          # spot-check first 5
+                if not isinstance(row, dict):
+                    return None, f"Invalid file: row {i} in '{tbl}' is not a JSON object."
+
+        return obj, None
+    except (UnicodeDecodeError, base64.binascii.Error):
+        return None, "File could not be decoded. Is it a valid .tmu export?"
+    except json.JSONDecodeError:
+        return None, "File is not valid JSON."
     except Exception:
-        return None
+        return None, "Unexpected error while reading the file."
+
+
+def _sanitise_str(val: Any, max_len: int = 200) -> str:
+    """Return a safe printable string, truncated to max_len."""
+    return str(val)[:max_len].encode("ascii", errors="replace").decode("ascii")
+
+
+def _coerce_row(row_dict: dict, tbl: str) -> dict:
+    """
+    Return a copy of row_dict with:
+    - only columns that belong to the model (prevents mass-assignment)
+    - values type-coerced to match column types
+    """
+    from sqlalchemy import String, Text, Float, Integer, Boolean, DateTime
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    model = _MODEL_MAP[tbl]
+    valid_cols = _MODEL_COLUMNS[tbl]
+    col_types = {c.name: type(c.type) for c in model.__table__.columns}
+    result = {}
+    for key, val in row_dict.items():
+        if key not in valid_cols:
+            continue                            # drop unknown keys
+        if val is None:
+            result[key] = None
+            continue
+        col_type = col_types.get(key)
+        try:
+            if col_type in (Float,):
+                result[key] = float(val)
+            elif col_type in (Integer,):
+                result[key] = int(val)
+            elif col_type in (Boolean,):
+                result[key] = bool(val)
+            elif col_type in (String, Text):
+                result[key] = str(val)[:10_000]
+            elif col_type in (DateTime,):
+                if isinstance(val, str):
+                    dt = datetime.fromisoformat(val)
+                    result[key] = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                else:
+                    result[key] = val
+            elif col_type is JSONB:
+                # Must be a JSON-serialisable type
+                if not isinstance(val, (dict, list, str, int, float, bool, type(None))):
+                    result[key] = None
+                else:
+                    result[key] = val
+            else:
+                result[key] = val
+        except (ValueError, TypeError):
+            result[key] = None
+    return result
 
 
 def _execute_import(obj: dict, mode: str,
@@ -392,6 +502,9 @@ def _execute_import(obj: dict, mode: str,
                     custom_end: Optional[str] = None) -> dict:
     """mode: 'merge' or 'replace'. Returns result stats dict."""
     data = obj.get("data", {})
+    if not isinstance(data, dict):
+        return {"results": {}, "errors": ["Malformed import file."]}
+
     results: dict[str, int] = {}
     errors: list[str] = []
     start_dt, end_dt = _cutoff_from_range(timerange, custom_start, custom_end)
@@ -414,44 +527,58 @@ def _execute_import(obj: dict, mode: str,
         except Exception:
             return True
 
+    if mode not in ("merge", "replace"):
+        return {"results": {}, "errors": ["Invalid import mode."]}
+
     if mode == "replace":
         try:
             with Session(_engine) as db:
                 for tbl in reversed(_TABLE_ORDER_EXPORT):
-                    if tbl in data:
-                        model = _MODEL_MAP[tbl]
-                        db.query(model).delete()
+                    if tbl in data and tbl in _MODEL_MAP:
+                        db.query(_MODEL_MAP[tbl]).delete()
                 db.commit()
-        except Exception as e:
-            errors.append(f"Clear failed: {e}")
-            return {"results": results, "errors": errors}
+        except Exception:
+            return {"results": {}, "errors": ["Failed to clear existing data before replace."]}
 
     for tbl in _TABLE_ORDER_EXPORT:
-        if tbl not in data:
+        if tbl not in data or tbl not in _MODEL_MAP:
             continue
+        raw_rows = data[tbl]
+        if not isinstance(raw_rows, list):
+            errors.append(f"{tbl}: skipped (not a list).")
+            continue
+        raw_rows = raw_rows[:_MAX_ROWS_PER_TABLE]
+
         model = _MODEL_MAP[tbl]
-        rows = [r for r in data[tbl] if _in_window(r, tbl)]
+        rows = [r for r in raw_rows if isinstance(r, dict) and _in_window(r, tbl)]
         inserted = 0
+        skipped = 0
         for row_dict in rows:
             try:
+                safe = _coerce_row(row_dict, tbl)
                 with Session(_engine) as db:
-                    obj_instance = model(**row_dict)
+                    instance = model(**safe)
                     if mode == "merge":
-                        db.merge(obj_instance)
+                        db.merge(instance)
                     else:
-                        db.add(obj_instance)
+                        db.add(instance)
                     db.commit()
                     inserted += 1
-            except Exception as e:
-                errors.append(f"{tbl}: {str(e)[:120]}")
+            except Exception:
+                skipped += 1
         results[tbl] = inserted
+        if skipped:
+            errors.append(f"{tbl}: {skipped} row(s) skipped due to constraint violations.")
 
+    # Sanitise file metadata before writing to local history
     filter_note = "" if timerange == "all" else f", filter={timerange}"
+    safe_host = _sanitise_str(obj.get("hostname", "unknown"), 64)
+    safe_ts   = _sanitise_str(obj.get("exported_at", "unknown"), 32)
     _record_event(
         "import",
         results,
-        notes=f"mode={mode}{filter_note}, from={obj.get('hostname','?')}, exported={obj.get('exported_at','?')}",
-        source_file=obj.get("hostname", ""),
+        notes=f"mode={mode}{filter_note}, from={safe_host}, exported={safe_ts}",
+        source_file=safe_host,
     )
     return {"results": results, "errors": errors}
 
@@ -1211,10 +1338,10 @@ def register_callbacks(app) -> None:
     def _handle_upload(contents, filename):
         if not contents:
             return html.Div(), None, {"display": "none"}
-        obj = _parse_import_file(contents)
-        if obj is None:
+        obj, err = _parse_import_file(contents)
+        if err:
             return (
-                dbc.Alert("Invalid file. Please upload a .tmu export file.", color="danger"),
+                dbc.Alert(err, color="danger"),
                 None,
                 {"display": "none"},
             )
