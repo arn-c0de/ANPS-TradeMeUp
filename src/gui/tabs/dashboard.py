@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 import logging
+import re
 
 import dash
 import dash_bootstrap_components as dbc
@@ -24,10 +25,24 @@ from src.models.predictions import Prediction, PredictionOutcome
 from src.models.analysis import MarketRegime, SurpriseScore, FactVerification
 from src.models.trading_simulation import TradingSimulation
 from src.gui.components import create_metric_card
-from src.config.settings import VERSION
 from src.utils.json_helpers import ensure_dict as _ensure_dict
 
 logger = logging.getLogger(__name__)
+
+_SERVER_LOG_LIMIT = 100
+_FLAT_LOG_FILES = (
+    Path("logs/pipeline_activity.log"),
+    Path("logs/dashboard.log"),
+)
+_FLAT_LOG_PATTERN = re.compile(
+    r"^\[(?P<timestamp>[^\]]+)\]\s+(?P<level>[A-Z]+):\s*(?P<message>.*)$"
+)
+
+
+def _as_naive_datetime(value):
+    if value is None:
+        return datetime.min
+    return value.replace(tzinfo=None) if getattr(value, "tzinfo", None) else value
 
 
 def create_layout():
@@ -109,7 +124,7 @@ def create_layout():
             ], width=6),
             dbc.Col([
                 dbc.Card([
-                    dbc.CardHeader(html.H5("📋 Server Logs (Last 20 lines)")),
+                    dbc.CardHeader(html.H5("📋 Server Logs")),
                     dbc.CardBody([
                         dcc.Textarea(
                             id="server-logs-display",
@@ -681,46 +696,76 @@ def get_top_performers(engine, timeframe='24h', limit=10):
 
 
 def get_server_logs():
-    """Get recent server logs"""
-    log_file = Path("logs/dashboard.log")
-    
-    if not log_file.exists():
-        return f"""╔══════════════════════════════════════════════════════════════╗
-║  ANPS-TradeMeUp Dashboard v{VERSION} - Live Server Logs         ║
-╚══════════════════════════════════════════════════════════════╝
+    """Get recent server logs, including historical flat-file entries."""
+    db_rows = []
+    earliest_db_timestamp = None
 
-✨ Dashboard wurde erfolgreich gestartet!
-
-📊 Status: AKTIV
-🔄 Auto-Update: Alle 5 Sekunden
-🎮 Bereit für Pipeline-Ausführung
-
-──────────────────────────────────────────────────────────────
-
-💡 So startest du die Pipeline:
-
-   1. Gehe zum "🎮 Agent Control" Tab
-   2. Klicke "Run Full Pipeline" oder "Run Quick Test"
-   3. Beobachte hier die Live-Logs!
-
-──────────────────────────────────────────────────────────────
-
-⚡ Oder führe in einem separaten Terminal aus:
-   python scripts/run_mvp_pipeline.py
-
-──────────────────────────────────────────────────────────────
-
-Warte auf Agent-Aktivitäten...
-"""
-    
     try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            # Get last 20 lines
-            recent_lines = lines[-20:] if len(lines) > 20 else lines
-            return ''.join(recent_lines)
-    except Exception as e:
-        return f"Error reading logs: {str(e)}\n"
+        from src.models.system_logs import SystemLog
+
+        with Session(engine) as db:
+            db_rows = (
+                db.query(SystemLog)
+                .order_by(SystemLog.timestamp.desc())
+                .limit(_SERVER_LOG_LIMIT)
+                .all()
+            )
+        if db_rows:
+            timestamps = [row.timestamp for row in db_rows if row.timestamp]
+            if timestamps:
+                earliest_db_timestamp = min(timestamps)
+    except Exception:
+        db_rows = []
+
+    entries = []
+    seen = set()
+
+    for row in db_rows:
+        timestamp = row.timestamp.strftime("%Y-%m-%d %H:%M:%S") if row.timestamp else ""
+        level = (row.level or "INFO").ljust(7)
+        source = (row.source or "system").ljust(12)
+        component = f"[{row.component}] " if row.component else ""
+        line = f"[{timestamp}] {level} {source} {component}{row.message}"
+        key = ("db", timestamp, row.level or "INFO", row.source or "system", row.component or "", row.message or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append((_as_naive_datetime(row.timestamp), line))
+
+    for log_file in _FLAT_LOG_FILES:
+        if not log_file.exists():
+            continue
+        try:
+            with open(log_file, "r", encoding="utf-8", errors="ignore") as handle:
+                for raw_line in handle:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    match = _FLAT_LOG_PATTERN.match(line)
+                    if not match:
+                        continue
+                    try:
+                        parsed_ts = datetime.strptime(
+                            match.group("timestamp"), "%Y-%m-%d %H:%M:%S"
+                        )
+                    except ValueError:
+                        continue
+                    if earliest_db_timestamp and parsed_ts >= _as_naive_datetime(earliest_db_timestamp):
+                        continue
+                    key = ("file", parsed_ts.isoformat(), match.group("level"), match.group("message"))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    entries.append((parsed_ts, line))
+        except OSError:
+            continue
+
+    if not entries:
+        return "No logs yet. Start the pipeline or wait for activity...\n"
+
+    entries.sort(key=lambda item: item[0])
+    lines = [line for _, line in entries[-_SERVER_LOG_LIMIT:]]
+    return "\n".join(lines) + "\n"
 
 
 def register_callbacks(app):

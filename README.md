@@ -17,6 +17,15 @@ ANPS-TradeMeUp is a multi-agent news-to-market prediction system. It ingests fin
 docker compose up --build
 ```
 
+Nur betroffene Services nach Dateiänderungen neu bauen:
+
+```bash
+./scripts/docker/rebuild-on-change.sh
+./scripts/docker/rebuild-on-change.sh --watch
+```
+
+Das Skript baut bei reinen GUI-Änderungen nur `gui` neu; bei Änderungen in mehreren Bereichen oder gemeinsamen Build-Dateien wird der komplette App-Stack (`api`, `gui`, `worker`) neu gebaut.
+
 Services:
 
 - GUI: `http://localhost:8050`
