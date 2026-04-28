@@ -54,6 +54,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Attach DB log handler so pipeline logs appear in the dashboard log viewer
+try:
+    from src.utils.db_log_handler import attach_db_handler as _attach
+    _attach(source="pipeline")
+except Exception:
+    pass
+
 
 class ContinuousPipeline:
     """Continuously running pipeline for production mode with performance optimization"""
