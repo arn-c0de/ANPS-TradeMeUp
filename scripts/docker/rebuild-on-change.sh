@@ -66,7 +66,6 @@ classify_services() {
   local file
   local -A targets=()
   local has_relevant=0
-  local target_count=0
 
   for file in "$@"; do
     case "$file" in
@@ -101,18 +100,6 @@ classify_services() {
 
   if (( ! has_relevant )); then
     return 1
-  fi
-
-  for file in api gui worker; do
-    if [[ -n "${targets[$file]:-}" ]]; then
-      ((target_count += 1))
-    fi
-  done
-
-  if (( target_count > 1 )); then
-    targets[api]=1
-    targets[gui]=1
-    targets[worker]=1
   fi
 
   if [[ -n "${targets[api]:-}" ]]; then

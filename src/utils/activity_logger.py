@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from src.utils.log_retention import prune_system_logs
 
 # Level → normalised form used in system_logs
 _LEVEL_MAP = {
@@ -18,7 +19,6 @@ _LEVEL_MAP = {
     "DEBUG":      "DEBUG",
 }
 
-_MAX_LOG_ROWS   = 20_000   # prune target
 _PRUNE_INTERVAL = 200      # prune check every N writes
 
 
@@ -154,23 +154,8 @@ class ActivityLogger:
             pass  # log failures must never break the application
 
     def _prune_old_logs(self):
-        """Keep the table below _MAX_LOG_ROWS by deleting the oldest excess rows."""
-        try:
-            from src.models.database import SessionLocal
-            from src.models.system_logs import SystemLog
-            from sqlalchemy import func, text
-
-            with SessionLocal() as db:
-                total = db.query(func.count(SystemLog.log_id)).scalar() or 0
-                excess = total - _MAX_LOG_ROWS
-                if excess > 0:
-                    db.execute(text(
-                        "DELETE FROM system_logs WHERE log_id IN "
-                        "(SELECT log_id FROM system_logs ORDER BY log_id ASC LIMIT :n)"
-                    ), {"n": excess})
-                    db.commit()
-        except Exception:
-            pass
+        """Apply retention rules to the central system log table."""
+        prune_system_logs()
 
 
 # Global singleton

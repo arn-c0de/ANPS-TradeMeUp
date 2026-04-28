@@ -17,6 +17,7 @@ from sqlalchemy import desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from src.gui.utils.callbacks import safe_callback
+from src.utils.log_retention import LOG_RETENTION_HOURS
 from src.models.raw_news import RawNews
 from src.models.database import engine
 from src.models.data_quality import DataQualityScore
@@ -29,7 +30,8 @@ from src.utils.json_helpers import ensure_dict as _ensure_dict
 
 logger = logging.getLogger(__name__)
 
-_SERVER_LOG_LIMIT = 100
+_SERVER_LOG_CARD_LIMIT = 120
+_SERVER_LOG_MODAL_LIMIT = 500
 _FLAT_LOG_FILES = (
     Path("logs/pipeline_activity.log"),
     Path("logs/dashboard.log"),
@@ -43,6 +45,89 @@ def _as_naive_datetime(value):
     if value is None:
         return datetime.min
     return value.replace(tzinfo=None) if getattr(value, "tzinfo", None) else value
+
+
+def _build_log_viewer(content_id: str, end_marker_id: str, height: str) -> html.Div:
+    return html.Div(
+        [
+            html.Pre(
+                id=content_id,
+                className="mb-0",
+                style={
+                    "margin": "0",
+                    "whiteSpace": "pre-wrap",
+                    "wordBreak": "break-word",
+                    "color": "#7CFFB2",
+                    "fontFamily": "monospace",
+                    "fontSize": "12px",
+                    "lineHeight": "1.45",
+                },
+            ),
+            html.Div(id=end_marker_id, style={"height": "1px"}),
+        ],
+        style={
+            "height": height,
+            "overflowY": "auto",
+            "backgroundColor": "#11161c",
+            "border": "1px solid #26313d",
+            "borderRadius": "8px",
+            "padding": "12px",
+        },
+    )
+
+
+_CLIENTSCRIPT_SERVER_LOGS_SCROLL = """
+function(cardLogs, modalLogs, modalOpen, liveEnabled) {
+    window.serverLogFollowState = window.serverLogFollowState || {};
+
+    const configs = [
+        ['server-logs-scroll-container', 'server-logs-end-marker'],
+        ['server-logs-modal-scroll-container', 'server-logs-modal-end-marker']
+    ];
+
+    function bindScroll(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container || container.dataset.logFollowBound === '1') {
+            return;
+        }
+        container.dataset.logFollowBound = '1';
+        window.serverLogFollowState[containerId] = true;
+        container.addEventListener('scroll', function() {
+            const nearBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 80;
+            window.serverLogFollowState[containerId] = nearBottom;
+        });
+    }
+
+    configs.forEach(function(config) {
+        bindScroll(config[0]);
+    });
+
+    if (!liveEnabled) {
+        return '';
+    }
+
+    setTimeout(function() {
+        configs.forEach(function(config) {
+            const containerId = config[0];
+            const markerId = config[1];
+            const container = document.getElementById(containerId);
+            const marker = document.getElementById(markerId);
+            if (!container || !marker) {
+                return;
+            }
+            if (containerId === 'server-logs-modal-scroll-container' && !modalOpen) {
+                return;
+            }
+            const shouldFollow = window.serverLogFollowState[containerId] !== false;
+            if (shouldFollow) {
+                marker.scrollIntoView({block: 'center'});
+            }
+        });
+    }, 0);
+
+    return '';
+}
+"""
 
 
 def create_layout():
@@ -124,22 +209,48 @@ def create_layout():
             ], width=6),
             dbc.Col([
                 dbc.Card([
-                    dbc.CardHeader(html.H5("📋 Server Logs")),
-                    dbc.CardBody([
-                        dcc.Textarea(
-                            id="server-logs-display",
-                            style={
-                                'width': '100%',
-                                'height': '300px',
-                                'fontFamily': 'monospace',
-                                'fontSize': '12px',
-                                'backgroundColor': '#1a1a1a',
-                                'color': '#00ff00',
-                                'border': '1px solid #333',
-                                'padding': '10px'
-                            },
-                            readOnly=True
+                    dbc.CardHeader(
+                        dbc.Row(
+                            [
+                                dbc.Col(html.H5("📋 Server Logs", className="mb-0"), width="auto"),
+                                dbc.Col(
+                                    dbc.Switch(
+                                        id="server-logs-live-toggle",
+                                        label="Live",
+                                        value=True,
+                                        className="mb-0",
+                                    ),
+                                    width="auto",
+                                    className="ms-auto d-flex align-items-center",
+                                ),
+                                dbc.Col(
+                                    dbc.Button(
+                                        "⛶ Fullscreen",
+                                        id="open-server-logs-modal",
+                                        color="outline-info",
+                                        size="sm",
+                                    ),
+                                    width="auto",
+                                ),
+                            ],
+                            align="center",
+                            className="g-2",
                         )
+                    ),
+                    dbc.CardBody([
+                        html.Small(
+                            f"DB-Retention: {LOG_RETENTION_HOURS}h. Auto-follow pausiert automatisch, sobald du hochscrollst.",
+                            className="text-muted d-block mb-2",
+                        ),
+                        html.Div(
+                            id="server-logs-scroll-container",
+                            children=_build_log_viewer(
+                                "server-logs-display",
+                                "server-logs-end-marker",
+                                "300px",
+                            ),
+                        ),
+                        html.Div(id="server-logs-scroll-trigger", style={"display": "none"}),
                     ])
                 ])
             ], width=6)
@@ -153,7 +264,39 @@ def create_layout():
                     ])
                 ])
             ], width=12)
-        ])
+        ]),
+        dbc.Modal(
+            [
+                dbc.ModalHeader(
+                    dbc.ModalTitle("📋 Server Logs Fullscreen"),
+                    close_button=False,
+                ),
+                dbc.ModalBody(
+                    [
+                        html.Small(
+                            "Live-Ansicht folgt neuen Einträgen nur solange du am unteren Rand bleibst.",
+                            className="text-muted d-block mb-2",
+                        ),
+                        html.Div(
+                            id="server-logs-modal-scroll-container",
+                            children=_build_log_viewer(
+                                "server-logs-modal-display",
+                                "server-logs-modal-end-marker",
+                                "70vh",
+                            ),
+                        ),
+                    ]
+                ),
+                dbc.ModalFooter(
+                    dbc.Button("Close", id="close-server-logs-modal", color="secondary")
+                ),
+            ],
+            id="server-logs-modal",
+            is_open=False,
+            size="xl",
+            scrollable=False,
+            centered=True,
+        )
         ], fluid=True)
     ])
 
@@ -695,8 +838,8 @@ def get_top_performers(engine, timeframe='24h', limit=10):
         ])
 
 
-def get_server_logs():
-    """Get recent server logs, including historical flat-file entries."""
+def _get_server_log_lines(limit: int):
+    """Get recent server log lines, including historical flat-file entries."""
     db_rows = []
     earliest_db_timestamp = None
 
@@ -707,7 +850,7 @@ def get_server_logs():
             db_rows = (
                 db.query(SystemLog)
                 .order_by(SystemLog.timestamp.desc())
-                .limit(_SERVER_LOG_LIMIT)
+                .limit(limit)
                 .all()
             )
         if db_rows:
@@ -761,15 +904,33 @@ def get_server_logs():
             continue
 
     if not entries:
-        return "No logs yet. Start the pipeline or wait for activity...\n"
+        return []
 
     entries.sort(key=lambda item: item[0])
-    lines = [line for _, line in entries[-_SERVER_LOG_LIMIT:]]
+    lines = [line for _, line in entries[-limit:]]
+    return lines
+
+
+def get_server_logs(limit: int):
+    """Get recent server logs as a formatted string."""
+    lines = _get_server_log_lines(limit)
+    if not lines:
+        return "No logs yet. Start the pipeline or wait for activity...\n"
     return "\n".join(lines) + "\n"
 
 
 def register_callbacks(app):
     """Register dashboard tab callbacks."""
+
+    app.clientside_callback(
+        _CLIENTSCRIPT_SERVER_LOGS_SCROLL,
+        Output("server-logs-scroll-trigger", "children"),
+        Input("server-logs-display", "children"),
+        Input("server-logs-modal-display", "children"),
+        Input("server-logs-modal", "is_open"),
+        Input("server-logs-live-toggle", "value"),
+        prevent_initial_call=False,
+    )
 
     @app.callback(
         Output("dashboard-metrics", "children"),
@@ -804,12 +965,40 @@ def register_callbacks(app):
         return get_live_agent_activity()
 
     @app.callback(
-        Output("server-logs-display", "value"),
+        [
+            Output("server-logs-display", "children"),
+            Output("server-logs-modal-display", "children"),
+        ],
         Input("interval-component", "n_intervals"),
     )
-    @safe_callback(default_return="")
+    @safe_callback(default_return=["", ""])
     def update_server_logs(n):
-        return get_server_logs()
+        return (
+            get_server_logs(_SERVER_LOG_CARD_LIMIT),
+            get_server_logs(_SERVER_LOG_MODAL_LIMIT),
+        )
+
+    @app.callback(
+        Output("server-logs-modal", "is_open"),
+        [
+            Input("open-server-logs-modal", "n_clicks"),
+            Input("close-server-logs-modal", "n_clicks"),
+        ],
+        State("server-logs-modal", "is_open"),
+        prevent_initial_call=True,
+    )
+    def toggle_server_logs_modal(open_clicks, close_clicks, is_open):
+        from dash import callback_context
+
+        if not callback_context.triggered:
+            return is_open
+
+        trigger = callback_context.triggered[0]["prop_id"].split(".")[0]
+        if trigger == "open-server-logs-modal" and open_clicks:
+            return True
+        if trigger == "close-server-logs-modal" and close_clicks:
+            return False
+        return is_open
 
     @app.callback(
         Output("performance-chart", "figure"),
