@@ -109,10 +109,8 @@ function(cardLogs, modalLogs, modalOpen, liveEnabled) {
     setTimeout(function() {
         configs.forEach(function(config) {
             const containerId = config[0];
-            const markerId = config[1];
             const container = document.getElementById(containerId);
-            const marker = document.getElementById(markerId);
-            if (!container || !marker) {
+            if (!container) {
                 return;
             }
             if (containerId === 'server-logs-modal-scroll-container' && !modalOpen) {
@@ -120,7 +118,7 @@ function(cardLogs, modalLogs, modalOpen, liveEnabled) {
             }
             const shouldFollow = window.serverLogFollowState[containerId] !== false;
             if (shouldFollow) {
-                marker.scrollIntoView({block: 'center'});
+                container.scrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
             }
         });
     }, 0);
