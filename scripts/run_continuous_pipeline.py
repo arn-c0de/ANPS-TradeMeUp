@@ -16,7 +16,7 @@ import signal
 import logging
 import psutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from collections import deque
 
@@ -27,6 +27,7 @@ sys.path.insert(0, str(project_root))
 from src.models.database import SessionLocal
 from src.models.raw_news import RawNews
 from src.models.processed_news import ProcessedNews
+from src.models.system_logs import SystemLog
 from src.agents.ingestion_agent import IngestionAgent
 from src.agents.data_quality_agent import DataQualityAgent
 from src.agents.content_understanding_agent import ContentUnderstandingAgent
@@ -54,6 +55,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Attach DB log handler so pipeline logs appear in the dashboard log viewer
+try:
+    from src.utils.db_log_handler import attach_db_handler as _attach
+    _attach(source="pipeline")
+except Exception:
+    pass
+
 
 class ContinuousPipeline:
     """Continuously running pipeline for production mode with performance optimization"""
@@ -70,6 +78,7 @@ class ContinuousPipeline:
         self.max_memory_mb = max_memory_mb
         self.running = False
         self.db: Optional[object] = None
+        self.started_at_utc: Optional[datetime] = None
         
         # Performance metrics
         self.iteration_times = deque(maxlen=20)  # Last 20 iteration times
@@ -190,10 +199,53 @@ class ContinuousPipeline:
         if not self.iteration_times:
             return 0.0
         return sum(self.iteration_times) / len(self.iteration_times)
+
+    def _stop_requested_via_db(self) -> bool:
+        """Check whether the GUI requested a stop through the shared DB log table."""
+        if self.started_at_utc is None:
+            return False
+
+        try:
+            with SessionLocal() as db:
+                request = (
+                    db.query(SystemLog)
+                    .filter(
+                        SystemLog.source == "control",
+                        SystemLog.component == "continuous_pipeline",
+                        SystemLog.message == "STOP_REQUEST",
+                        SystemLog.timestamp >= self.started_at_utc,
+                    )
+                    .order_by(SystemLog.timestamp.desc())
+                    .first()
+                )
+        except Exception as exc:
+            logger.debug(f"Failed to read external stop request: {exc}")
+            return False
+
+        return request is not None
+
+    def _check_for_external_stop(self):
+        """Stop the worker when the GUI sends a shared stop request."""
+        if self._stop_requested_via_db():
+            logger.info("External stop request detected from GUI control.")
+            activity_logger.log_activity("Continuous Pipeline stop request acknowledged", "INFO")
+            self.stop()
+            raise KeyboardInterrupt
+
+    def _sleep_with_stop_check(self, seconds: int):
+        """Sleep in short chunks so stop requests are handled quickly."""
+        remaining = max(0, int(seconds))
+        while self.running and remaining > 0:
+            self._check_for_external_stop()
+            chunk = min(2, remaining)
+            time.sleep(chunk)
+            remaining -= chunk
+        self._check_for_external_stop()
         
     def run(self):
         """Run the pipeline continuously with performance monitoring"""
         self.running = True
+        self.started_at_utc = datetime.now(timezone.utc)
         activity_logger.log_activity("Continuous Pipeline Mode STARTED", "SUCCESS")
         logger.info(f"Starting continuous pipeline (check every {self.check_interval}s)")
         
@@ -201,6 +253,7 @@ class ContinuousPipeline:
         
         while self.running:
             try:
+                self._check_for_external_stop()
                 iteration += 1
                 start_time = datetime.now()
                 
@@ -234,6 +287,7 @@ class ContinuousPipeline:
 
                 # Run all pipeline phases
                 new_articles = self._run_pipeline_iteration()
+                self._check_for_external_stop()
                 
                 # Close database session safely
                 if self.db:
@@ -319,10 +373,10 @@ class ContinuousPipeline:
                 if total_pending > 0:
                     logger.info(f"Found {total_pending} items pending (assessed:{unassessed}, analyzed:{unanalyzed}, mapped:{unmapped}, surprised:{unsurprised}, scored:{unscored}, predicted:{unpredicted})")
                     logger.info("Continuing immediately to process backlog...")
-                    time.sleep(2)  # Brief pause to avoid overwhelming the system
+                    self._sleep_with_stop_check(2)  # Brief pause to avoid overwhelming the system
                 else:
                     logger.info(f"All articles fully processed, waiting {self.check_interval}s for new data...")
-                    time.sleep(self.check_interval)
+                    self._sleep_with_stop_check(self.check_interval)
                 
             except KeyboardInterrupt:
                 logger.info("Stopping continuous pipeline (keyboard interrupt)")
@@ -353,7 +407,7 @@ class ContinuousPipeline:
                     logger.error(f"Too many consecutive errors ({self.consecutive_errors}), increasing backoff significantly")
                     backoff_time = 600  # 10 minutes
                 
-                time.sleep(backoff_time)
+                self._sleep_with_stop_check(backoff_time)
             finally:
                 # Ensure DB session is always closed
                 if self.db:
@@ -375,6 +429,7 @@ class ContinuousPipeline:
         """
         try:
             # Phase 1: Data Ingestion
+            self._check_for_external_stop()
             activity_logger.log_phase(1, "Data Ingestion")
             ingestion = IngestionAgent(self.db)
             rss_results = ingestion.fetch_all_rss_feeds()
@@ -383,18 +438,21 @@ class ContinuousPipeline:
 
             # Phase 2: Quality Check (process unassessed articles) - DYNAMIC BATCH SIZE
             # ✅ REFACTORED: Uses scoped sessions internally
+            self._check_for_external_stop()
             activity_logger.log_phase(2, "Quality Assessment")
             quality = DataQualityAgent()  # ✅ No db parameter!
             quality_results = quality.process_batch(limit=self.batch_sizes['quality'])
             logger.info(f"Quality check: {quality_results}")
 
             # Phase 3: Content Understanding - ✅ OPTIMIZED with scoped sessions
+            self._check_for_external_stop()
             activity_logger.log_phase(3, "Content Analysis")
             content = ContentUnderstandingAgent()  # ✅ No db parameter!
             content_results = content.process_batch(limit=self.batch_sizes['content'])
             logger.info(f"NLP Analysis: {content_results}")
             
             # Phase 4: Entity Mapping - ✅ OPTIMIZED with scoped sessions
+            self._check_for_external_stop()
             activity_logger.log_phase(4, "Entity Mapping")
             entities = EntityMappingAgent()  # ✅ No db parameter!
             entity_results = entities.process_batch(limit=self.batch_sizes['entity'])
@@ -402,6 +460,7 @@ class ContinuousPipeline:
 
             # Phase 5: Market Regime (single update, no batch)
             # TODO: Refactor RegimeDetectionAgent to use scoped sessions
+            self._check_for_external_stop()
             activity_logger.log_phase(5, "Market Regime")
             regime = RegimeDetectionAgent(self.db)
             regime_result = regime.update_regime()
@@ -409,12 +468,14 @@ class ContinuousPipeline:
 
             # Phase 6: Surprise Quantification - DYNAMIC BATCH SIZE
             # ✅ REFACTORED: Uses scoped sessions internally
+            self._check_for_external_stop()
             activity_logger.log_phase(6, "Surprise Quantification")
             surprise = SurpriseQuantificationAgent()  # ✅ No db parameter!
             surprise_results = surprise.process_batch(limit=self.batch_sizes['surprise'])
             logger.info(f"Surprises: {surprise_results}")
 
             # Phase 7: Impact Scoring - ✅ OPTIMIZED with scoped sessions
+            self._check_for_external_stop()
             activity_logger.log_phase(7, "Impact Scoring")
             impact = ImpactScoringAgent()  # ✅ No db parameter!
             impact_results = impact.process_batch(limit=self.batch_sizes['impact'])
@@ -422,6 +483,7 @@ class ContinuousPipeline:
 
             # Phase 8: Signal Decay Modeling (apply to impact scores)
             # ✅ REFACTORED: Uses scoped sessions internally
+            self._check_for_external_stop()
             activity_logger.log_phase(8, "Signal Decay Modeling")
             signal_decay = SignalDecayAgent()  # ✅ No db parameter!
             decay_stats = signal_decay.get_statistics()
@@ -429,18 +491,21 @@ class ContinuousPipeline:
 
             # Phase 9: Correlation Analysis (between entities)
             # ✅ REFACTORED: Uses scoped sessions internally
+            self._check_for_external_stop()
             activity_logger.log_phase(9, "Correlation Analysis")
             correlation = CorrelationAnalysisAgent()  # ✅ No db parameter!
             corr_stats = correlation.get_statistics()
             logger.info(f"Correlation: {corr_stats}")
             
             # Phase 10: Predictions - ✅ OPTIMIZED with scoped sessions
+            self._check_for_external_stop()
             activity_logger.log_phase(10, "Predictions")
             predictions = PredictionAgent()  # ✅ No db parameter!
             pred_results = predictions.process_batch(limit=self.batch_sizes['prediction'])
             logger.info(f"Predictions: {pred_results}")
 
             # Phase 10.5: Auto-Process New Predictions (Performance & Simulations)
+            self._check_for_external_stop()
             activity_logger.log_phase(10.5, "Auto-Processing Predictions")
             try:
                 from src.services.auto_prediction_processor import auto_processor
@@ -459,6 +524,7 @@ class ContinuousPipeline:
             # ===== NEW PHASES (Phase 2 Agents) =====
 
             # Phase 11: Trading Simulation (predictions vs market)
+            self._check_for_external_stop()
             activity_logger.log_phase(11, "Trading Simulation")
             simulator = TradingSimulationAgent()
             sim_results = simulator.process_batch(limit=self.batch_sizes['simulation'], lookback_days=7)
@@ -467,6 +533,7 @@ class ContinuousPipeline:
             # Phase 12: Scenario Generation (stress test predictions)
             # Check if scenarios are enabled in settings
             if settings.enable_scenarios:
+                self._check_for_external_stop()
                 activity_logger.log_phase(12, "Scenario Generation")
                 scenario_gen = ScenarioGenerationAgent(self.db)
                 scenario_stats = scenario_gen.get_statistics()
@@ -478,6 +545,7 @@ class ContinuousPipeline:
             # ✅ REFACTORED: Uses scoped sessions internally
             # Check if fact checking is enabled in settings (can be expensive in tokens)
             if settings.enable_fact_checking:
+                self._check_for_external_stop()
                 activity_logger.log_phase(13, "Fact Verification")
                 fact_verifier = FactVerificationAgent()  # ✅ No db parameter!
                 fact_results = fact_verifier.process_batch(limit=self.batch_sizes['fact_verification'])
@@ -489,6 +557,7 @@ class ContinuousPipeline:
             # ✅ REFACTORED: Uses scoped sessions internally
             # Check if calibration is enabled in settings
             if settings.enable_calibration:
+                self._check_for_external_stop()
                 activity_logger.log_phase(14, "Confidence Calibration")
                 calibrator = ConfidenceCalibrationAgent()  # ✅ No db parameter!
                 calibration_stats = calibrator.get_statistics()
@@ -500,6 +569,7 @@ class ContinuousPipeline:
             # ✅ REFACTORED: Uses scoped sessions internally
             # Check if meta-strategy is enabled in settings
             if settings.enable_meta_strategy:
+                self._check_for_external_stop()
                 activity_logger.log_phase(15, "Meta-Strategy Ensemble")
                 meta_strategy = MetaStrategyAgent()  # ✅ No db parameter!
                 # Get entities that have multiple predictions for ensemble
@@ -510,6 +580,7 @@ class ContinuousPipeline:
 
             # Phase 16: Model Performance Monitoring
             # TODO: Refactor when needed
+            self._check_for_external_stop()
             activity_logger.log_phase(16, "Performance Monitoring")
             monitor = ModelPerformanceMonitor(self.db)
             perf_stats = monitor.get_statistics()
@@ -517,6 +588,7 @@ class ContinuousPipeline:
 
             # Phase 17: A/B Testing (compare model versions)
             # TODO: Refactor when needed
+            self._check_for_external_stop()
             activity_logger.log_phase(17, "A/B Testing")
             ab_testing = ABTestingAgent(self.db)
             ab_stats = ab_testing.get_statistics()

@@ -12,8 +12,16 @@ import dash
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 
+import logging
 from src.config.settings import VERSION
 from src.gui.components import create_navbar
+
+# Attach DB log handler for the GUI process
+try:
+    from src.utils.db_log_handler import attach_db_handler as _attach_db_handler
+    _attach_db_handler(source="gui")
+except Exception:
+    pass
 from src.gui.callbacks import register_charts_callbacks, register_common_callbacks
 from src.gui.helpers.prediction_details_popup import create_prediction_modal
 from src.gui.tabs import (
