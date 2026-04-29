@@ -2,6 +2,26 @@
 
 ANPS-TradeMeUp is a multi-agent news-to-market prediction system. It ingests financial news, extracts entities and events with LLM-supported analysis, scores impact and surprise, and produces market predictions with a Dash GUI and a FastAPI backend.
 
+## Screenshots
+
+### Dashboard
+![Dashboard](images/screenshots/1.0.3-dashboard.png)
+
+### Live Charts
+![Live Charts](images/screenshots/1.0.3-charts.png)
+
+### News Feed
+![News Feed](images/screenshots/1.0.3-news.png)
+
+### Predictions
+![Predictions](images/screenshots/1.0.3-predict.png)
+
+### Trading Simulations
+![Trading Simulations](images/screenshots/1.0.3-sim.png)
+
+### Statistics
+![Statistics](images/screenshots/1.0.3-stats.png)
+
 ## Status
 
 - Core application code is organized under `src/`
@@ -17,14 +37,14 @@ ANPS-TradeMeUp is a multi-agent news-to-market prediction system. It ingests fin
 docker compose up --build
 ```
 
-Nur betroffene Services nach Dateiänderungen neu bauen:
+Rebuild only affected services after file changes:
 
 ```bash
 ./scripts/docker/rebuild-on-change.sh
 ./scripts/docker/rebuild-on-change.sh --watch
 ```
 
-Das Skript baut bei reinen GUI-Änderungen nur `gui` neu; bei Änderungen in mehreren Bereichen oder gemeinsamen Build-Dateien wird der komplette App-Stack (`api`, `gui`, `worker`) neu gebaut.
+The script rebuilds only `gui` for pure GUI changes; for changes across multiple areas or shared build files, the full app stack (`api`, `gui`, `worker`) is rebuilt.
 
 Services:
 
