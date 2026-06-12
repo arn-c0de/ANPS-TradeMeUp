@@ -248,8 +248,6 @@ def main():
         
         activity_logger.log_pipeline_complete("TradeMeUp MVP Pipeline", duration)
 
-        activity_logger.log_pipeline_complete("TradeMeUp MVP Pipeline", duration)
-
     except Exception as e:
         logger.error(f"❌ Pipeline failed: {e}", exc_info=True)
         activity_logger.log_agent_error("Pipeline", str(e))
