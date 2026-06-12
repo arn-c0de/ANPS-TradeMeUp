@@ -305,7 +305,7 @@ def main():
         entity_count = session.execute(select(func.count(Entity.entity_id))).scalar()
         news_count = session.execute(select(func.count(ProcessedNews.news_id))).scalar()
     
-    logger.info(f"\nDatabase stats:")
+    logger.info("\nDatabase stats:")
     logger.info(f"  Predictions: {pred_count:,}")
     logger.info(f"  Entities: {entity_count:,}")
     logger.info(f"  Processed News: {news_count:,}")

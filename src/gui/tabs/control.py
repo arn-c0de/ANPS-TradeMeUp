@@ -604,7 +604,7 @@ def register_callbacks(app):
                 wrapper_script = Path("scripts/run_continuous_pipeline_wrapper.sh").absolute()
             
             if not wrapper_script.exists():
-                error_msg = "Wrapper script not found: %s" % wrapper_script
+                error_msg = f"Wrapper script not found: {wrapper_script}"
                 activity_logger.log_activity(error_msg, "ERROR")
                 logger.error(error_msg)
                 return dash.no_update
@@ -618,7 +618,7 @@ def register_callbacks(app):
                 logger.info("Pipeline console started with PID: %s", process.pid)
                 return ({"running": True, "pid": process.pid}, True, False)
             except Exception as e:
-                activity_logger.log_activity("Failed to start continuous pipeline: %s" % e, "ERROR")
+                activity_logger.log_activity(f"Failed to start continuous pipeline: {e}", "ERROR")
                 logger.error("Failed to start: %s", e, exc_info=True)
                 return dash.no_update
         if button_id == "btn-stop-continuous":
@@ -630,9 +630,9 @@ def register_callbacks(app):
                 success, message = stop_process(stop_pid)
                 if success:
                     stop_message = message
-                    activity_logger.log_activity("Continuous Pipeline STOPPED: %s" % message, "INFO")
+                    activity_logger.log_activity(f"Continuous Pipeline STOPPED: {message}", "INFO")
                 else:
-                    activity_logger.log_activity("Warning stopping pipeline: %s" % message, "WARNING")
+                    activity_logger.log_activity(f"Warning stopping pipeline: {message}", "WARNING")
             _request_continuous_pipeline_stop()
             if stop_message is None:
                 activity_logger.log_activity(
@@ -672,7 +672,7 @@ def register_callbacks(app):
                 wrapper_script = Path("scripts/run_rss_fetch_wrapper.sh").absolute()
             
             if not wrapper_script.exists():
-                error_msg = "RSS fetch script not found: %s" % wrapper_script
+                error_msg = f"RSS fetch script not found: {wrapper_script}"
                 activity_logger.log_activity(error_msg, "ERROR")
                 logger.error(error_msg)
                 return {"status": "error", "message": str(error_msg)}
@@ -686,7 +686,7 @@ def register_callbacks(app):
             return {"status": "success", "message": "RSS fetch started in new terminal"}
         except Exception as e:
             logger.error("Error opening RSS fetch terminal: %s", e, exc_info=True)
-            activity_logger.log_activity("RSS Fetch Error: %s" % str(e), "ERROR")
+            activity_logger.log_activity(f"RSS Fetch Error: {e}", "ERROR")
             return {"status": "error", "message": str(e)}
 
     @app.callback(

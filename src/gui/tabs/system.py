@@ -224,7 +224,7 @@ def _render_log_table(rows: list) -> html.Div:
                 style={"verticalAlign": "top", "whiteSpace": "nowrap"},
             ),
             html.Td([
-                html.Span(r["component"] + " · ", className="text-muted small")
+                html.Span(f"{r['component']} · ", className="text-muted small")
                 if r["component"] else html.Span(),
                 html.Span(r["message"]),
                 detail_section,

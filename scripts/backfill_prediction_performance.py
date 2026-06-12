@@ -110,7 +110,7 @@ def backfill_prediction_outcomes(db: Session, limit: int = None) -> dict:
                 logger.info(f"✅ Saved performance: {total_return:+.2f}% ({'✓' if is_correct else '✗'})")
                 success += 1
             else:
-                logger.warning(f"⚠️ Could not calculate performance (may not be tradable)")
+                logger.warning("⚠️ Could not calculate performance (may not be tradable)")
                 skipped += 1
             
             processed += 1
@@ -207,7 +207,7 @@ def backfill_simulations(db: Session, limit: int = None) -> dict:
                 logger.info(f"✅ Created simulation: {decision.upper()} (Return: {expected_return:+.2f}%, Risk: {risk_score:.2f})")
                 created += 1
             else:
-                logger.warning(f"⚠️ Simulation not created (may not meet criteria)")
+                logger.warning("⚠️ Simulation not created (may not meet criteria)")
                 skipped += 1
             
             processed += 1
@@ -247,7 +247,7 @@ def main():
             total_outcomes = db.query(func.count(PredictionOutcome.outcome_id)).scalar() or 0
             total_simulations = db.query(func.count(TradingSimulation.simulation_id)).scalar() or 0
             
-            logger.info(f"📊 Current Status:")
+            logger.info("📊 Current Status:")
             logger.info(f"   - Total Predictions: {total_predictions}")
             logger.info(f"   - Total Outcomes: {total_outcomes}")
             logger.info(f"   - Total Simulations: {total_simulations}")
@@ -279,7 +279,7 @@ def main():
             new_total_outcomes = db.query(func.count(PredictionOutcome.outcome_id)).scalar() or 0
             new_total_simulations = db.query(func.count(TradingSimulation.simulation_id)).scalar() or 0
             
-            logger.info(f"📈 New Status:")
+            logger.info("📈 New Status:")
             logger.info(f"   - Total Predictions: {total_predictions}")
             logger.info(f"   - Total Outcomes: {new_total_outcomes} (+{new_total_outcomes - total_outcomes})")
             logger.info(f"   - Total Simulations: {new_total_simulations} (+{new_total_simulations - total_simulations})")

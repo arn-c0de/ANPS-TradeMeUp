@@ -4,7 +4,7 @@ Simulations Tab - View trading simulation outcomes
 
 import json
 import logging
-from datetime import datetime, timezone, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import dash
 from dash import ALL, MATCH, Input, Output, State, dcc, html
@@ -45,7 +45,7 @@ def create_layout():
                                 dbc.CardBody([
                                     dbc.Row([
                                         dbc.Col([
-                                            html.Small("Depot Capital", className="text-muted d-block mb-1"),
+                                            html.Small("Portfolio Capital", className="text-muted d-block mb-1"),
                                             dcc.Input(
                                                 id="portfolio-capital-input",
                                                 type="number",
@@ -546,7 +546,7 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                             title=cost_breakdown_text),
                     html.Td(f"{position_size:.1f}%" if position_size is not None else "—",
                             className="text-info text-center",
-                            title=f"Position size as % of portfolio"),
+                            title="Position size as % of portfolio"),
                     # Stop Loss column
                     html.Td(
                         f"-{stop_loss_pct:.2f}%" if stop_loss_pct is not None else "—",
@@ -880,7 +880,7 @@ def register_callbacks(app):
                     date_range = (start, end)
                     logger.info(f"Creating simulations for date range: {start.date()} to {end.date()}")
                 except Exception as e:
-                    logger.warning("Error parsing date range: %s", e)
+                    logger.warning(f"Error parsing date range: {e}")
                     return dbc.Alert(f"Invalid date range: {str(e)}", color="warning", dismissable=True, duration=5000), dash.no_update
             stats = engine_sim.create_simulations_from_predictions(
                 entity_filter=entities if entities and len(entities) > 0 else None,
@@ -900,7 +900,7 @@ def register_callbacks(app):
                 duration=5000
             ), filter_sync_data
         except Exception as e:
-            logger.error("Error creating simulations: %s", e, exc_info=True)
+            logger.error(f"Error creating simulations: {e}", exc_info=True)
             return dbc.Alert(f"Error creating simulations: {str(e)}", color="danger", dismissable=True, duration=5000), dash.no_update
 
     @app.callback(
@@ -954,7 +954,7 @@ def register_callbacks(app):
                     "ts": datetime.now(timezone.utc).isoformat()
                 }
             except Exception as e:
-                logger.error("Error clearing all simulations: %s", e)
+                logger.error(f"Error clearing all simulations: {e}")
                 activity_logger.log_activity(f"Error clearing all simulations: {e}", "ERROR")
                 disabled_states = [False] * (len(button_ids) if button_ids else 0)
                 return disabled_states, {
@@ -989,7 +989,7 @@ def register_callbacks(app):
                 return disabled_states, {"simulation_id": simulation_id, "deleted": True, "ts": datetime.now(timezone.utc).isoformat()}
             return [False] * len(button_ids), dash.no_update
         except Exception as e:
-            logger.error("Error deleting simulation: %s", e)
+            logger.error(f"Error deleting simulation: {e}")
             return [False] * len(button_ids), dash.no_update
 
     @app.callback(
@@ -1007,7 +1007,7 @@ def register_callbacks(app):
             engine_sim = TradingSimulationEngine()
             engine_sim.refresh_simulation(simulation_id)
         except Exception as e:
-            logger.error("Error refreshing simulation: %s", e)
+            logger.error(f"Error refreshing simulation: {e}")
         return False
 
     @app.callback(
@@ -1153,7 +1153,7 @@ def register_callbacks(app):
         }
         
         if not capital or capital <= 0:
-            return html.Small("Enter depot capital to see summary", className="text-muted fst-italic"), store_data
+            return html.Small("Enter portfolio capital to see summary", className="text-muted fst-italic"), store_data
 
         currency_symbol = {"EUR": "\u20AC", "USD": "$", "GBP": "\u00A3"}.get(currency, currency)
         risk_adj_pct = (risk_adj or 0.3) * 100

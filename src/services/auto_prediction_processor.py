@@ -132,8 +132,6 @@ class AutoPredictionProcessor:
         Returns:
             dict: Statistics about processed predictions
         """
-        from datetime import timedelta
-        
         cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
         
         logger.info(f"🔍 Looking for predictions created after {cutoff_time.strftime('%Y-%m-%d %H:%M')}")
