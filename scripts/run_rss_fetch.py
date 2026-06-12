@@ -110,7 +110,7 @@ def main():
             
             if running:
                 logger.info(f"\n⏰ Next fetch in {fetch_interval} seconds ({fetch_interval//60} minutes)...")
-                logger.info(f"   (Press Ctrl+C to stop)")
+                logger.info("   (Press Ctrl+C to stop)")
                 
                 # Sleep with periodic checks for shutdown signal
                 for i in range(fetch_interval):

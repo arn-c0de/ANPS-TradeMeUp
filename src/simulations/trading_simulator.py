@@ -624,6 +624,65 @@ class TradingSimulationEngine:
 
         return "hold", constraint_info
 
+    def _resolve_actual_return(
+        self,
+        db: Session,
+        prediction: Prediction,
+        entity: Entity,
+    ) -> Tuple[Optional[Dict], Optional[float]]:
+        """
+        Resolve the actual return for a prediction.
+
+        Tries live performance data first, then falls back to a saved
+        PredictionOutcome record.
+
+        Returns:
+            Tuple of (performance dict or None, actual return pct or None)
+        """
+        performance = self.performance_service.get_prediction_performance(prediction, entity)
+        actual_return_pct = performance.get("total_return_pct") if performance else None
+
+        # FALLBACK: Check PredictionOutcome table if live data unavailable
+        if actual_return_pct is None:
+            from src.models.predictions import PredictionOutcome
+            outcome = db.query(PredictionOutcome).filter(
+                PredictionOutcome.prediction_id == prediction.prediction_id
+            ).first()
+            if outcome and outcome.actual_return is not None:
+                actual_return_pct = outcome.actual_return
+                logger.info(f"Using saved PredictionOutcome for {entity.entity_id}: {actual_return_pct:.2f}%")
+            else:
+                logger.warning(f"No actual return data available for {entity.entity_id} (prediction {prediction.prediction_id})")
+
+        return performance, actual_return_pct
+
+    def _reset_simulation_for_invalid_price(
+        self,
+        existing: TradingSimulation,
+        prediction: Prediction,
+        entity: Entity,
+        price: float,
+    ) -> TradingSimulation:
+        """Clear an existing simulation's values when the market price is invalid or too small."""
+        logger.warning(f"Invalid/too-small price for {entity.entity_id} ({price}) - clearing existing simulation values")
+        existing.decision = "hold"
+        existing.expected_return_pct = to_python_type(self._get_expected_return_pct(prediction))
+        existing.actual_return_pct = None
+        existing.divergence_pct = None
+        existing.risk_score = None
+        existing.confidence = to_python_type(prediction.confidence)
+        existing.calibrated_confidence = to_python_type(prediction.calibrated_confidence)
+        existing.transaction_cost_bps = 0.0
+        existing.overnight_cost_bps = None
+        existing.borrow_cost_bps = None
+        existing.position_size_pct = 0.0
+        existing.position_value_usd = 0.0
+        existing.cost_breakdown = {}
+        existing.risk_breakdown = {}
+        existing.simulation_metadata = {"note": "skipped - invalid/too-small market price", "market_price": price}
+        existing.created_at = datetime.now(timezone.utc)
+        return existing
+
     def simulate_prediction(
         self,
         db: Session,
@@ -641,30 +700,14 @@ class TradingSimulationEngine:
         expected_return_pct = self._get_expected_return_pct(prediction)
         confidence = prediction.calibrated_confidence or prediction.confidence or 0.0
 
-        # Try to get live performance data first
-        performance = self.performance_service.get_prediction_performance(prediction, entity)
-        actual_return_pct = performance.get("total_return_pct") if performance else None
-        
-        # FALLBACK: Check PredictionOutcome table if live data unavailable
-        if actual_return_pct is None:
-            from src.models.predictions import PredictionOutcome
-            outcome = db.query(PredictionOutcome).filter(
-                PredictionOutcome.prediction_id == prediction.prediction_id
-            ).first()
-            if outcome and outcome.actual_return is not None:
-                actual_return_pct = outcome.actual_return
-                logger.info(f"Using saved PredictionOutcome for {entity.entity_id}: {actual_return_pct:.2f}%")
-            else:
-                logger.warning(f"No actual return data available for {entity.entity_id} (prediction {prediction.prediction_id})")
-        
-        # Calculate divergence only when actual data exists
+        performance, actual_return_pct = self._resolve_actual_return(db, prediction, entity)
+
+        # Calculate divergence only when actual data exists.
+        # Don't default to expected - leave as None to indicate missing data.
         divergence_pct = None
         if actual_return_pct is not None:
             divergence_pct = expected_return_pct - actual_return_pct
-        else:
-            # Don't default to expected - leave as None to indicate missing data
-            pass
-        
+
         # Convert numpy types to Python native types for PostgreSQL compatibility
         actual_return_pct = to_python_type(actual_return_pct)
         divergence_pct = to_python_type(divergence_pct)
@@ -698,24 +741,7 @@ class TradingSimulationEngine:
         if not cost_breakdown:
             # If we already have an existing simulation, clear its values to avoid showing stale/absurd numbers
             if existing:
-                logger.warning(f"Invalid/too-small price for {entity.entity_id} ({price}) - clearing existing simulation values")
-                existing.decision = "hold"
-                existing.expected_return_pct = to_python_type(self._get_expected_return_pct(prediction))
-                existing.actual_return_pct = None
-                existing.divergence_pct = None
-                existing.risk_score = None
-                existing.confidence = to_python_type(prediction.confidence)
-                existing.calibrated_confidence = to_python_type(prediction.calibrated_confidence)
-                existing.transaction_cost_bps = 0.0
-                existing.overnight_cost_bps = None
-                existing.borrow_cost_bps = None
-                existing.position_size_pct = 0.0
-                existing.position_value_usd = 0.0
-                existing.cost_breakdown = {}
-                existing.risk_breakdown = {}
-                existing.simulation_metadata = {"note": "skipped - invalid/too-small market price", "market_price": price}
-                existing.created_at = datetime.now(timezone.utc)
-                return existing
+                return self._reset_simulation_for_invalid_price(existing, prediction, entity, price)
 
             logger.warning(f"Skipping simulation for {entity.entity_id}: invalid or missing market price ({price})")
             return None
@@ -748,7 +774,7 @@ class TradingSimulationEngine:
         
         # Now adjust position size based on risk score (INVERSE relationship)
         # Higher risk = smaller position
-        # risk_result is a Dict with keys: risk_score, component_scores, weights
+        # risk_result is a Dict with keys: risk_score, components, weights
         risk_score = risk_result["risk_score"]
         max_position_pct = self.config.get("position_constraints", {}).get("max_position_size_pct", 10.0)
         

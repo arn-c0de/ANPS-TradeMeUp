@@ -260,10 +260,10 @@ class ContinuousPipeline:
                 # Check memory before iteration
                 memory_before = self._check_memory()
                 
-                logger.info(f"=" * 60)
+                logger.info("=" * 60)
                 logger.info(f"Pipeline Iteration #{iteration} - {start_time}")
                 logger.info(f"Memory: {memory_before:.1f}MB | Avg Time: {self._get_avg_iteration_time():.1f}s | Batch Sizes: {self.batch_sizes}")
-                logger.info(f"=" * 60)
+                logger.info("=" * 60)
                 
                 activity_logger.log_activity(f"Starting Pipeline Iteration #{iteration}", "INFO")
                 
@@ -617,7 +617,7 @@ class ContinuousPipeline:
                 self.db = None
         
         # Log final statistics
-        logger.info(f"Pipeline Statistics:")
+        logger.info("Pipeline Statistics:")
         logger.info(f"  - Total Errors: {self.error_count}")
         logger.info(f"  - Avg Iteration Time: {self._get_avg_iteration_time():.1f}s")
         if self.iteration_times:

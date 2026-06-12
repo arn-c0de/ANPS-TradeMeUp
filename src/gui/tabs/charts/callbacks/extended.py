@@ -6,19 +6,22 @@ import concurrent.futures
 import copy
 import json
 import logging
+import re
 import time
 import uuid
-from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import ALL, MATCH, Input, Output, State, html
+import pandas as pd
+from dash import ALL, MATCH, Input, Output, State, callback_context, html
 from dash.exceptions import PreventUpdate
 from sqlalchemy.orm import Session
 
 from src.models.database import engine as _engine
 from src.gui.tabs.charts.components import (
     get_stock_chart_components,
+    get_stock_chart_with_stats,
     create_trading_overlay,
     render_multi_panel_layout,
     create_overlay_list
@@ -27,7 +30,7 @@ from src.services.market_data import MarketDataProvider
 from src.gui.tabs.charts.fullscreen_manager import get_fullscreen_state, get_container_classname
 from src.gui.tabs.charts.overlay_utils import normalize_overlay_store, save_overlays_to_db, ensure_overlay_tab
 from src.gui.tabs.charts.chart_utils import find_index_binary
-from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager
+from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager, ChartDataManager
 
 # Initialize market data provider
 market_data = MarketDataProvider()
@@ -36,7 +39,96 @@ logger = logging.getLogger(__name__)
 
 
 def register_charts_extended(app):
-    """Register extended chart callbacks (tabs, overlays, render, panels)."""
+    """Register extended chart callbacks (tabs, overlays, render, panels).
+
+    The helper functions below each register one related group of callbacks.
+    They are called in the original registration order, which must be preserved.
+    """
+    _register_price_cache_callbacks(app)
+    _register_overlay_modal_callbacks(app)
+    _register_scroll_callbacks(app)
+    _register_tab_management_callbacks(app)
+    _register_render_callbacks(app)
+    _register_panel_settings_callbacks(app)
+    _register_panel_layout_callbacks(app)
+    _register_config_modal_callbacks(app)
+    _register_overlay_list_callbacks(app)
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _get_triggered_relayout(relayout_data_list: list, graph_ids: list) -> Tuple[Optional[str], Optional[dict]]:
+    """Resolve which chart graph triggered a relayoutData callback.
+
+    Returns (tab_id, relayout_data) or (None, None) if the trigger cannot be
+    resolved (no trigger, unparseable ID, or graph not found).
+    """
+    if not callback_context.triggered:
+        return None, None
+
+    trigger = callback_context.triggered[0]["prop_id"]
+    if ".relayoutData" not in trigger:
+        return None, None
+
+    try:
+        trigger_id = json.loads(trigger.split(".")[0])
+        tab_id = trigger_id.get("index")
+    except Exception as e:
+        logger.debug(f"Could not parse relayout trigger ID: {e}")
+        return None, None
+
+    for idx, graph_id in enumerate(graph_ids):
+        if graph_id.get("index") == tab_id:
+            if idx < len(relayout_data_list):
+                return tab_id, relayout_data_list[idx]
+            return None, None
+
+    return None, None
+
+
+def _isoformat_or_str(value: Any) -> str:
+    """Serialize a timestamp-like value (pandas Timestamp, datetime, str) to a string."""
+    try:
+        if hasattr(value, 'isoformat'):
+            return value.isoformat()
+        if hasattr(value, 'strftime'):
+            return value.strftime('%Y-%m-%dT%H:%M:%S')
+        return str(value)
+    except Exception:
+        return str(value)
+
+
+def _search_entity_symbols(search_value: str) -> List[Dict[str, str]]:
+    """Search the Entity table by ticker or company name; return dropdown options."""
+    from src.models.entities import Entity
+
+    try:
+        with Session(_engine) as db:
+            search_term = f"%{search_value.upper()}%"
+            entities = db.query(Entity).filter(
+                (Entity.entity_id.ilike(search_term)) |
+                (Entity.entity_name.ilike(search_term))
+            ).limit(20).all()
+
+            # Format as dropdown options: "AAPL - Apple Inc."
+            return [
+                {"label": f"{entity.entity_id} - {entity.entity_name}", "value": entity.entity_id}
+                for entity in entities
+            ]
+    except Exception as e:
+        logger.error(f"Error searching symbols: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Price cache + tab bar
+# ---------------------------------------------------------------------------
+
+def _register_price_cache_callbacks(app):
+    """Background price cache updates and browser-style tab buttons."""
+
     @app.callback(
         Output("chart-price-cache-store", "data"),
         [Input("chart-price-update-interval", "n_intervals"),
@@ -47,24 +139,20 @@ def register_charts_extended(app):
     def update_price_cache(n_intervals, tabs_data, active_main_tab):
         """Update price cache in background (non-blocking for UI).
         Only updates when Charts tab is active to save resources."""
-        # Early return if Charts tab is not active
         if active_main_tab != "charts":
             return dash.no_update
-        
-        import concurrent.futures
 
         tabs = tabs_data.get('tabs', [])
         if not tabs:
             return {}
 
-        symbols = list(set([tab['symbol'] for tab in tabs]))
+        symbols = list(set(tab['symbol'] for tab in tabs))
         price_cache = {}
 
         def fetch_price(symbol):
             try:
-                quote = market_data.get_live_price(symbol)
-                return symbol, quote
-            except:
+                return symbol, market_data.get_live_price(symbol)
+            except Exception:
                 return symbol, None
 
         # Parallel price fetching (max 5 concurrent)
@@ -76,14 +164,13 @@ def register_charts_extended(app):
 
         return price_cache
 
-
     @app.callback(
         Output("chart-tab-buttons", "children"),
         [Input("chart-tabs-store", "data"),
          Input("chart-price-cache-store", "data")]
     )
     def render_chart_tabs(tabs_data, price_cache):
-        """Render the browser-style tab buttons with cached price data"""
+        """Render the browser-style tab buttons with cached price data."""
         tabs = tabs_data.get('tabs', [])
         active_tab = tabs_data.get('active_tab')
         price_cache = price_cache or {}
@@ -141,6 +228,256 @@ def register_charts_extended(app):
         return tab_buttons
 
 
+# ---------------------------------------------------------------------------
+# Overlay modal (brackets / breaks)
+# ---------------------------------------------------------------------------
+
+def _overlay_item_row(group: str, tab_id: str, item: dict, default_color: str) -> dbc.Row:
+    """Build one editable row (price, label, color, visibility, jump, delete) for an overlay item."""
+    item_id = item.get("id")
+    return dbc.Row([
+        dbc.Col(
+            dbc.Input(
+                id={"type": "overlay-item-price", "group": group, "tab": tab_id, "index": item_id},
+                type="number",
+                step="0.01",
+                value=item.get("price"),
+                debounce=True,
+                placeholder="Price",
+                className="overlay-price-input"
+            ),
+            width=3
+        ),
+        dbc.Col(
+            dbc.Input(
+                id={"type": "overlay-item-name", "group": group, "tab": tab_id, "index": item_id},
+                type="text",
+                value=item.get("name", ""),
+                debounce=True,
+                placeholder="Label",
+                className="overlay-name-input"
+            ),
+            width=3
+        ),
+        dbc.Col(
+            dbc.Input(
+                id={"type": "overlay-item-color", "group": group, "tab": tab_id, "index": item_id},
+                type="color",
+                value=item.get("color") or default_color,
+                className="overlay-color-input"
+            ),
+            width="auto"
+        ),
+        dbc.Col(
+            dbc.Checklist(
+                id={"type": "overlay-item-visible", "group": group, "tab": tab_id, "index": item_id},
+                options=[{"label": "Visible", "value": "visible"}],
+                value=["visible"] if item.get("visible", True) else [],
+                switch=True,
+                className="overlay-visible-toggle"
+            ),
+            width="auto"
+        ),
+        dbc.Col(
+            dbc.Button(
+                "↗",
+                id={"type": "overlay-jump-btn", "group": group, "tab": tab_id, "index": item_id},
+                color="secondary",
+                size="sm",
+                outline=True,
+                className="overlay-jump-btn",
+                title="Open chart"
+            ),
+            width="auto"
+        ),
+        dbc.Col(
+            dbc.Button(
+                "✕",
+                id={"type": "overlay-item-delete", "group": group, "tab": tab_id, "index": item_id},
+                color="secondary",
+                size="sm",
+                outline=True,
+                className="overlay-delete-btn"
+            ),
+            width="auto"
+        )
+    ], className="overlay-item-row g-2 align-items-center")
+
+
+def _overlay_add_row(group: str, tab_id: str, default_color: str) -> dbc.Row:
+    """Build the 'add new overlay item' input row for a chart."""
+    return dbc.Row([
+        dbc.Col(
+            dbc.Input(
+                id={"type": "overlay-add-price", "group": group, "tab": tab_id},
+                type="number",
+                step="0.01",
+                placeholder="Price",
+                debounce=True,
+                className="overlay-price-input"
+            ),
+            width=3
+        ),
+        dbc.Col(
+            dbc.Input(
+                id={"type": "overlay-add-name", "group": group, "tab": tab_id},
+                type="text",
+                placeholder="Label (optional)",
+                debounce=True,
+                className="overlay-name-input"
+            ),
+            width=3
+        ),
+        dbc.Col(
+            dbc.Input(
+                id={"type": "overlay-add-color", "group": group, "tab": tab_id},
+                type="color",
+                value=default_color,
+                className="overlay-color-input"
+            ),
+            width="auto"
+        ),
+        dbc.Col(
+            dbc.Checklist(
+                id={"type": "overlay-add-visible", "group": group, "tab": tab_id},
+                options=[{"label": "Visible", "value": "visible"}],
+                value=["visible"],
+                switch=True,
+                className="overlay-visible-toggle"
+            ),
+            width="auto"
+        ),
+        dbc.Col(
+            dbc.Button(
+                "Add",
+                id={"type": "overlay-add-btn", "group": group, "tab": tab_id},
+                color="primary",
+                size="sm"
+            ),
+            width="auto"
+        )
+    ], className="g-2 align-items-center")
+
+
+def _build_overlay_group_accordion(all_charts: dict, active_item: list, group: str,
+                                   default_color: str, label: str) -> dbc.Accordion:
+    """Build the accordion listing all charts' overlay items for one group (brackets or breaks)."""
+    accordion_items = []
+
+    # Iterate over all charts (active tabs + DB-only)
+    for key, chart_data in all_charts.items():
+        symbol = chart_data["symbol"]
+        timeframe = chart_data["timeframe"]
+        tab_id = chart_data["tab_id"]  # Real tab_id or symbol_timeframe
+        items = chart_data.get(group, []) or []
+
+        # Get current price for this symbol
+        current_price = None
+        try:
+            df = market_data.get_historical_data(symbol, period='1d')
+            if df is not None and not df.empty:
+                current_price = df['Close'].iloc[-1]
+        except Exception:
+            pass
+
+        rows = []
+        if items:
+            for item in items:
+                rows.append(_overlay_item_row(group, tab_id, item, default_color))
+        else:
+            rows.append(html.Div("No entries yet.", className="overlay-empty"))
+
+        rows.append(html.Hr(className="overlay-divider"))
+        rows.append(html.Div(f"Add {label}", className="overlay-section-title mb-2"))
+        rows.append(_overlay_add_row(group, tab_id, default_color))
+
+        # Build title with current price if available
+        price_str = f" ${current_price:.2f}" if current_price else ""
+        title_text = f"{symbol}{price_str} • {timeframe} ({len(items)})"
+
+        accordion_items.append(
+            dbc.AccordionItem(
+                rows,
+                title=title_text,
+                item_id=key  # Use symbol_timeframe as accordion item_id
+            )
+        )
+
+    return dbc.Accordion(
+        accordion_items,
+        active_item=active_item,
+        always_open=True,
+        className="overlay-accordion"
+    )
+
+
+def _apply_overlay_item_update(group, price_values, name_values, color_values, visible_values,
+                               price_ids, name_ids, color_ids, visible_ids, overlays_data, tabs_data):
+    """Shared logic for editing/deleting bracket and break overlay items.
+
+    Returns the updated overlay store or dash.no_update.
+    """
+    if not callback_context.triggered:
+        return dash.no_update
+
+    trigger = callback_context.triggered[0]["prop_id"].split(".")[0]
+    try:
+        trigger_id = json.loads(trigger)
+    except json.JSONDecodeError:
+        return dash.no_update
+
+    item_id = trigger_id.get("index")
+    tab_id = trigger_id.get("tab")
+    action_type = trigger_id.get("type")
+
+    if not tab_id:
+        return dash.no_update
+
+    overlays = normalize_overlay_store(copy.deepcopy(overlays_data))
+    tab_overlays = ensure_overlay_tab(overlays, tab_id)
+    items = tab_overlays.get(group, [])
+
+    if action_type == "overlay-item-delete":
+        tab_overlays[group] = [item for item in items if item.get("id") != item_id]
+        save_overlays_to_db(overlays, tabs_data)
+        return overlays
+
+    def value_by_id(ids, values):
+        for comp_id, value in zip(ids, values):
+            if comp_id.get("index") == item_id and comp_id.get("tab") == tab_id:
+                return value
+        return None
+
+    for item in items:
+        if item.get("id") != item_id:
+            continue
+        if action_type == "overlay-item-price":
+            new_value = value_by_id(price_ids, price_values)
+            if new_value is not None:
+                try:
+                    item["price"] = float(new_value)
+                except (TypeError, ValueError):
+                    pass
+        elif action_type == "overlay-item-name":
+            new_value = value_by_id(name_ids, name_values)
+            if new_value is not None:
+                item["name"] = new_value or ""
+        elif action_type == "overlay-item-color":
+            new_value = value_by_id(color_ids, color_values)
+            if new_value:
+                item["color"] = new_value
+        elif action_type == "overlay-item-visible":
+            new_value = value_by_id(visible_ids, visible_values)
+            item["visible"] = "visible" in (new_value or [])
+        break
+
+    save_overlays_to_db(overlays, tabs_data)
+    return overlays
+
+
+def _register_overlay_modal_callbacks(app):
+    """Trading overlay modal: open/close, list rendering, add/edit/delete items, shape dragging."""
+
     @app.callback(
         [Output("trading-overlay-modal", "is_open"),
          Output("overlay-modal-tab-id", "data")],
@@ -152,9 +489,6 @@ def register_charts_extended(app):
     )
     def toggle_trading_overlay_modal(manage_clicks, close_click, is_open, manage_ids):
         """Open overlay modal from a chart panel."""
-        from dash import callback_context
-        import json
-
         if not callback_context.triggered:
             raise PreventUpdate
 
@@ -176,7 +510,6 @@ def register_charts_extended(app):
 
         return is_open, dash.no_update
 
-
     @app.callback(
         [Output("overlay-brackets-container", "children"),
          Output("overlay-breaks-container", "children")],
@@ -186,7 +519,6 @@ def register_charts_extended(app):
     )
     def render_overlay_lists(overlays_data, tabs_data, active_tab_id):
         """Render grouped bracket/break lists for all charts (active tabs + DB overlays)."""
-        from sqlalchemy.orm import Session
         from src.models.chart_overlays import ChartOverlay
 
         # Get active tabs
@@ -251,184 +583,9 @@ def register_charts_extended(app):
                     active_item = [key]
                     break
 
-        def build_group(group, default_color, label):
-            accordion_items = []
-
-            # Iterate over all charts (active tabs + DB-only)
-            for key, chart_data in all_charts.items():
-                symbol = chart_data["symbol"]
-                timeframe = chart_data["timeframe"]
-                tab_id = chart_data["tab_id"]  # Real tab_id or symbol_timeframe
-                items = chart_data.get(group, []) or []
-
-                # Get current price for this symbol
-                current_price = None
-                try:
-                    df = market_data.get_historical_data(symbol, period='1d')
-                    if df is not None and not df.empty:
-                        current_price = df['Close'].iloc[-1]
-                except:
-                    pass
-
-                rows = []
-                if items:
-                    for item in items:
-                        item_id = item.get("id")
-                        price_value = item.get("price")
-                        name_value = item.get("name", "")
-                        color_value = item.get("color") or default_color
-                        is_visible = item.get("visible", True)
-                        rows.append(
-                            dbc.Row([
-                                dbc.Col(
-                                    dbc.Input(
-                                        id={"type": "overlay-item-price", "group": group, "tab": tab_id, "index": item_id},
-                                        type="number",
-                                        step="0.01",
-                                        value=price_value,
-                                        debounce=True,
-                                        placeholder="Price",
-                                        className="overlay-price-input"
-                                    ),
-                                    width=3
-                                ),
-                                dbc.Col(
-                                    dbc.Input(
-                                        id={"type": "overlay-item-name", "group": group, "tab": tab_id, "index": item_id},
-                                        type="text",
-                                        value=name_value,
-                                        debounce=True,
-                                        placeholder="Label",
-                                        className="overlay-name-input"
-                                    ),
-                                    width=3
-                                ),
-                                dbc.Col(
-                                    dbc.Input(
-                                        id={"type": "overlay-item-color", "group": group, "tab": tab_id, "index": item_id},
-                                        type="color",
-                                        value=color_value,
-                                        className="overlay-color-input"
-                                    ),
-                                    width="auto"
-                                ),
-                                dbc.Col(
-                                    dbc.Checklist(
-                                        id={"type": "overlay-item-visible", "group": group, "tab": tab_id, "index": item_id},
-                                        options=[{"label": "Visible", "value": "visible"}],
-                                        value=["visible"] if is_visible else [],
-                                        switch=True,
-                                        className="overlay-visible-toggle"
-                                    ),
-                                    width="auto"
-                                ),
-                                dbc.Col(
-                                    dbc.Button(
-                                        "↗",
-                                        id={"type": "overlay-jump-btn", "group": group, "tab": tab_id, "index": item_id},
-                                        color="secondary",
-                                        size="sm",
-                                        outline=True,
-                                        className="overlay-jump-btn",
-                                        title="Open chart"
-                                    ),
-                                    width="auto"
-                                ),
-                                dbc.Col(
-                                    dbc.Button(
-                                        "✕",
-                                        id={"type": "overlay-item-delete", "group": group, "tab": tab_id, "index": item_id},
-                                        color="secondary",
-                                        size="sm",
-                                        outline=True,
-                                        className="overlay-delete-btn"
-                                    ),
-                                    width="auto"
-                                )
-                            ], className="overlay-item-row g-2 align-items-center")
-                        )
-                else:
-                    rows.append(html.Div("No entries yet.", className="overlay-empty"))
-
-                rows.append(html.Hr(className="overlay-divider"))
-                rows.append(html.Div(f"Add {label}", className="overlay-section-title mb-2"))
-                rows.append(
-                    dbc.Row([
-                        dbc.Col(
-                            dbc.Input(
-                                id={"type": "overlay-add-price", "group": group, "tab": tab_id},
-                                type="number",
-                                step="0.01",
-                                placeholder="Price",
-                                debounce=True,
-                                className="overlay-price-input"
-                            ),
-                            width=3
-                        ),
-                        dbc.Col(
-                            dbc.Input(
-                                id={"type": "overlay-add-name", "group": group, "tab": tab_id},
-                                type="text",
-                                placeholder="Label (optional)",
-                                debounce=True,
-                                className="overlay-name-input"
-                            ),
-                            width=3
-                        ),
-                        dbc.Col(
-                            dbc.Input(
-                                id={"type": "overlay-add-color", "group": group, "tab": tab_id},
-                                type="color",
-                                value=default_color,
-                                className="overlay-color-input"
-                            ),
-                            width="auto"
-                        ),
-                        dbc.Col(
-                            dbc.Checklist(
-                                id={"type": "overlay-add-visible", "group": group, "tab": tab_id},
-                                options=[{"label": "Visible", "value": "visible"}],
-                                value=["visible"],
-                                switch=True,
-                                className="overlay-visible-toggle"
-                            ),
-                            width="auto"
-                        ),
-                        dbc.Col(
-                            dbc.Button(
-                                "Add",
-                                id={"type": "overlay-add-btn", "group": group, "tab": tab_id},
-                                color="primary",
-                                size="sm"
-                            ),
-                            width="auto"
-                        )
-                    ], className="g-2 align-items-center")
-                )
-
-                # Build title with current price if available
-                price_str = f" ${current_price:.2f}" if current_price else ""
-                title_text = f"{symbol}{price_str} • {timeframe} ({len(items)})"
-
-                accordion_items.append(
-                    dbc.AccordionItem(
-                        rows,
-                        title=title_text,
-                        item_id=key  # Use symbol_timeframe as accordion item_id
-                    )
-                )
-
-            return dbc.Accordion(
-                accordion_items,
-                active_item=active_item,
-                always_open=True,
-                className="overlay-accordion"
-            )
-
-        brackets_view = build_group("brackets", "#00ff88", "Bracket")
-        breaks_view = build_group("breaks", "#ff4444", "Break")
+        brackets_view = _build_overlay_group_accordion(all_charts, active_item, "brackets", "#00ff88", "Bracket")
+        breaks_view = _build_overlay_group_accordion(all_charts, active_item, "breaks", "#ff4444", "Break")
         return brackets_view, breaks_view
-
 
     @app.callback(
         Output("chart-overlays-store", "data", allow_duplicate=True),
@@ -453,11 +610,6 @@ def register_charts_extended(app):
                          visible_ids, visible_values,
                          overlays_data, tabs_data):
         """Add a new bracket/break overlay line for a specific chart."""
-        from dash import callback_context
-        import json
-        import uuid
-        import copy
-
         if not callback_context.triggered:
             return dash.no_update
 
@@ -499,11 +651,8 @@ def register_charts_extended(app):
             "visible": "visible" in (visible or [])
         })
 
-        # Save to database
         save_overlays_to_db(overlays, tabs_data)
-
         return overlays
-
 
     @app.callback(
         Output("chart-overlays-store", "data", allow_duplicate=True),
@@ -524,69 +673,10 @@ def register_charts_extended(app):
     def update_bracket_items(price_values, name_values, color_values, visible_values, delete_clicks,
                              price_ids, name_ids, color_ids, visible_ids, delete_ids, overlays_data, tabs_data):
         """Update bracket items when fields change."""
-        from dash import callback_context
-        import json
-        import copy
-
-        if not callback_context.triggered:
-            return dash.no_update
-
-        trigger = callback_context.triggered[0]["prop_id"].split(".")[0]
-        try:
-            trigger_id = json.loads(trigger)
-        except json.JSONDecodeError:
-            return dash.no_update
-
-        item_id = trigger_id.get("index")
-        tab_id = trigger_id.get("tab")
-        action_type = trigger_id.get("type")
-
-        if not tab_id:
-            return dash.no_update
-
-        overlays = normalize_overlay_store(copy.deepcopy(overlays_data))
-        tab_overlays = ensure_overlay_tab(overlays, tab_id)
-        items = tab_overlays.get("brackets", [])
-
-        if action_type == "overlay-item-delete":
-            tab_overlays["brackets"] = [item for item in items if item.get("id") != item_id]
-            save_overlays_to_db(overlays, tabs_data)
-            return overlays
-
-        def value_by_id(ids, values):
-            for comp_id, value in zip(ids, values):
-                if comp_id.get("index") == item_id and comp_id.get("tab") == tab_id:
-                    return value
-            return None
-
-        for item in items:
-            if item.get("id") != item_id:
-                continue
-            if action_type == "overlay-item-price":
-                new_value = value_by_id(price_ids, price_values)
-                if new_value is not None:
-                    try:
-                        item["price"] = float(new_value)
-                    except (TypeError, ValueError):
-                        pass
-            elif action_type == "overlay-item-name":
-                new_value = value_by_id(name_ids, name_values)
-                if new_value is not None:
-                    item["name"] = new_value or ""
-            elif action_type == "overlay-item-color":
-                new_value = value_by_id(color_ids, color_values)
-                if new_value:
-                    item["color"] = new_value
-            elif action_type == "overlay-item-visible":
-                new_value = value_by_id(visible_ids, visible_values)
-                item["visible"] = "visible" in (new_value or [])
-            break
-
-        # Save to database
-        save_overlays_to_db(overlays, tabs_data)
-
-        return overlays
-
+        return _apply_overlay_item_update(
+            "brackets", price_values, name_values, color_values, visible_values,
+            price_ids, name_ids, color_ids, visible_ids, overlays_data, tabs_data
+        )
 
     @app.callback(
         Output("chart-overlays-store", "data", allow_duplicate=True),
@@ -607,69 +697,10 @@ def register_charts_extended(app):
     def update_break_items(price_values, name_values, color_values, visible_values, delete_clicks,
                            price_ids, name_ids, color_ids, visible_ids, delete_ids, overlays_data, tabs_data):
         """Update break items when fields change."""
-        from dash import callback_context
-        import json
-        import copy
-
-        if not callback_context.triggered:
-            return dash.no_update
-
-        trigger = callback_context.triggered[0]["prop_id"].split(".")[0]
-        try:
-            trigger_id = json.loads(trigger)
-        except json.JSONDecodeError:
-            return dash.no_update
-
-        item_id = trigger_id.get("index")
-        tab_id = trigger_id.get("tab")
-        action_type = trigger_id.get("type")
-
-        if not tab_id:
-            return dash.no_update
-
-        overlays = normalize_overlay_store(copy.deepcopy(overlays_data))
-        tab_overlays = ensure_overlay_tab(overlays, tab_id)
-        items = tab_overlays.get("breaks", [])
-
-        if action_type == "overlay-item-delete":
-            tab_overlays["breaks"] = [item for item in items if item.get("id") != item_id]
-            save_overlays_to_db(overlays, tabs_data)
-            return overlays
-
-        def value_by_id(ids, values):
-            for comp_id, value in zip(ids, values):
-                if comp_id.get("index") == item_id and comp_id.get("tab") == tab_id:
-                    return value
-            return None
-
-        for item in items:
-            if item.get("id") != item_id:
-                continue
-            if action_type == "overlay-item-price":
-                new_value = value_by_id(price_ids, price_values)
-                if new_value is not None:
-                    try:
-                        item["price"] = float(new_value)
-                    except (TypeError, ValueError):
-                        pass
-            elif action_type == "overlay-item-name":
-                new_value = value_by_id(name_ids, name_values)
-                if new_value is not None:
-                    item["name"] = new_value or ""
-            elif action_type == "overlay-item-color":
-                new_value = value_by_id(color_ids, color_values)
-                if new_value:
-                    item["color"] = new_value
-            elif action_type == "overlay-item-visible":
-                new_value = value_by_id(visible_ids, visible_values)
-                item["visible"] = "visible" in (new_value or [])
-            break
-
-        # Save to database
-        save_overlays_to_db(overlays, tabs_data)
-
-        return overlays
-
+        return _apply_overlay_item_update(
+            "breaks", price_values, name_values, color_values, visible_values,
+            price_ids, name_ids, color_ids, visible_ids, overlays_data, tabs_data
+        )
 
     @app.callback(
         Output("chart-overlays-store", "data", allow_duplicate=True),
@@ -681,36 +712,7 @@ def register_charts_extended(app):
     )
     def update_overlays_from_chart_drag(relayout_data_list, overlays_data, tabs_data, graph_ids):
         """Update overlay prices when user drags shapes in the chart."""
-        from dash import callback_context
-        import json
-        import copy
-
-        if not callback_context.triggered:
-            return dash.no_update
-
-        # Find which graph triggered
-        trigger = callback_context.triggered[0]["prop_id"]
-        if ".relayoutData" not in trigger:
-            return dash.no_update
-
-        try:
-            trigger_id_str = trigger.split(".")[0]
-            trigger_id = json.loads(trigger_id_str)
-            tab_id = trigger_id.get("index")
-        except:
-            return dash.no_update
-
-        # Get the relayout data for this graph
-        trigger_index = None
-        for idx, graph_id in enumerate(graph_ids):
-            if graph_id.get("index") == tab_id:
-                trigger_index = idx
-                break
-
-        if trigger_index is None or trigger_index >= len(relayout_data_list):
-            return dash.no_update
-
-        relayout_data = relayout_data_list[trigger_index]
+        tab_id, relayout_data = _get_triggered_relayout(relayout_data_list, graph_ids)
         if not relayout_data:
             return dash.no_update
 
@@ -719,14 +721,11 @@ def register_charts_extended(app):
         for key, value in relayout_data.items():
             if key.startswith("shapes[") and (key.endswith(".y0") or key.endswith(".y1")):
                 # Extract shape index
-                import re
                 match = re.match(r"shapes\[(\d+)\]\.(y\d)", key)
                 if match:
                     shape_idx = int(match.group(1))
                     y_coord = match.group(2)
-                    if shape_idx not in shape_updates:
-                        shape_updates[shape_idx] = {}
-                    shape_updates[shape_idx][y_coord] = value
+                    shape_updates.setdefault(shape_idx, {})[y_coord] = value
 
         if not shape_updates:
             return dash.no_update
@@ -735,11 +734,10 @@ def register_charts_extended(app):
         overlays = normalize_overlay_store(copy.deepcopy(overlays_data))
         tab_overlays = overlays.get("tabs", {}).get(tab_id, {})
 
-        # Count all items to map shape index to overlay
+        # Collect all items to map shape index to overlay
         all_items = []
         for group in ["brackets", "breaks"]:
-            items = tab_overlays.get(group, [])
-            for item in items:
+            for item in tab_overlays.get(group, []):
                 all_items.append((group, item))
 
         # Update prices based on shape movements
@@ -755,11 +753,112 @@ def register_charts_extended(app):
                     logger.info(f"[Shape Drag] Updated {group} {item.get('name', 'N/A')} to ${new_price:.2f}")
 
         if changed:
-            # Save to database
             save_overlays_to_db(overlays, tabs_data)
             return overlays
         return dash.no_update
 
+
+# ---------------------------------------------------------------------------
+# View state persistence + infinite scroll
+# ---------------------------------------------------------------------------
+
+def _parse_visible_range(relayout_data: dict) -> Optional[list]:
+    """Extract the visible [left, right] x-axis range from relayout data, or None."""
+    if 'xaxis.range' in relayout_data:
+        visible_range = relayout_data['xaxis.range']
+    elif 'xaxis.range[0]' in relayout_data and 'xaxis.range[1]' in relayout_data:
+        visible_range = [relayout_data['xaxis.range[0]'], relayout_data['xaxis.range[1]']]
+    else:
+        return None
+
+    if not visible_range or not isinstance(visible_range, list) or len(visible_range) != 2:
+        return None
+    return visible_range
+
+
+def _to_axis_value(value: Any) -> Optional[Any]:
+    """Convert a Plotly axis bound to a comparable value.
+
+    Numbers (category-type x-axis indices) pass through unchanged; ISO strings
+    (date-type x-axis) are parsed to datetimes. Returns None if unparseable.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            return pd.to_datetime(value)
+        except (ValueError, TypeError):
+            logger.debug(f"[Infinite Scroll] Could not parse axis value: {value}")
+            return None
+    return value
+
+
+def _resolve_visible_indices(indices: list, left_value: Any, right_value: Any,
+                             total_points: int) -> Tuple[int, int]:
+    """Map visible range bounds to (left_index, right_index) within the loaded data."""
+    # With type='category' x-axis, Plotly sends numeric indices (0, 1, 2...) not timestamps
+    if isinstance(left_value, (int, float)) and isinstance(right_value, (int, float)):
+        left_index = int(round(left_value))
+        right_index = int(round(right_value))
+        logger.debug(f"[Infinite Scroll] Using numeric indices: left={left_index}, right={right_index}")
+    else:
+        # Timestamp values - use binary search (legacy behavior)
+        left_index = find_index_binary(indices, left_value)
+        right_index = find_index_binary(indices, right_value)
+        logger.debug("[Infinite Scroll] Using binary search for timestamps")
+
+    # Clamp indices into valid bounds
+    if left_index < 0 or left_index >= total_points:
+        left_index = 0
+    if right_index < 0 or right_index >= total_points:
+        right_index = total_points - 1
+    if right_index < left_index:
+        right_index = left_index
+    return left_index, right_index
+
+
+def _load_adjacent_data(data_manager: ChartDataManager, symbol: str, timeframe: str,
+                        cached_df: pd.DataFrame, should_load_left: bool,
+                        should_load_right: bool) -> Tuple[pd.DataFrame, bool, int]:
+    """Load historical (left) and/or future (right) data around the cached range.
+
+    Returns (combined_df, data_loaded, index_offset) where index_offset is the
+    number of points prepended at the beginning (shifts existing indices right).
+    """
+    combined_df = cached_df.copy()
+    data_loaded = False
+    index_offset = 0
+
+    if should_load_left:
+        earliest_date = cached_df.index[0]
+        new_historical_df = data_manager.load_more_historical(symbol, timeframe, earliest_date)
+
+        if new_historical_df is not None and not new_historical_df.empty:
+            old_len = len(combined_df)
+            combined_df = data_manager.prepend_data(combined_df, new_historical_df)
+            index_offset = len(combined_df) - old_len  # How many points were added at the beginning
+            data_loaded = True
+            logger.info(f"[Infinite Scroll] Loaded {len(new_historical_df)} historical points for {symbol} ({timeframe}), index_offset={index_offset}")
+        else:
+            logger.debug(f"[Infinite Scroll] No more historical data for {symbol} ({timeframe})")
+
+    if should_load_right:
+        latest_date = combined_df.index[-1]
+        new_future_df = data_manager.load_more_future(symbol, timeframe, latest_date)
+
+        if new_future_df is not None and not new_future_df.empty:
+            # Append new data (no index offset needed - data added at end)
+            combined_df = data_manager.append_data(combined_df, new_future_df)
+            data_loaded = True
+            logger.info(f"[Infinite Scroll] Loaded {len(new_future_df)} future points for {symbol} ({timeframe})")
+        else:
+            logger.debug(f"[Infinite Scroll] No more future data for {symbol} ({timeframe})")
+
+    return combined_df, data_loaded, index_offset
+
+
+def _register_scroll_callbacks(app):
+    """Chart zoom/pan persistence and infinite scroll data loading."""
 
     @app.callback(
         Output("chart-view-state", "data", allow_duplicate=True),
@@ -770,48 +869,15 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def save_chart_view_state(relayout_data_list, view_state_data, tabs_data, graph_ids):
-        """Save chart zoom/pan state to localStorage for persistence"""
-        from dash import callback_context
-        import json
-        import copy
-
-        if not callback_context.triggered:
-            return dash.no_update
-
-        # Find which graph triggered
-        trigger = callback_context.triggered[0]["prop_id"]
-        if ".relayoutData" not in trigger:
-            return dash.no_update
-
-        try:
-            trigger_id_str = trigger.split(".")[0]
-            trigger_id = json.loads(trigger_id_str)
-            tab_id = trigger_id.get("index")
-        except:
-            return dash.no_update
-
-        # Get the relayout data for this graph
-        trigger_index = None
-        for idx, graph_id in enumerate(graph_ids):
-            if graph_id.get("index") == tab_id:
-                trigger_index = idx
-                break
-
-        if trigger_index is None or trigger_index >= len(relayout_data_list):
-            return dash.no_update
-
-        relayout_data = relayout_data_list[trigger_index]
+        """Save chart zoom/pan state to localStorage for persistence."""
+        tab_id, relayout_data = _get_triggered_relayout(relayout_data_list, graph_ids)
         if not relayout_data:
             return dash.no_update
 
         # Extract zoom/pan information (ignore shape-related changes)
-        view_state = {}
-        zoom_pan_keys = ['xaxis.range', 'yaxis.range', 'xaxis2.range', 'yaxis2.range', 
+        zoom_pan_keys = ['xaxis.range', 'yaxis.range', 'xaxis2.range', 'yaxis2.range',
                          'xaxis.autorange', 'yaxis.autorange', 'xaxis2.autorange', 'yaxis2.autorange']
-
-        for key in zoom_pan_keys:
-            if key in relayout_data:
-                view_state[key] = relayout_data[key]
+        view_state = {key: relayout_data[key] for key in zoom_pan_keys if key in relayout_data}
 
         # Only save if we have actual zoom/pan data (not just shape movements)
         if not view_state:
@@ -836,7 +902,6 @@ def register_charts_extended(app):
         logger.debug(f"[Chart View] Saved view state for chart {tab_id}")
         return state
 
-
     @app.callback(
         [Output("chart-loaded-data-store", "data", allow_duplicate=True),
          Output("chart-scroll-state-store", "data", allow_duplicate=True)],
@@ -859,38 +924,7 @@ def register_charts_extended(app):
         - Position persistence: saves position to view_state to prevent jumping on refresh
         - Optimized with binary search and improved throttling
         """
-        from dash import callback_context
-        import json
-        import copy
-        import time
-
-        if not callback_context.triggered:
-            return dash.no_update, dash.no_update
-
-        # Find which graph triggered
-        trigger = callback_context.triggered[0]["prop_id"]
-        if ".relayoutData" not in trigger:
-            return dash.no_update, dash.no_update
-
-        try:
-            trigger_id_str = trigger.split(".")[0]
-            trigger_id = json.loads(trigger_id_str)
-            tab_id = trigger_id.get("index")
-        except Exception as e:
-            logger.debug(f"[Infinite Scroll] Error parsing trigger ID: {e}")
-            return dash.no_update, dash.no_update
-
-        # Get the relayout data for this graph
-        trigger_index = None
-        for idx, graph_id in enumerate(graph_ids):
-            if graph_id.get("index") == tab_id:
-                trigger_index = idx
-                break
-
-        if trigger_index is None or trigger_index >= len(relayout_data_list):
-            return dash.no_update, dash.no_update
-
-        relayout_data = relayout_data_list[trigger_index]
+        tab_id, relayout_data = _get_triggered_relayout(relayout_data_list, graph_ids)
         if not relayout_data:
             return dash.no_update, dash.no_update
 
@@ -900,25 +934,14 @@ def register_charts_extended(app):
 
         # Get chart configuration
         tabs = tabs_data.get('tabs', []) if tabs_data else []
-        tab_config = None
-        for tab in tabs:
-            if tab.get('id') == tab_id:
-                tab_config = tab
-                break
-
+        tab_config = next((tab for tab in tabs if tab.get('id') == tab_id), None)
         if not tab_config:
             return dash.no_update, dash.no_update
 
         symbol = tab_config.get('symbol')
         timeframe = tab_config.get('timeframe', '1mo')
-
         if not symbol:
             return dash.no_update, dash.no_update
-
-        # Get interaction mode to check if auto_scroll is enabled
-        interaction_modes_dict = interaction_modes if interaction_modes else {'tabs': {}}
-        tab_interaction = interaction_modes_dict.get('tabs', {}).get(tab_id, {})
-        auto_scroll = tab_interaction.get('auto_scroll', False)
 
         # Check scroll state to prevent race conditions
         scroll_state = copy.deepcopy(scroll_state_store) if scroll_state_store else {'tabs': {}}
@@ -934,45 +957,19 @@ def register_charts_extended(app):
         # Debounce: check last load time (200ms for responsive loading)
         current_time = time.time()
         last_load_time = tab_scroll_state.get('last_load_time', 0)
-        if current_time - last_load_time < 0.2:  # 200ms debounce for fast response
+        if current_time - last_load_time < 0.2:
             return dash.no_update, dash.no_update
 
-        # Get visible range
-        visible_range = None
-        if 'xaxis.range' in relayout_data:
-            visible_range = relayout_data['xaxis.range']
-        elif 'xaxis.range[0]' in relayout_data and 'xaxis.range[1]' in relayout_data:
-            visible_range = [relayout_data['xaxis.range[0]'], relayout_data['xaxis.range[1]']]
-
-        if not visible_range or not isinstance(visible_range, list) or len(visible_range) != 2:
+        # Get and validate visible range
+        visible_range = _parse_visible_range(relayout_data)
+        if not visible_range:
             return dash.no_update, dash.no_update
 
-        # Validate range values and convert to proper types
-        try:
-            left_value = visible_range[0]
-            right_value = visible_range[1]
-            if left_value is None or right_value is None:
-                return dash.no_update, dash.no_update
+        logger.debug(f"[Infinite Scroll] Received range: left={visible_range[0]} (type={type(visible_range[0]).__name__}), right={visible_range[1]} (type={type(visible_range[1]).__name__})")
 
-            logger.debug(f"[Infinite Scroll] Received range: left={left_value} (type={type(left_value).__name__}), right={right_value} (type={type(right_value).__name__})")
-
-            # Convert string timestamps to datetime if needed (Plotly sends ISO strings for date-type x-axis)
-            # For category-type x-axis, Plotly sends numeric indices (int/float)
-            from pandas import to_datetime
-            if isinstance(left_value, str):
-                try:
-                    left_value = to_datetime(left_value)
-                except (ValueError, TypeError):
-                    logger.debug(f"[Infinite Scroll] Could not parse left_value: {left_value}")
-                    return dash.no_update, dash.no_update
-            if isinstance(right_value, str):
-                try:
-                    right_value = to_datetime(right_value)
-                except (ValueError, TypeError):
-                    logger.debug(f"[Infinite Scroll] Could not parse right_value: {right_value}")
-                    return dash.no_update, dash.no_update
-        except (TypeError, ValueError) as e:
-            logger.debug(f"[Infinite Scroll] Error validating range values: {e}")
+        left_value = _to_axis_value(visible_range[0])
+        right_value = _to_axis_value(visible_range[1])
+        if left_value is None or right_value is None:
             return dash.no_update, dash.no_update
 
         # Get loaded data metadata
@@ -980,10 +977,8 @@ def register_charts_extended(app):
         if 'tabs' not in loaded_store:
             loaded_store['tabs'] = {}
 
-        # Get data manager
-        data_manager = get_chart_data_manager()
-
         # Get cached data to check total points
+        data_manager = get_chart_data_manager()
         cached_df = data_manager.get_cached_data(symbol, timeframe)
         if cached_df is None or cached_df.empty:
             # No cached data yet, initialize
@@ -995,46 +990,15 @@ def register_charts_extended(app):
         if total_points == 0:
             return dash.no_update, dash.no_update
 
-        # Find left and right indices in visible range
-        # With type='category' x-axis, Plotly sends numeric indices (0, 1, 2...) not timestamps
         indices = list(cached_df.index)
 
         try:
-            # Check if values are already numeric indices (from category-type x-axis)
-            if isinstance(left_value, (int, float)) and isinstance(right_value, (int, float)):
-                # Direct numeric indices - no need for binary search
-                left_index = int(round(left_value))
-                right_index = int(round(right_value))
-                logger.debug(f"[Infinite Scroll] Using numeric indices: left={left_index}, right={right_index}")
-            else:
-                # Timestamp values - use binary search (legacy behavior)
-                left_index = find_index_binary(indices, left_value)
-                right_index = find_index_binary(indices, right_value)
-                logger.debug(f"[Infinite Scroll] Using binary search for timestamps")
-
-            # Validate indices
-            if left_index < 0 or left_index >= total_points:
-                left_index = 0
-            if right_index < 0 or right_index >= total_points:
-                right_index = total_points - 1
-            if right_index < left_index:
-                right_index = left_index
+            left_index, right_index = _resolve_visible_indices(indices, left_value, right_value, total_points)
 
             # Calculate visible candle count and centered candle
             visible_candle_count = right_index - left_index + 1
             centered_index = left_index + (visible_candle_count // 2)
             centered_candle = indices[centered_index] if centered_index < len(indices) else indices[-1]
-
-            # Serialize centered_candle safely (handle pandas Timestamp, datetime, or string)
-            try:
-                if hasattr(centered_candle, 'isoformat'):
-                    centered_candle_str = centered_candle.isoformat()
-                elif hasattr(centered_candle, 'strftime'):
-                    centered_candle_str = centered_candle.strftime('%Y-%m-%dT%H:%M:%S')
-                else:
-                    centered_candle_str = str(centered_candle)
-            except Exception:
-                centered_candle_str = str(centered_candle)
 
             # Calculate buffer zone (2x visible range for smooth scrolling)
             buffer_size = max(visible_candle_count * 2, 50)  # Minimum 50 candles buffer
@@ -1044,10 +1008,10 @@ def register_charts_extended(app):
                 'loading': tab_scroll_state.get('loading', False),
                 'last_load_time': tab_scroll_state.get('last_load_time', 0),
                 'last_threshold_check': current_time,
-                'xaxis_range': visible_range,  # NEW: Save current visible range
-                'centered_candle': centered_candle_str,  # NEW: Save centered candle (safely serialized)
-                'visible_candle_count': visible_candle_count,  # NEW: Save visible candle count
-                'left_index': left_index,  # NEW: Save indices for position restoration
+                'xaxis_range': visible_range,
+                'centered_candle': _isoformat_or_str(centered_candle),
+                'visible_candle_count': visible_candle_count,
+                'left_index': left_index,  # Saved for position restoration
                 'right_index': right_index
             }
 
@@ -1064,38 +1028,9 @@ def register_charts_extended(app):
             # Set loading flag BEFORE starting async operation
             scroll_state['tabs'][tab_id]['loading'] = True
 
-            combined_df = cached_df.copy()
-            data_loaded = False
-            index_offset = 0  # Track how many points were prepended (shifts indices right)
-
-            # Load historical data if needed (scrolling left)
-            if should_load_left:
-                earliest_date = cached_df.index[0]
-                new_historical_df = data_manager.load_more_historical(symbol, timeframe, earliest_date)
-
-                if new_historical_df is not None and not new_historical_df.empty:
-                    # Prepend new data
-                    old_len = len(combined_df)
-                    combined_df = data_manager.prepend_data(combined_df, new_historical_df)
-                    new_len = len(combined_df)
-                    index_offset = new_len - old_len  # How many points were added at the beginning
-                    data_loaded = True
-                    logger.info(f"[Infinite Scroll] Loaded {len(new_historical_df)} historical points for {symbol} ({timeframe}), index_offset={index_offset}")
-                else:
-                    logger.debug(f"[Infinite Scroll] No more historical data for {symbol} ({timeframe})")
-
-            # Load future data if needed (scrolling right)
-            if should_load_right:
-                latest_date = combined_df.index[-1]
-                new_future_df = data_manager.load_more_future(symbol, timeframe, latest_date)
-
-                if new_future_df is not None and not new_future_df.empty:
-                    # Append new data (no index offset needed - data added at end)
-                    combined_df = data_manager.append_data(combined_df, new_future_df)
-                    data_loaded = True
-                    logger.info(f"[Infinite Scroll] Loaded {len(new_future_df)} future points for {symbol} ({timeframe})")
-                else:
-                    logger.debug(f"[Infinite Scroll] No more future data for {symbol} ({timeframe})")
+            combined_df, data_loaded, index_offset = _load_adjacent_data(
+                data_manager, symbol, timeframe, cached_df, should_load_left, should_load_right
+            )
 
             # Only update if we actually loaded data
             if data_loaded:
@@ -1103,38 +1038,16 @@ def register_charts_extended(app):
                 data_manager.update_cached_data(symbol, timeframe, combined_df)
 
                 # Update loaded data store (safely serialize dates)
-                earliest_date_str = None
-                latest_date_str = None
-                if len(combined_df) > 0:
-                    try:
-                        earliest_date = combined_df.index[0]
-                        latest_date = combined_df.index[-1]
-                        if hasattr(earliest_date, 'isoformat'):
-                            earliest_date_str = earliest_date.isoformat()
-                        elif hasattr(earliest_date, 'strftime'):
-                            earliest_date_str = earliest_date.strftime('%Y-%m-%dT%H:%M:%S')
-                        else:
-                            earliest_date_str = str(earliest_date)
+                earliest_date_str = _isoformat_or_str(combined_df.index[0]) if len(combined_df) > 0 else None
+                latest_date_str = _isoformat_or_str(combined_df.index[-1]) if len(combined_df) > 0 else None
 
-                        if hasattr(latest_date, 'isoformat'):
-                            latest_date_str = latest_date.isoformat()
-                        elif hasattr(latest_date, 'strftime'):
-                            latest_date_str = latest_date.strftime('%Y-%m-%dT%H:%M:%S')
-                        else:
-                            latest_date_str = str(latest_date)
-                    except Exception as e:
-                        logger.debug(f"[Infinite Scroll] Error serializing dates: {e}")
-                        earliest_date_str = str(combined_df.index[0]) if len(combined_df) > 0 else None
-                        latest_date_str = str(combined_df.index[-1]) if len(combined_df) > 0 else None
-
-                import time
                 loaded_store['tabs'][tab_id] = {
                     'symbol': symbol,
                     'timeframe': timeframe,
                     'earliest_date': earliest_date_str,
                     'latest_date': latest_date_str,
                     'data_points': len(combined_df),
-                    'index_offset': index_offset,  # NEW: Store offset for position correction
+                    'index_offset': index_offset,  # Stored for position correction
                     'offset_timestamp': time.time()  # Timestamp when offset was set
                 }
 
@@ -1142,9 +1055,6 @@ def register_charts_extended(app):
                 # which listens to the same relayoutData events
                 load_direction = "left" if should_load_left else "right" if should_load_right else "both"
                 logger.info(f"[Infinite Scroll] Loaded data ({load_direction}) for {symbol} ({timeframe}): {len(combined_df)} total points, index_offset={index_offset}")
-            else:
-                # No data loaded, but still update scroll state
-                pass
 
             # Reset loading flag
             scroll_state['tabs'][tab_id]['loading'] = False
@@ -1153,18 +1063,20 @@ def register_charts_extended(app):
             return loaded_store, scroll_state
 
         except Exception as e:
-            tab_id_str = str(tab_id) if 'tab_id' in locals() else 'unknown'
-            logger.error(f"[Infinite Scroll] Error handling scroll for tab {tab_id_str}: {e}", exc_info=True)
-            # Ensure scroll_state is initialized before accessing it
-            if 'tabs' not in scroll_state:
-                scroll_state['tabs'] = {}
-            # Only try to reset loading flag if tab_id is valid
-            if 'tab_id' in locals() and tab_id is not None:
-                if tab_id not in scroll_state['tabs']:
-                    scroll_state['tabs'][tab_id] = {}
-                scroll_state['tabs'][tab_id]['loading'] = False
+            logger.error(f"[Infinite Scroll] Error handling scroll for tab {tab_id}: {e}", exc_info=True)
+            # Reset the loading flag so the chart is not stuck in a loading state
+            if tab_id not in scroll_state['tabs']:
+                scroll_state['tabs'][tab_id] = {}
+            scroll_state['tabs'][tab_id]['loading'] = False
             return dash.no_update, scroll_state
 
+
+# ---------------------------------------------------------------------------
+# Tab management (open/close/switch, new-tab modal, overlay jump)
+# ---------------------------------------------------------------------------
+
+def _register_tab_management_callbacks(app):
+    """Tab switching/closing, the new-tab modal, and jumping to charts from overlay lists."""
 
     @app.callback(
         Output("chart-tabs-store", "data", allow_duplicate=True),
@@ -1176,10 +1088,6 @@ def register_charts_extended(app):
     )
     def jump_to_overlay_chart(n_clicks, button_ids, tabs_data, overlays_data):
         """Jump to chart tab from overlay list and adjust timeframe if needed."""
-        from dash import callback_context
-        import json
-        import copy
-
         if not callback_context.triggered or not any(n_clicks or []):
             return dash.no_update
 
@@ -1216,6 +1124,7 @@ def register_charts_extended(app):
             tabs_data["active_tab"] = tab_id
             return tabs_data
 
+        # Use the shared provider singleton (not this module's own instance)
         from src.services.market_data import market_data
 
         def fetch_df(symbol, timeframe):
@@ -1268,7 +1177,6 @@ def register_charts_extended(app):
 
         return tabs_data
 
-
     @app.callback(
         Output("chart-tabs-store", "data", allow_duplicate=True),
         Input({"type": "chart-tab-btn", "index": ALL}, "n_clicks"),
@@ -1276,31 +1184,24 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def switch_chart_tab(n_clicks_list, tabs_data):
-        """Switch to clicked tab"""
-        from dash import callback_context
-        import copy
-
+        """Switch to clicked tab."""
         if not callback_context.triggered or not any(n_clicks_list):
             return dash.no_update
 
         # Get the clicked tab ID
         triggered_id = callback_context.triggered[0]["prop_id"].split(".")[0]
-        import json
         button_id = json.loads(triggered_id)
         tab_id = button_id["index"]
 
         # Verify that the tab exists before switching
         tabs = tabs_data.get('tabs', [])
-        tab_exists = any(tab.get('id') == tab_id for tab in tabs)
-
-        if not tab_exists:
+        if not any(tab.get('id') == tab_id for tab in tabs):
             return dash.no_update
 
         # Return a copy to avoid reference issues
         updated_data = copy.deepcopy(tabs_data)
         updated_data['active_tab'] = tab_id
         return updated_data
-
 
     @app.callback(
         Output("chart-tabs-store", "data", allow_duplicate=True),
@@ -1309,16 +1210,12 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def close_chart_tab(n_clicks_list, tabs_data):
-        """Close clicked tab"""
-        from dash import callback_context
-        import copy
-
+        """Close clicked tab."""
         if not callback_context.triggered or not any(n_clicks_list):
             return dash.no_update
 
         # Get the clicked tab ID
         triggered_id = callback_context.triggered[0]["prop_id"].split(".")[0]
-        import json
         button_id = json.loads(triggered_id)
         tab_id_to_close = button_id["index"]
 
@@ -1328,8 +1225,6 @@ def register_charts_extended(app):
 
         # Return a copy to avoid reference issues
         updated_data = copy.deepcopy(tabs_data)
-
-        # Remove the tab
         updated_data['tabs'] = [t for t in updated_data['tabs'] if t['id'] != tab_id_to_close]
 
         # If we closed the active tab, switch to the first remaining tab
@@ -1340,7 +1235,6 @@ def register_charts_extended(app):
                 updated_data['active_tab'] = None
 
         return updated_data
-
 
     @app.callback(
         [Output("new-tab-modal", "is_open"),
@@ -1354,9 +1248,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def toggle_new_tab_modal(add_click, cancel_click, add_btn_click, is_open):
-        """Toggle new tab modal"""
-        from dash import callback_context
-
+        """Toggle new tab modal."""
         if not callback_context.triggered:
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
@@ -1364,9 +1256,7 @@ def register_charts_extended(app):
 
         if trigger_id == "add-chart-tab-btn":
             return True, None, '1mo', 'candlestick'
-        else:
-            return False, None, '1mo', 'candlestick'
-
+        return False, None, '1mo', 'candlestick'
 
     @app.callback(
         Output("chart-tabs-store", "data", allow_duplicate=True),
@@ -1378,9 +1268,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def add_new_chart_tab(n_clicks, symbol, timeframe, chart_type, tabs_data):
-        """Add new chart tab"""
-        import uuid
-
+        """Add new chart tab."""
         if not n_clicks or not symbol:
             return dash.no_update
 
@@ -1398,39 +1286,116 @@ def register_charts_extended(app):
 
         return tabs_data
 
-
     @app.callback(
         Output("new-tab-symbol-input", "options"),
         Input("new-tab-symbol-input", "search_value"),
         prevent_initial_call=True
     )
     def search_new_tab_symbols(search_value):
-        """Search for symbols in new tab modal"""
+        """Search for symbols in new tab modal."""
         # Don't clear options when search_value is empty - this prevents resetting the selected value
         if not search_value or len(search_value) < 1:
             return dash.no_update
+        return _search_entity_symbols(search_value)
 
-        from sqlalchemy.orm import Session
-        from src.models.entities import Entity
 
-        try:
-            with Session(_engine) as db:
-                search_term = f"%{search_value.upper()}%"
-                entities = db.query(Entity).filter(
-                    (Entity.entity_id.ilike(search_term)) | 
-                    (Entity.entity_name.ilike(search_term))
-                ).limit(20).all()
+# ---------------------------------------------------------------------------
+# Chart display rendering
+# ---------------------------------------------------------------------------
 
-                options = []
-                for entity in entities:
-                    label = f"{entity.entity_id} - {entity.entity_name}"
-                    options.append({"label": label, "value": entity.entity_id})
+def _get_loaded_data_with_offset(tab: dict, tab_loaded: dict,
+                                 view_state: Optional[dict]) -> Optional[pd.DataFrame]:
+    """Fetch cached infinite-scroll data for a tab and shift the saved view range if needed.
 
-                return options
-        except Exception as e:
-            logger.error(f"Error searching symbols: {e}")
-            return []
+    If new data was recently prepended (fresh index_offset), the saved x-axis
+    range in view_state is shifted right in place so the visible window stays put.
+    """
+    data_manager = get_chart_data_manager()
+    cache_start = time.time()
+    loaded_data = data_manager.get_cached_data(tab['symbol'], tab['timeframe'])
+    cache_time = time.time() - cache_start
+    if cache_time > 0.1:  # Log if cache access takes more than 100ms
+        logger.debug(f"[Performance] Cache access took {cache_time:.2f}s for {tab['symbol']} ({tab['timeframe']})")
 
+    index_offset = tab_loaded.get('index_offset', 0)
+    offset_timestamp = tab_loaded.get('offset_timestamp', 0)
+
+    # Apply offset to view_state range only if it is fresh (set within the last
+    # 2 seconds) to avoid applying it multiple times
+    if index_offset > 0 and view_state and 'xaxis_range' in view_state:
+        time_since_offset = time.time() - offset_timestamp
+        if time_since_offset < 2.0:
+            old_range = view_state['xaxis_range']
+            try:
+                # For category-type x-axis, range is in index form (numeric):
+                # shift range right by the number of prepended points
+                new_range = [old_range[0] + index_offset, old_range[1] + index_offset]
+                view_state['xaxis_range'] = new_range
+                logger.info(f"[Infinite Scroll] Adjusted view range by offset {index_offset}: {old_range} -> {new_range}")
+            except (TypeError, ValueError, IndexError) as e:
+                logger.warning(f"[Infinite Scroll] Could not adjust range: {e}")
+        else:
+            logger.debug(f"[Infinite Scroll] Offset too old ({time_since_offset:.2f}s), skipping adjustment")
+
+    return loaded_data
+
+
+def _select_quad_tabs(tabs: list, selected_tab_ids: list, max_panels: int) -> list:
+    """Pick up to max_panels distinct tabs for quad view: selected tabs first, then remaining tabs."""
+    tabs_by_id = {tab['id']: tab for tab in tabs}
+    quad_tabs: list = []
+    seen_tabs: set = set()
+
+    def add_tab(tab):
+        if not tab:
+            return
+        tab_id = tab.get('id')
+        if tab_id and tab_id not in seen_tabs:
+            quad_tabs.append(tab)
+            seen_tabs.add(tab_id)
+
+    for tab_id in selected_tab_ids:
+        add_tab(tabs_by_id.get(tab_id))
+        if len(quad_tabs) >= max_panels:
+            break
+
+    if len(quad_tabs) < max_panels:
+        for tab in tabs:
+            add_tab(tab)
+            if len(quad_tabs) >= max_panels:
+                break
+
+    return quad_tabs
+
+
+def _arrange_quad_layout(panel_wrappers: list, left_width: int, right_width: int,
+                         row_class: str, margin_class: str) -> html.Div:
+    """Arrange 1-4 panel wrappers into the quad-view grid."""
+    count = len(panel_wrappers)
+    if count == 1:
+        return html.Div([
+            dbc.Row([dbc.Col(panel_wrappers[0], md=12)], className=row_class)
+        ])
+
+    rows = [
+        dbc.Row([
+            dbc.Col(panel_wrappers[0], md=left_width, className=margin_class),
+            dbc.Col(panel_wrappers[1], md=right_width, className=margin_class)
+        ], className=row_class)
+    ]
+    if count == 3:
+        rows.append(dbc.Row([dbc.Col(panel_wrappers[2], md=12)], className=row_class))
+    elif count >= 4:
+        rows.append(dbc.Row([
+            dbc.Col(panel_wrappers[2], md=left_width, className=margin_class),
+            dbc.Col(panel_wrappers[3], md=right_width, className=margin_class)
+        ], className=row_class))
+
+    return html.Div(rows)
+
+
+def _register_render_callbacks(app):
+    """Main chart display rendering (single and quad mode)."""
 
     @app.callback(
         Output("chart-display-area", "children"),
@@ -1457,14 +1422,14 @@ def register_charts_extended(app):
         Uses State to track previous render and optimize re-rendering logic.
         """
         start_time = time.time()
-        
+
         # Early return if Charts tab is not active
         if active_main_tab != "charts":
             return dash.no_update
-        
+
         tabs = tabs_data.get('tabs', [])
         active_tab_id = tabs_data.get('active_tab')
-        
+
         # Find active tab early for optimization checks
         active_tab = None
         if active_tab_id:
@@ -1472,7 +1437,7 @@ def register_charts_extended(app):
                 if tab['id'] == active_tab_id:
                     active_tab = tab
                     break
-        
+
         # Ensure quad_data is properly initialized and preserve quad_enabled state
         if quad_data is None:
             quad_data = {'enabled': False, 'selected_tabs': []}
@@ -1485,15 +1450,11 @@ def register_charts_extended(app):
 
         if not tabs:
             return dbc.Alert("No charts open. Click '+ New' to add a chart.", color="info", className="mt-3")
-        
-        # OPTIMIZATION: Check if we can skip re-rendering
-        # If only active_tab changed but tab data is identical, we still need to render
-        # but we can log this for performance monitoring
-        from dash import callback_context
+
+        # Log tab switches for performance monitoring
         if callback_context.triggered:
             trigger_id = callback_context.triggered[0]["prop_id"]
             if trigger_id == "chart-tabs-store.data" and active_tab:
-                # Log tab switch for performance monitoring
                 logger.debug(f"[Performance] Chart tab switch to {active_tab.get('symbol', 'unknown')} ({active_tab.get('timeframe', 'unknown')})")
 
         def build_tab_panel(tab, panel_height, is_active, clickable=True):
@@ -1513,39 +1474,10 @@ def register_charts_extended(app):
 
             # Get loaded data from cache (for infinite scroll)
             loaded_data = None
-            index_offset = 0  # Offset to adjust range when new data is prepended
             if loaded_data_store and loaded_data_store.get('tabs'):
                 tab_loaded = loaded_data_store.get('tabs', {}).get(tab['id'])
                 if tab_loaded:
-                    # Get cached data from ChartDataManager (optimized - uses cache)
-                    from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager
-                    data_manager = get_chart_data_manager()
-                    cache_start = time.time()
-                    loaded_data = data_manager.get_cached_data(tab['symbol'], tab['timeframe'])
-                    cache_time = time.time() - cache_start
-                    if cache_time > 0.1:  # Log if cache access takes more than 100ms
-                        logger.debug(f"[Performance] Cache access took {cache_time:.2f}s for {tab['symbol']} ({tab['timeframe']})")
-
-                    # Get index offset (if new data was prepended, we need to adjust the view)
-                    index_offset = tab_loaded.get('index_offset', 0)
-                    offset_timestamp = tab_loaded.get('offset_timestamp', 0)
-
-                    # Apply offset to view_state range if needed
-                    # Only apply if offset is fresh (set within last 2 seconds) to avoid applying it multiple times
-                    if index_offset > 0 and view_state and 'xaxis_range' in view_state:
-                        time_since_offset = time.time() - offset_timestamp
-                        if time_since_offset < 2.0:  # Only apply if fresh (within 2 seconds)
-                            old_range = view_state['xaxis_range']
-                            try:
-                                # For category-type x-axis, range is in index form (numeric)
-                                # Shift range right by the number of prepended points
-                                new_range = [old_range[0] + index_offset, old_range[1] + index_offset]
-                                view_state['xaxis_range'] = new_range
-                                logger.info(f"[Infinite Scroll] Adjusted view range by offset {index_offset}: {old_range} -> {new_range}")
-                            except (TypeError, ValueError, IndexError) as e:
-                                logger.warning(f"[Infinite Scroll] Could not adjust range: {e}")
-                        else:
-                            logger.debug(f"[Infinite Scroll] Offset too old ({time_since_offset:.2f}s), skipping adjustment")
+                    loaded_data = _get_loaded_data_with_offset(tab, tab_loaded, view_state)
 
             # Performance logging for chart component creation
             component_start = time.time()
@@ -1563,7 +1495,7 @@ def register_charts_extended(app):
                 loaded_data=loaded_data  # Pass loaded data for infinite scroll (uses cache)
             )
             component_time = time.time() - component_start
-            if component_time > 1.0:  # Log if component creation takes more than 1 second
+            if component_time > 1.0:
                 logger.warning(f"[Performance] get_stock_chart_components took {component_time:.2f}s for {tab['symbol']} ({tab['timeframe']})")
             elif component_time > 0.5:
                 logger.debug(f"[Performance] get_stock_chart_components took {component_time:.2f}s for {tab['symbol']} ({tab['timeframe']})")
@@ -1583,7 +1515,6 @@ def register_charts_extended(app):
                 'height': panel_height,
                 'overflow': 'hidden'
             }
-            panel_class = None
 
             if clickable:
                 panel_style.update({
@@ -1607,32 +1538,11 @@ def register_charts_extended(app):
 
         if quad_enabled:
             selected_tabs = (quad_data or {}).get('selected_tabs', []) or []
-            tabs_by_id = {tab['id']: tab for tab in tabs}
             max_panels = min(4, len(tabs))
             if max_panels == 0:
                 return dbc.Alert("No charts available for quad view.", color="info", className="mt-3")
 
-            quad_tabs = []
-            seen_tabs = set()
-
-            def add_tab(tab):
-                if not tab:
-                    return
-                tab_id = tab.get('id')
-                if tab_id and tab_id not in seen_tabs:
-                    quad_tabs.append(tab)
-                    seen_tabs.add(tab_id)
-
-            for tab_id in selected_tabs:
-                add_tab(tabs_by_id.get(tab_id))
-                if len(quad_tabs) >= max_panels:
-                    break
-
-            if len(quad_tabs) < max_panels:
-                for tab in tabs:
-                    add_tab(tab)
-                    if len(quad_tabs) >= max_panels:
-                        break
+            quad_tabs = _select_quad_tabs(tabs, selected_tabs, max_panels)
 
             panel_height = 'calc(50vh - 80px)' if is_fullscreen else '500px'
             row_class = "g-1" if is_fullscreen else "g-2"
@@ -1649,59 +1559,18 @@ def register_charts_extended(app):
                 for tab in quad_tabs
             ]
 
-            if max_panels == 1:
-                quad_layout = html.Div([
-                    dbc.Row([dbc.Col(panel_wrappers[0], md=12)], className=row_class)
-                ])
-            elif max_panels == 2:
-                quad_layout = html.Div([
-                    dbc.Row([
-                        dbc.Col(panel_wrappers[0], md=left_width, className=margin_class),
-                        dbc.Col(panel_wrappers[1], md=right_width, className=margin_class)
-                    ], className=row_class)
-                ])
-            elif max_panels == 3:
-                quad_layout = html.Div([
-                    dbc.Row([
-                        dbc.Col(panel_wrappers[0], md=left_width, className=margin_class),
-                        dbc.Col(panel_wrappers[1], md=right_width, className=margin_class)
-                    ], className=row_class),
-                    dbc.Row([
-                        dbc.Col(panel_wrappers[2], md=12)
-                    ], className=row_class)
-                ])
-            else:
-                quad_layout = html.Div([
-                    dbc.Row([
-                        dbc.Col(panel_wrappers[0], md=left_width, className=margin_class),
-                        dbc.Col(panel_wrappers[1], md=right_width, className=margin_class)
-                    ], className=row_class),
-                    dbc.Row([
-                        dbc.Col(panel_wrappers[2], md=left_width, className=margin_class),
-                        dbc.Col(panel_wrappers[3], md=right_width, className=margin_class)
-                    ], className=row_class)
-                ])
-
-            return quad_layout
+            return _arrange_quad_layout(panel_wrappers, left_width, right_width, row_class, margin_class)
 
         # PERFORMANCE OPTIMIZATION: Only render the active tab
         # This avoids expensive API calls and chart rendering for hidden tabs
         # (active_tab was already found above for optimization checks)
-        
+
         # In single mode, if active tab not found, fallback to first tab for rendering
         # But don't update the store here - let a separate callback handle that
         # IMPORTANT: Only fallback if active_tab_id is None or empty, not if it's just not found
-        # This prevents resetting the tab when it's being switched
-        if not active_tab:
-            if tabs and (not active_tab_id or active_tab_id == ''):
-                # Only fallback if active_tab_id is actually None/empty, not just not found
-                active_tab = tabs[0]
-            elif tabs:
-                # If active_tab_id exists but tab not found, try to find it again (might be timing issue)
-                # But don't fallback immediately - this could be a race condition
-                active_tab = None
-            else:
-                active_tab = None
+        # This prevents resetting the tab when it's being switched (race condition)
+        if not active_tab and tabs and (not active_tab_id or active_tab_id == ''):
+            active_tab = tabs[0]
 
         if not active_tab:
             return dbc.Alert("No active chart.", color="info", className="mt-3")
@@ -1714,20 +1583,25 @@ def register_charts_extended(app):
         render_start = time.time()
         panel_content = build_tab_panel(active_tab, "100%", True, clickable=False)
         render_time = time.time() - render_start
-        
-        if render_time > 0.5:  # Log if rendering takes more than 500ms
+
+        if render_time > 0.5:
             logger.warning(f"[Performance] Chart rendering took {render_time:.2f}s for {active_tab.get('symbol', 'unknown')} ({active_tab.get('timeframe', 'unknown')})")
         else:
             logger.debug(f"[Performance] Chart rendering took {render_time:.2f}s for {active_tab.get('symbol', 'unknown')} ({active_tab.get('timeframe', 'unknown')})")
-        
+
         total_time = time.time() - start_time
-        if total_time > 1.0:  # Log if total callback takes more than 1 second
+        if total_time > 1.0:
             logger.warning(f"[Performance] render_chart_display total time: {total_time:.2f}s")
-        
-        single_chart_div = html.Div(panel_content, style=final_style)
 
-        return single_chart_div
+        return html.Div(panel_content, style=final_style)
 
+
+# ---------------------------------------------------------------------------
+# Panel settings modal + misc UI toggles
+# ---------------------------------------------------------------------------
+
+def _register_panel_settings_callbacks(app):
+    """Panel settings modal, quad panel focus, market overview toggle, refresh bridge."""
 
     @app.callback(
         [Output("panel-settings-modal", "is_open"),
@@ -1743,9 +1617,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def toggle_panel_settings_modal(settings_clicks, cancel_clicks, apply_clicks, tabs_data, current_tab_id):
-        """Open/close panel settings modal and load current settings"""
-        from dash import callback_context
-
+        """Open/close panel settings modal and load current settings."""
         if not callback_context.triggered:
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
@@ -1757,7 +1629,6 @@ def register_charts_extended(app):
 
         # Open modal - load settings for clicked panel (only if settings button was actually clicked)
         if 'panel-settings-btn' in trigger and any(settings_clicks):
-            import json
             trigger_dict = json.loads(trigger.split('.')[0])
             tab_id = trigger_dict['index']
 
@@ -1782,7 +1653,6 @@ def register_charts_extended(app):
 
         return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
-
     @app.callback(
         Output("chart-tabs-store", "data", allow_duplicate=True),
         Input("panel-settings-apply-btn", "n_clicks"),
@@ -1794,7 +1664,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def apply_panel_settings(n_clicks, tab_id, timeframe, chart_type, options, tabs_data):
-        """Apply settings to the selected panel/tab"""
+        """Apply settings to the selected panel/tab."""
         if not n_clicks or not tab_id:
             return dash.no_update
 
@@ -1812,10 +1682,6 @@ def register_charts_extended(app):
         tabs_data['tabs'] = tabs
         return tabs_data
 
-
-    # ESC handler removed - now handled by clicking exit-fullscreen-btn directly
-
-
     @app.callback(
         Output("chart-tabs-store", "data", allow_duplicate=True),
         Input({"type": "quad-panel", "index": dash.ALL}, "n_clicks"),
@@ -1823,9 +1689,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def focus_tab_on_quad_panel_click(n_clicks_list, tabs_data):
-        """Focus the corresponding tab when a quad panel is clicked (but not settings button)"""
-        from dash import callback_context
-
+        """Focus the corresponding tab when a quad panel is clicked (but not settings button)."""
         if not callback_context.triggered or not any(n_clicks_list):
             return dash.no_update
 
@@ -1834,8 +1698,6 @@ def register_charts_extended(app):
 
         # Don't focus if a settings button was clicked - check if trigger is exactly quad-panel
         if 'quad-panel' in trigger and 'panel-settings-btn' not in trigger:
-            import json
-            # Extract tab_id from the trigger string
             try:
                 trigger_dict = json.loads(trigger.split('.')[0])
                 clicked_tab_id = trigger_dict['index']
@@ -1843,11 +1705,10 @@ def register_charts_extended(app):
                 # Update active tab
                 tabs_data['active_tab'] = clicked_tab_id
                 return tabs_data
-            except:
+            except Exception:
                 return dash.no_update
 
         return dash.no_update
-
 
     @app.callback(
         Output("market-overview-collapse", "is_open"),
@@ -1856,9 +1717,8 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def toggle_market_overview(n_clicks, is_open):
-        """Toggle market overview section"""
+        """Toggle market overview section."""
         return not is_open
-
 
     @app.callback(
         Output("refresh-all-panels", "n_clicks"),
@@ -1872,6 +1732,13 @@ def register_charts_extended(app):
             raise PreventUpdate
         return (hidden_clicks or 0) + 1
 
+
+# ---------------------------------------------------------------------------
+# Multi-panel layout (panel config, rendering, refresh interval, interaction mode)
+# ---------------------------------------------------------------------------
+
+def _register_panel_layout_callbacks(app):
+    """Panel configuration store, multi-panel rendering, refresh interval, zoom/pan toggle."""
 
     @app.callback(
         Output("chart-panels-config", "data"),
@@ -1890,12 +1757,10 @@ def register_charts_extended(app):
          State("config-favorite-checkbox", "value")],
         prevent_initial_call=True
     )
-    def update_chart_config(layout_single, layout_h, layout_v, layout_quad, 
+    def update_chart_config(layout_single, layout_h, layout_v, layout_quad,
                            apply_config, favorite_clicks, refresh_all,
                            current_config, panel_id, symbol, timeframe, chart_type, is_favorite):
-        """Update chart panels configuration"""
-        from dash import callback_context
-
+        """Update chart panels configuration."""
         if not callback_context.triggered:
             return current_config
 
@@ -1924,14 +1789,12 @@ def register_charts_extended(app):
 
         # Handle favorite toggles
         elif 'favorite-btn' in trigger_id:
-            import json
             btn_data = json.loads(trigger_id.split('.')[0])
             panel_id = btn_data['index']
             if panel_id in current_config.get('panels', {}):
                 current_config['panels'][panel_id]['favorite'] = not current_config['panels'][panel_id].get('favorite', False)
 
         return current_config
-
 
     # Separate callback for multi-panel className to avoid re-rendering when only fullscreen changes
     @app.callback(
@@ -1940,10 +1803,9 @@ def register_charts_extended(app):
         prevent_initial_call=False
     )
     def update_multi_panel_classname(fullscreen_state):
-        """Update multi-panel chart area className based on fullscreen state"""
+        """Update multi-panel chart area className based on fullscreen state."""
         is_fullscreen = get_fullscreen_state(fullscreen_state)
         return get_container_classname(is_fullscreen)
-
 
     @app.callback(
         Output("multi-panel-chart-area", "children"),
@@ -1954,11 +1816,11 @@ def register_charts_extended(app):
          Input("chart-fullscreen-state", "data"),  # Keep for height calculation
          Input("chart-interaction-modes", "data"),
          Input("chart-view-state", "data"),
-         Input("chart-loaded-data-store", "data")],  # NEW: Listen to loaded data changes
+         Input("chart-loaded-data-store", "data")],  # Listen to loaded data changes
         prevent_initial_call='initial_duplicate'
     )
     def render_chart_panels(config, n_intervals, refresh_clicks, overlays_data, fullscreen_state, interaction_modes, view_state_data, loaded_data_store):
-        """Render the multi-panel chart layout with fullscreen support"""
+        """Render the multi-panel chart layout with fullscreen support."""
         # Handle None values
         if not config:
             config = {'layout': 'single', 'panels': {}}
@@ -1972,7 +1834,6 @@ def register_charts_extended(app):
         is_fullscreen = get_fullscreen_state(fullscreen_state)
 
         # Merge interaction modes into panel configs (create copy to avoid modifying original)
-        import copy
         panels = copy.deepcopy(panels)
         modes_dict = (interaction_modes or {}).get('tabs', {})
         for panel_id, panel_config in panels.items():
@@ -1985,12 +1846,10 @@ def register_charts_extended(app):
                 panel_config['auto_scroll'] = panel_config.get('timeframe', '1mo') in ['1d_1m', '5d_5m']
 
         try:
-            chart_layout = render_multi_panel_layout(layout, panels, is_fullscreen, overlays_data, view_state_data, loaded_data_store)
-            return chart_layout
+            return render_multi_panel_layout(layout, panels, is_fullscreen, overlays_data, view_state_data, loaded_data_store)
         except Exception as e:
             logger.error(f"Error rendering chart panels: {e}", exc_info=True)
             return html.Div(f"Error rendering charts: {str(e)}", className="text-danger")
-
 
     @app.callback(
         [Output("chart-update-interval", "disabled"),
@@ -2009,12 +1868,7 @@ def register_charts_extended(app):
             return True, 60000  # Disabled by default
 
         panels = config.get('panels', {})
-        timeframes = []
-
-        # Collect all active timeframes from panels
-        for panel_id, panel_config in panels.items():
-            timeframe = panel_config.get('timeframe', '1mo')
-            timeframes.append(timeframe)
+        timeframes = [panel_config.get('timeframe', '1mo') for panel_config in panels.values()]
 
         if not timeframes:
             return True, 60000  # Disabled if no panels
@@ -2022,15 +1876,10 @@ def register_charts_extended(app):
         # Determine refresh interval based on shortest timeframe
         # Priority: 1-minute > 5-minute > disabled
         if any(tf == '1d_1m' for tf in timeframes):
-            # 1-minute charts: refresh every 60 seconds
-            return False, 60000
-        elif any(tf == '5d_5m' for tf in timeframes):
-            # 5-minute charts: refresh every 5 minutes
-            return False, 300000
-        else:
-            # Longer timeframes: disable auto-refresh
-            return True, 60000
-
+            return False, 60000  # 1-minute charts: refresh every 60 seconds
+        if any(tf == '5d_5m' for tf in timeframes):
+            return False, 300000  # 5-minute charts: refresh every 5 minutes
+        return True, 60000  # Longer timeframes: disable auto-refresh
 
     @app.callback(
         Output("chart-interaction-modes", "data", allow_duplicate=True),
@@ -2042,16 +1891,12 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def toggle_chart_interaction_mode(n_clicks_list, button_ids, modes_data, tabs_data, panels_config):
-        """Toggle between zoom and pan mode for charts"""
-        from dash import callback_context
-        import copy
-
+        """Toggle between zoom and pan mode for charts."""
         if not callback_context.triggered or not any(n_clicks_list):
             return dash.no_update
 
         # Get the clicked button's panel/tab ID
         trigger_id = callback_context.triggered[0]["prop_id"].split(".")[0]
-        import json
         button_id = json.loads(trigger_id)
         panel_id = button_id.get("index")
 
@@ -2063,13 +1908,10 @@ def register_charts_extended(app):
         if 'tabs' not in modes:
             modes['tabs'] = {}
 
-        # Get current mode for this panel (default: zoom)
+        # Toggle between zoom and pan (default: zoom)
         current_mode = modes['tabs'].get(panel_id, {}).get('dragmode', 'zoom')
-
-        # Toggle between zoom and pan
         new_mode = 'pan' if current_mode == 'zoom' else 'zoom'
 
-        # Update mode
         if panel_id not in modes['tabs']:
             modes['tabs'][panel_id] = {}
 
@@ -2095,39 +1937,23 @@ def register_charts_extended(app):
         return modes
 
 
+# ---------------------------------------------------------------------------
+# Config / quick-edit / favorites modals
+# ---------------------------------------------------------------------------
+
+def _register_config_modal_callbacks(app):
+    """Panel configuration modal, quick symbol edit, live symbol search, favorites modal."""
+
     @app.callback(
         Output("config-symbol-input", "options"),
         Input("config-symbol-input", "search_value"),
         prevent_initial_call=True
     )
     def search_config_symbols(search_value):
-        """Search for symbols and company names in Entity database"""
+        """Search for symbols and company names in Entity database."""
         if not search_value or len(search_value) < 1:
             return []
-
-        from sqlalchemy.orm import Session
-        from src.models.entities import Entity
-
-        try:
-            with Session(_engine) as db:
-                # Search by entity_id (ticker) or entity_name (company name)
-                search_term = f"%{search_value.upper()}%"
-                entities = db.query(Entity).filter(
-                    (Entity.entity_id.ilike(search_term)) | 
-                    (Entity.entity_name.ilike(search_term))
-                ).limit(20).all()
-
-                # Format as dropdown options: "AAPL - Apple Inc."
-                options = []
-                for entity in entities:
-                    label = f"{entity.entity_id} - {entity.entity_name}"
-                    options.append({"label": label, "value": entity.entity_id})
-
-                return options
-        except Exception as e:
-            logger.error(f"Error searching symbols: {e}")
-            return []
-
+        return _search_entity_symbols(search_value)
 
     @app.callback(
         [Output("config-panel-modal", "is_open"),
@@ -2144,10 +1970,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def toggle_config_modal(config_clicks, cancel_click, apply_click, panels_config, is_open):
-        """Toggle configuration modal and populate with panel data"""
-        from dash import callback_context
-        import json
-
+        """Toggle configuration modal and populate with panel data."""
         if not callback_context.triggered:
             raise dash.exceptions.PreventUpdate
 
@@ -2161,20 +1984,18 @@ def register_charts_extended(app):
                 panel_id = btn_data['index']
                 panel_config = panels_config.get('panels', {}).get(panel_id, {})
 
-                return (True, panel_id, 
+                return (True, panel_id,
                         panel_config.get('symbol', ''),
                         panel_config.get('timeframe', '1mo'),
                         panel_config.get('chart_type', 'candlestick'),
                         panel_config.get('favorite', False))
-            else:
-                raise dash.exceptions.PreventUpdate
+            raise dash.exceptions.PreventUpdate
 
         # Close modal
-        elif 'cancel-btn' in trigger_id or 'apply-btn' in trigger_id:
+        if 'cancel-btn' in trigger_id or 'apply-btn' in trigger_id:
             return False, None, "", "1mo", "candlestick", False
 
         raise dash.exceptions.PreventUpdate
-
 
     @app.callback(
         [Output("quick-edit-modal", "is_open"),
@@ -2188,10 +2009,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def toggle_quick_edit_modal(label_clicks, cancel_click, apply_click, panels_config, is_open):
-        """Toggle quick edit modal when clicking on symbol name"""
-        from dash import callback_context
-        import json
-
+        """Toggle quick edit modal when clicking on symbol name."""
         if not callback_context.triggered:
             raise dash.exceptions.PreventUpdate
 
@@ -2207,15 +2025,13 @@ def register_charts_extended(app):
                 current_symbol = panel_config.get('symbol', '')
 
                 return True, panel_id, current_symbol
-            else:
-                raise dash.exceptions.PreventUpdate
+            raise dash.exceptions.PreventUpdate
 
         # Close modal
-        elif 'cancel-btn' in trigger_id or 'apply-btn' in trigger_id:
+        if 'cancel-btn' in trigger_id or 'apply-btn' in trigger_id:
             return False, None, ""
 
         raise dash.exceptions.PreventUpdate
-
 
     @app.callback(
         [Output("symbol-search-results", "children"),
@@ -2224,7 +2040,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def search_symbols_live(query):
-        """Search for stock symbols as user types (live search)"""
+        """Search for stock symbols as user types (live search)."""
         if not query or len(query) < 1:
             return html.Div([
                 html.Small("💡 Start typing to search symbols by ticker or company name",
@@ -2232,6 +2048,7 @@ def register_charts_extended(app):
             ]), []
 
         try:
+            # Use the shared provider singleton (not this module's own instance)
             from src.services.market_data import market_data
             results = market_data.search_symbols(query, limit=8)
 
@@ -2287,7 +2104,6 @@ def register_charts_extended(app):
                 className="mt-2"
             ), []
 
-
     @app.callback(
         Output("quick-edit-symbol-input", "value", allow_duplicate=True),
         Input({"type": "symbol-result-btn", "index": ALL}, "n_clicks"),
@@ -2295,9 +2111,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def select_symbol_from_search(clicks, symbols_cache):
-        """Update input when user clicks on a search result"""
-        from dash import callback_context
-
+        """Update input when user clicks on a search result."""
         if not callback_context.triggered or not any(clicks) or not symbols_cache:
             return dash.no_update
 
@@ -2309,7 +2123,6 @@ def register_charts_extended(app):
 
         return dash.no_update
 
-
     @app.callback(
         Output("chart-panels-config", "data", allow_duplicate=True),
         Input("quick-edit-apply-btn", "n_clicks"),
@@ -2319,7 +2132,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def apply_quick_symbol_edit(n_clicks, panel_id, new_symbol, current_config):
-        """Apply symbol change from quick edit modal"""
+        """Apply symbol change from quick edit modal."""
         if not panel_id or not new_symbol:
             raise dash.exceptions.PreventUpdate
 
@@ -2328,7 +2141,6 @@ def register_charts_extended(app):
             current_config['panels'][panel_id]['symbol'] = new_symbol.upper().strip()
 
         return current_config
-
 
     @app.callback(
         [Output("favorites-modal", "is_open"),
@@ -2340,9 +2152,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def toggle_favorites_modal(show_click, close_click, panels_config, is_open):
-        """Toggle favorites modal and show favorite symbols"""
-        from dash import callback_context
-
+        """Toggle favorites modal and show favorite symbols."""
         if not callback_context.triggered:
             return False, []
 
@@ -2367,14 +2177,19 @@ def register_charts_extended(app):
 
             return True, favorites
 
-        elif 'close-btn' in trigger_id:
+        if 'close-btn' in trigger_id:
             return False, []
 
         return is_open, []
 
 
-    # Dynamic callbacks for individual panel actions
-    
+# ---------------------------------------------------------------------------
+# Per-panel overlay lists and panel refresh
+# ---------------------------------------------------------------------------
+
+def _register_overlay_list_callbacks(app):
+    """Per-panel overlay list rendering, centering on an overlay line, panel refresh."""
+
     @app.callback(
         Output({"type": "overlay-list", "index": MATCH}, "children"),
         [Input("chart-overlays-store", "data"),
@@ -2386,27 +2201,26 @@ def register_charts_extended(app):
         """Update overlay list when overlays change."""
         if not list_id or not panels_config:
             return html.Div("No overlays", style={'padding': '2px 4px', 'fontSize': '0.65rem', 'color': '#888', 'fontStyle': 'italic'})
-        
+
         panel_id = list_id.get('index')
         if not panel_id:
             return dash.no_update
-        
+
         # Get panel config to get symbol and timeframe
         panel_config = panels_config.get('panels', {}).get(panel_id, {})
         symbol = panel_config.get('symbol')
         timeframe = panel_config.get('timeframe')
-        
+
         if not symbol:
             return html.Div("No symbol", style={'padding': '2px 4px', 'fontSize': '0.65rem', 'color': '#888', 'fontStyle': 'italic'})
-        
+
         # Ensure overlays_data has proper structure if None or empty
         if not overlays_data:
             overlays_data = {'tabs': {}}
-        
+
         # Create overlay list using the helper function with timeframe
         return create_overlay_list(panel_id, symbol, overlays_data, timeframe)
-    
-    
+
     @app.callback(
         Output("chart-view-state", "data", allow_duplicate=True),
         Input({"type": "overlay-list-item", "index": ALL, "overlay_id": ALL}, "n_clicks"),
@@ -2418,76 +2232,69 @@ def register_charts_extended(app):
     )
     def center_overlay_line(n_clicks_list, item_ids, overlays_data, panels_config, view_state_data):
         """Center chart on overlay line when clicked."""
-        from dash import callback_context
-        
         if not callback_context.triggered:
             return dash.no_update
-        
+
         # Find which item was clicked
         triggered = callback_context.triggered[0]
         trigger_prop = triggered["prop_id"]
-        
+
         if not trigger_prop or not trigger_prop.startswith('{"'):
             return dash.no_update
-        
+
         try:
             trigger_id = json.loads(trigger_prop.split('.')[0])
             panel_id = trigger_id.get('index')
             overlay_id = trigger_id.get('overlay_id')
-            
+
             if not panel_id or not overlay_id:
                 return dash.no_update
-            
+
             # Get overlay data
             panel_overlays = overlays_data.get('tabs', {}).get(panel_id, {})
             brackets = panel_overlays.get('brackets', []) or []
             breaks = panel_overlays.get('breaks', []) or []
-            
+
             # Find the clicked overlay
             clicked_overlay = None
             for item in brackets + breaks:
                 if str(item.get('id', '')) == str(overlay_id):
                     clicked_overlay = item
                     break
-            
+
             if not clicked_overlay:
                 return dash.no_update
-            
+
             price = clicked_overlay.get('price')
             if price is None:
                 return dash.no_update
-            
+
             try:
                 price_value = float(price)
             except (TypeError, ValueError):
                 return dash.no_update
-            
-            # Get panel config to check if volume is shown
-            panel_config = panels_config.get('panels', {}).get(panel_id, {})
-            show_volume = panel_config.get('show_volume', True)
-            
+
             # Calculate y-axis range centered on price (±5% range)
             range_percent = 0.05  # 5% above and below
             y_min = price_value * (1 - range_percent)
             y_max = price_value * (1 + range_percent)
-            
+
             # Update view state
             state = copy.deepcopy(view_state_data) if view_state_data else {'tabs': {}}
             if 'tabs' not in state:
                 state['tabs'] = {}
-            
+
             if panel_id not in state['tabs']:
                 state['tabs'][panel_id] = {}
-            
+
             state['tabs'][panel_id]['yaxis_range'] = [y_min, y_max]
-            
+
             logger.debug(f"[Overlay List] Centering chart {panel_id} on price {price_value}")
             return state
-            
+
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error(f"Error centering overlay line: {e}", exc_info=True)
             return dash.no_update
-
 
     @app.callback(
         Output({"type": "chart-content", "index": MATCH}, "children"),
@@ -2497,7 +2304,7 @@ def register_charts_extended(app):
         prevent_initial_call=True
     )
     def refresh_individual_panel(n_clicks, component_id, panels_config):
-        """Refresh individual chart panel"""
+        """Refresh individual chart panel."""
         panel_id = component_id['index']
         panel_config = panels_config.get('panels', {}).get(panel_id, {})
 
@@ -2505,6 +2312,4 @@ def register_charts_extended(app):
         timeframe = panel_config.get('timeframe', '1mo')
         chart_type = panel_config.get('chart_type', 'candlestick')
 
-        # Use get_stock_chart_with_stats instead (get_stock_chart doesn't exist)
-        from src.gui.tabs.charts.components import get_stock_chart_with_stats
         return get_stock_chart_with_stats(symbol, timeframe, chart_type)

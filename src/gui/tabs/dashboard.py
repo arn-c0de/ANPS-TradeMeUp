@@ -237,7 +237,7 @@ def create_layout():
                     ),
                     dbc.CardBody([
                         html.Small(
-                            f"DB-Retention: {LOG_RETENTION_HOURS}h. Auto-follow pausiert automatisch, sobald du hochscrollst.",
+                            f"DB retention: {LOG_RETENTION_HOURS}h. Auto-follow pauses automatically as soon as you scroll up.",
                             className="text-muted d-block mb-2",
                         ),
                         html.Div(
@@ -272,7 +272,7 @@ def create_layout():
                 dbc.ModalBody(
                     [
                         html.Small(
-                            "Live-Ansicht folgt neuen Einträgen nur solange du am unteren Rand bleibst.",
+                            "Live view only follows new entries while you stay at the bottom.",
                             className="text-muted d-block mb-2",
                         ),
                         html.Div(
@@ -367,15 +367,15 @@ def get_metrics(engine):
             return dbc.Row([
                 dbc.Col([
                     dbc.Alert([
-                        html.H4("🚀 Willkommen bei ANPS-TradeMeUp!", className="alert-heading"),
+                        html.H4("🚀 Welcome to ANPS-TradeMeUp!", className="alert-heading"),
                         html.Hr(),
-                        html.P("Die Datenbank ist leer. Starte die Pipeline um Daten zu sammeln:", className="mb-3"),
+                        html.P("The database is empty. Start the pipeline to collect data:", className="mb-3"),
                         html.Ul([
-                            html.Li([html.Strong("Option 1:"), " Gehe zum 🎮 Agent Control Tab und klicke 'Run Full Pipeline'"]),
-                            html.Li([html.Strong("Option 2:"), " Führe aus: ", html.Code("python scripts/run_mvp_pipeline.py")]),
-                            html.Li([html.Strong("Option 3:"), " Quick Test: ", html.Code("python scripts/run_ingestion.py")])
+                            html.Li([html.Strong("Option 1:"), " Go to the 🎮 Agent Control tab and click 'Run Full Pipeline'"]),
+                            html.Li([html.Strong("Option 2:"), " Run: ", html.Code("python scripts/run_mvp_pipeline.py")]),
+                            html.Li([html.Strong("Option 3:"), " Quick test: ", html.Code("python scripts/run_ingestion.py")])
                         ]),
-                        html.P(["📖 Mehr Info: ", html.Code("docs/setup/QUICKSTART.md")], className="mb-0")
+                        html.P(["📖 More info: ", html.Code("docs/setup/QUICKSTART.md")], className="mb-0")
                     ], color="info", className="shadow")
                 ], width=12)
             ])
@@ -433,7 +433,7 @@ def get_recent_news(engine, limit=50):
                 html.Td(news.source, className="text-primary"),
                 html.Td([
                     html.A(
-                        news.title[:80] + "..." if len(news.title) > 80 else news.title,
+                        f"{news.title[:80]}..." if len(news.title) > 80 else news.title,
                         href=news.url,
                         target="_blank",
                         className="text-decoration-none"
@@ -536,15 +536,15 @@ def get_live_agent_activity():
             ], className="mb-3"),
             html.Hr(),
             html.P([
-                "✨ System bereit für Pipeline-Ausführung",
+                "✨ System ready for pipeline execution",
             ], className="text-muted mb-2"),
             html.P([
-                "🎮 Gehe zu ",
+                "🎮 Go to the ",
                 html.Strong("Agent Control", className="text-info"),
-                " Tab um Pipeline zu starten"
+                " tab to start the pipeline"
             ], className="text-muted mb-2"),
             html.P([
-                "⚡ Oder führe aus: ",
+                "⚡ Or run: ",
                 html.Code("python scripts/run_mvp_pipeline.py", style={
                     "backgroundColor": "#1a1a1a",
                     "padding": "2px 6px",

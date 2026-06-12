@@ -1067,7 +1067,7 @@ def register_callbacks(app) -> None:
             return dash.no_update, dash.no_update
         n, p = _delete_news_cascade(news_id, also_preds)
         if n:
-            msg = f"Deleted 1 article" + (f" and {p} predictions." if p else ".")
+            msg = f"Deleted 1 article and {p} predictions." if p else "Deleted 1 article."
             return dbc.Alert(msg, color="success", dismissable=True, duration=4000), page or 0
         return dbc.Alert("Delete failed.", color="danger", dismissable=True), page or 0
 
@@ -1430,7 +1430,7 @@ def register_callbacks(app) -> None:
         ]
         children = [
             dbc.Alert(
-                [html.Strong(f"Import complete! "), f"{total} records inserted/merged."],
+                [html.Strong("Import complete! "), f"{total} records inserted/merged."],
                 color="success", dismissable=True
             ),
             dbc.Table([
