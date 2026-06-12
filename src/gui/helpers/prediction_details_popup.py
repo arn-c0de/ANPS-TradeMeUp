@@ -681,9 +681,6 @@ def _build_exit_strategy_section(simulation: TradingSimulation | None, performan
                     ], className="mb-2"),
 
                     # Trailing Stop (if applicable)
-                    # NOTE: preserved from the original code -- `self` is undefined at
-                    # module level, so when trailing_stop_price is not set this raises
-                    # NameError, which is caught by get_prediction_details' except.
                     html.Div([
                         html.Hr(className="my-2"),
                         html.Small([
@@ -693,7 +690,7 @@ def _build_exit_strategy_section(simulation: TradingSimulation | None, performan
                                 className="text-warning" if simulation.trailing_stop_price else "text-muted"
                             )
                         ], className="d-block")
-                    ]) if simulation.trailing_stop_price or self.config.get("stop_loss_take_profit", {}).get("trailing_stop", {}).get("enabled") else None
+                    ]) if simulation.trailing_stop_price else None
 
                 ], className="py-2")
             ], className="mb-2")
@@ -1136,9 +1133,7 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
             ).first()
 
             if not pred:
-                # NOTE: preserved from the original code -- this branch returns a
-                # 2-tuple (no sync_trigger), unlike the success and error paths.
-                return "Error", dbc.Alert("Prediction not found", color="danger")
+                return "Error", dbc.Alert("Prediction not found", color="danger"), None
 
             # Entity is already loaded via eager loading
             entity = pred.entity
