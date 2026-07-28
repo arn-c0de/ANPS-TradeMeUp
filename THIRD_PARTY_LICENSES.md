@@ -185,12 +185,6 @@ This document contains the licenses of all third-party dependencies used in the 
 - **Homepage:** https://github.com/celery/celery
 - **Copyright:** Copyright (c) 2009-2024 Ask Solem and contributors
 
-### Prefect
-- **Version:** 3.6.12
-- **License:** Apache License 2.0
-- **Homepage:** https://github.com/PrefectHQ/prefect
-- **Copyright:** Copyright (c) 2018-2024 Prefect Technologies, Inc.
-
 ---
 
 ## Visualization & Dashboard
