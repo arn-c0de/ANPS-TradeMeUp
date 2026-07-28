@@ -1,10 +1,12 @@
 """Test if update logic works correctly"""
 from datetime import datetime
 
-from sqlalchemy import create_engine, update
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-engine = create_engine('sqlite:///trademeup.db')
+from src.models.database import SessionLocal
+
+engine = SessionLocal().get_bind()
 
 with Session(engine) as db:
     from src.models.entities import Entity

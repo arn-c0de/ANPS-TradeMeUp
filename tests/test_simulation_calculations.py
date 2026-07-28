@@ -6,6 +6,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from datetime import datetime, timedelta
 
+import pytest
+
 from src.simulations.risk_calculations import RiskCalculator, RiskInputs
 from src.simulations.trading_simulator import TradingSimulationEngine
 
@@ -80,7 +82,9 @@ def test_cost_calculation_formulas():
 
     engine = TradingSimulationEngine()
 
-    # Test with different price points and volatility regimes
+    # Ranges cover the execution costs only (commission, spread, slippage,
+    # impact, regulatory). Overnight financing is asserted separately below
+    # because it scales with the horizon rather than the trade itself.
     test_cases = [
         {"price": 100, "volatility": "low", "shares": 100, "expected_range": (15, 20)},
         {"price": 100, "volatility": "medium", "shares": 100, "expected_range": (19, 25)},
@@ -100,9 +104,16 @@ def test_cost_calculation_formulas():
         print(f"  Total Cost: {total_bps:.1f} bps")
         print(f"  Breakdown: {breakdown}")
 
-        # Verify total is within expected range
-        assert case["expected_range"][0] <= total_bps <= case["expected_range"][1], \
-            f"Cost {total_bps} bps not in expected range {case['expected_range']}"
+        # A 5-day long position carries 5 x long_position_bps_per_day of
+        # financing on top of the execution costs.
+        overnight_bps = breakdown["overnight_cost_bps"]
+        assert overnight_bps > 0, "5d long position should carry overnight financing"
+        execution_bps = total_bps - overnight_bps
+
+        low, high = case["expected_range"]
+        assert low <= execution_bps <= high, \
+            f"Execution cost {execution_bps} bps not in expected range {case['expected_range']}"
+        assert total_bps == pytest.approx(execution_bps + overnight_bps)
 
         # Verify all components are present
         assert "commission_bps" in breakdown
@@ -116,22 +127,69 @@ def test_cost_calculation_formulas():
         print("  ✅ Passed\n")
 
 
-def test_small_price_handling():
-    """Very small prices should be treated as invalid and return empty breakdown."""
+def test_price_below_min_valid_is_rejected():
+    """Prices under penny_stock_handling.min_valid_price_usd yield no cost estimate."""
     engine = TradingSimulationEngine()
+    min_valid = engine.config["penny_stock_handling"]["min_valid_price_usd"]
+
     total_bps, breakdown = engine._estimate_costs_bps(
-        price=0.0001,
+        price=min_valid / 10,
         volatility_regime="medium",
         predicted_direction="up",
         horizon="5d",
         shares=100,
-        daily_volume=170000
+        daily_volume=170000,
     )
-    print("Small price test: price=0.0001")
-    print(f"  total_bps: {total_bps}, breakdown: {breakdown}")
     assert total_bps == 0.0
-    assert breakdown == {}, "Expected empty breakdown for extremely small price"
-    print("  ✅ Passed\n")
+    assert breakdown == {}, "Expected empty breakdown for an invalid price"
+
+
+def test_ultra_penny_cost_is_capped():
+    """An ultra-penny price is valid but must not produce an absurd bps figure.
+
+    A $0.0001 share price makes the $1.00 minimum commission worth ~1,000,000
+    bps of a 100-share position. penny_stock_handling.max_cost_bps_cap exists to
+    bound exactly this case.
+    """
+    engine = TradingSimulationEngine()
+    penny_config = engine.config["penny_stock_handling"]
+    cap = penny_config["max_cost_bps_cap"]
+
+    # Valid per config: above min_valid_price_usd, below ultra_penny_threshold_usd.
+    price = 0.0001
+    assert penny_config["min_valid_price_usd"] < price < penny_config["ultra_penny_threshold_usd"]
+
+    total_bps, breakdown = engine._estimate_costs_bps(
+        price=price,
+        volatility_regime="medium",
+        predicted_direction="up",
+        horizon="5d",
+        shares=100,
+        daily_volume=170000,
+    )
+
+    assert breakdown, "Ultra-penny prices are valid and should produce a breakdown"
+    assert total_bps == cap
+    assert breakdown["total_bps"] == cap
+    assert breakdown["max_cost_bps_cap"] == cap
+    assert breakdown["uncapped_total_bps"] > cap
+
+
+def test_penny_stock_cost_below_cap_is_untouched():
+    """Costs under the ceiling pass through without a cap marker."""
+    engine = TradingSimulationEngine()
+    cap = engine.config["penny_stock_handling"]["max_cost_bps_cap"]
+
+    total_bps, breakdown = engine._estimate_costs_bps(
+        price=0.5,
+        volatility_regime="medium",
+        predicted_direction="up",
+        horizon="5d",
+        shares=100,
+        daily_volume=170000,
+    )
+    assert 0 < total_bps < cap
+    assert "uncapped_total_bps" not in breakdown
 
 
 def test_penny_stock_detection():
@@ -425,7 +483,9 @@ def main():
         test_expected_return_calculation()
         test_divergence_calculation()
         test_cost_calculation_formulas()
-        test_small_price_handling()
+        test_price_below_min_valid_is_rejected()
+        test_ultra_penny_cost_is_capped()
+        test_penny_stock_cost_below_cap_is_untouched()
         test_penny_stock_detection()
         test_penny_stock_cost_methods()
         test_penny_stock_integration()

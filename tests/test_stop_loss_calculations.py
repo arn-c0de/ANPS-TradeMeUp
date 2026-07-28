@@ -34,7 +34,7 @@ def load_config():
         return json.load(f)
 
 
-def test_scenario(name: str, **kwargs):
+def check_scenario(name: str, **kwargs):
     """Test a specific scenario and print results."""
     logger.info(f"\n{'='*80}")
     logger.info(f"TEST SCENARIO: {name}")
@@ -98,7 +98,7 @@ def run_all_tests():
     logger.info("="*80)
 
     # Test 1: Normal stock, medium volatility
-    test_scenario(
+    check_scenario(
         "Normal Stock - Medium Volatility",
         entry_price=150.0,
         direction='up',
@@ -108,7 +108,7 @@ def run_all_tests():
     )
 
     # Test 2: High volatility regime
-    test_scenario(
+    check_scenario(
         "Normal Stock - High Volatility",
         entry_price=150.0,
         direction='up',
@@ -118,7 +118,7 @@ def run_all_tests():
     )
 
     # Test 3: Low volatility regime
-    test_scenario(
+    check_scenario(
         "Normal Stock - Low Volatility",
         entry_price=150.0,
         direction='up',
@@ -128,7 +128,7 @@ def run_all_tests():
     )
 
     # Test 4: Stressed market
-    test_scenario(
+    check_scenario(
         "Stressed Market Conditions",
         entry_price=150.0,
         direction='up',
@@ -138,7 +138,7 @@ def run_all_tests():
     )
 
     # Test 5: High risk position
-    test_scenario(
+    check_scenario(
         "High Risk Position (Tight Stops)",
         entry_price=100.0,
         direction='up',
@@ -148,7 +148,7 @@ def run_all_tests():
     )
 
     # Test 6: Low risk position
-    test_scenario(
+    check_scenario(
         "Low Risk Position (Wide Stops)",
         entry_price=100.0,
         direction='up',
@@ -158,7 +158,7 @@ def run_all_tests():
     )
 
     # Test 7: Short position
-    test_scenario(
+    check_scenario(
         "Short Position (Down Direction)",
         entry_price=100.0,
         direction='down',
@@ -168,7 +168,7 @@ def run_all_tests():
     )
 
     # Test 8: Penny stock
-    test_scenario(
+    check_scenario(
         "Penny Stock ($0.50)",
         entry_price=0.50,
         direction='up',
@@ -178,7 +178,7 @@ def run_all_tests():
     )
 
     # Test 9: Ultra-penny stock
-    test_scenario(
+    check_scenario(
         "Ultra-Penny Stock ($0.0005)",
         entry_price=0.0005,
         direction='up',
@@ -189,7 +189,7 @@ def run_all_tests():
 
     # Test 10: Different horizons
     for horizon in ['1d', '5d', '20d']:
-        test_scenario(
+        check_scenario(
             f"Horizon Test - {horizon}",
             entry_price=100.0,
             direction='up',
@@ -204,7 +204,7 @@ def run_all_tests():
     logger.info("="*80)
 
 
-def test_real_ticker(ticker: str):
+def check_real_ticker(ticker: str):
     """Test with a real ticker using live market data."""
     logger.info(f"\n{'='*80}")
     logger.info(f"REAL TICKER TEST: {ticker}")
@@ -268,7 +268,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.ticker:
-        test_real_ticker(args.ticker)
+        check_real_ticker(args.ticker)
     elif args.all:
         run_all_tests()
     else:
@@ -279,6 +279,6 @@ if __name__ == "__main__":
         logger.info("\n\nTesting with real tickers...")
         for ticker in ['AAPL', 'MSFT', 'TSLA']:
             try:
-                test_real_ticker(ticker)
+                check_real_ticker(ticker)
             except Exception as e:
                 logger.warning(f"Skipping {ticker}: {e}")

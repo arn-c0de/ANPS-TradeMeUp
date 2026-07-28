@@ -374,6 +374,23 @@ class TradingSimulationEngine:
                 price, shares, "per_share_only", predicted_direction, horizon
             )
 
+        # penny_stock_handling.max_cost_bps_cap is the config's declared ceiling
+        # ("prevent unrealistic BPS calculations"), but only the capped_bps method
+        # bounded its own total. per_share_only did not, so a $0.0001 share price
+        # produced ~1,000,000 bps from the minimum commission alone. Apply the
+        # ceiling to every method.
+        max_cost_bps = penny_config.get("max_cost_bps_cap")
+        if max_cost_bps is not None and total_bps > max_cost_bps:
+            logger.warning(
+                "Penny stock cost %.1f bps exceeds max_cost_bps_cap %s - capping",
+                total_bps,
+                max_cost_bps,
+            )
+            breakdown["uncapped_total_bps"] = round(total_bps, 3)
+            breakdown["max_cost_bps_cap"] = max_cost_bps
+            total_bps = float(max_cost_bps)
+            breakdown["total_bps"] = total_bps
+
         return total_bps, breakdown
 
     def _estimate_costs_bps(

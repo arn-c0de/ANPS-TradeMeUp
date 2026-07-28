@@ -3,11 +3,12 @@ Quick test to check if callbacks are working
 """
 import sys
 
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from src.models.database import SessionLocal
+
 # Test prediction loading
-engine = create_engine('sqlite:///trademeup.db')
+engine = SessionLocal().get_bind()
 
 with Session(engine) as db:
     from src.models.entities import Entity
