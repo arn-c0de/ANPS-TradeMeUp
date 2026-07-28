@@ -3,10 +3,11 @@ Live Chart Components
 Modular chart components for real-time market data visualization
 """
 
+from datetime import datetime, timedelta
+
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import pandas as pd
-from datetime import datetime, timedelta
 
 
 def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", show_volume: bool = True, show_ma: bool = False) -> go.Figure:
@@ -25,7 +26,7 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", sho
     """
     if df is None or df.empty:
         return create_empty_chart("No data available")
-    
+
     # Create subplots based on options
     if show_volume:
         fig = make_subplots(
@@ -39,7 +40,7 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", sho
     else:
         fig = go.Figure()
         volume_row = None
-    
+
     # Candlestick chart
     candlestick = go.Candlestick(
         x=df.index,
@@ -53,17 +54,17 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", sho
         increasing_fillcolor='rgba(0, 255, 136, 0.3)',
         decreasing_fillcolor='rgba(255, 68, 68, 0.3)'
     )
-    
+
     if show_volume:
         fig.add_trace(candlestick, row=1, col=1)
     else:
         fig.add_trace(candlestick)
-    
+
     # Add moving averages if requested
     if show_ma and len(df) >= 50:
         ma20 = df['Close'].rolling(window=20).mean()
         ma50 = df['Close'].rolling(window=50).mean()
-        
+
         ma20_trace = go.Scatter(
             x=df.index,
             y=ma20,
@@ -78,19 +79,19 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", sho
             line=dict(color='#00bfff', width=1.5),
             opacity=0.7
         )
-        
+
         if show_volume:
             fig.add_trace(ma20_trace, row=1, col=1)
             fig.add_trace(ma50_trace, row=1, col=1)
         else:
             fig.add_trace(ma20_trace)
             fig.add_trace(ma50_trace)
-    
+
     # Volume bars
     if show_volume:
-        colors = ['#00ff88' if close >= open_ else '#ff4444' 
+        colors = ['#00ff88' if close >= open_ else '#ff4444'
                   for close, open_ in zip(df['Close'], df['Open'])]
-        
+
         fig.add_trace(
             go.Bar(
                 x=df.index,
@@ -102,7 +103,7 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", sho
             ),
             row=volume_row, col=1
         )
-    
+
     # Update layout with modern styling
     fig.update_layout(
         template='plotly_dark',
@@ -127,7 +128,7 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", sho
         uirevision='constant',  # Maintain UI state on resize
         dragmode='pan'  # Default to pan mode for easier scrolling
     )
-    
+
     # Update axes - hide x-axis labels, show only in hover
     fig.update_xaxes(
         gridcolor='#333',
@@ -138,13 +139,13 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", sho
         fixedrange=False,  # Allow panning/zooming on x-axis
         rangeslider=dict(visible=False)  # Disable range slider but allow scrolling
     )
-    
+
     fig.update_yaxes(
         gridcolor='#333',
         showgrid=True,
         zeroline=False
     )
-    
+
     return fig
 
 
@@ -162,9 +163,9 @@ def create_line_chart(df: pd.DataFrame, symbol: str, column: str = 'Close') -> g
     """
     if df is None or df.empty:
         return create_empty_chart("No data available")
-    
+
     fig = go.Figure()
-    
+
     # Add line
     fig.add_trace(go.Scatter(
         x=df.index,
@@ -175,7 +176,7 @@ def create_line_chart(df: pd.DataFrame, symbol: str, column: str = 'Close') -> g
         fill='tonexty',
         fillcolor='rgba(0, 217, 255, 0.1)'
     ))
-    
+
     # Update layout
     fig.update_layout(
         template='plotly_dark',
@@ -189,7 +190,7 @@ def create_line_chart(df: pd.DataFrame, symbol: str, column: str = 'Close') -> g
         xaxis=dict(gridcolor='#333', showgrid=True),
         yaxis=dict(gridcolor='#333', showgrid=True)
     )
-    
+
     return fig
 
 
@@ -205,9 +206,9 @@ def create_multi_line_chart(data_dict: dict, title: str = "Comparison") -> go.Fi
         Plotly Figure
     """
     fig = go.Figure()
-    
+
     colors = ['#00d9ff', '#00ff88', '#ffaa00', '#ff4444', '#00aaff']
-    
+
     for idx, (symbol, df) in enumerate(data_dict.items()):
         if df is not None and not df.empty:
             fig.add_trace(go.Scatter(
@@ -217,7 +218,7 @@ def create_multi_line_chart(data_dict: dict, title: str = "Comparison") -> go.Fi
                 name=symbol,
                 line=dict(color=colors[idx % len(colors)], width=2)
             ))
-    
+
     fig.update_layout(
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
@@ -237,7 +238,7 @@ def create_multi_line_chart(data_dict: dict, title: str = "Comparison") -> go.Fi
             x=1
         )
     )
-    
+
     return fig
 
 
@@ -259,10 +260,10 @@ def create_price_indicator_card(quote_data: dict) -> dict:
             'change_percent': '0.00',
             'color': 'secondary'
         }
-    
+
     change = quote_data.get('change', 0)
     color = 'success' if change >= 0 else 'danger'
-    
+
     return {
         'symbol': quote_data['symbol'],
         'name': quote_data.get('name', quote_data['symbol']),
@@ -288,7 +289,7 @@ def create_empty_chart(message: str = "No data available") -> go.Figure:
         Plotly Figure
     """
     fig = go.Figure()
-    
+
     fig.add_annotation(
         text=message,
         xref="paper", yref="paper",
@@ -296,7 +297,7 @@ def create_empty_chart(message: str = "No data available") -> go.Figure:
         showarrow=False,
         font=dict(size=16, color="#666")
     )
-    
+
     fig.update_layout(
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
@@ -306,7 +307,7 @@ def create_empty_chart(message: str = "No data available") -> go.Figure:
         height=None,  # Allow dynamic height
         autosize=True
     )
-    
+
     return fig
 
 
@@ -328,7 +329,7 @@ def create_heatmap(data: pd.DataFrame, title: str = "Correlation Heatmap") -> go
         colorscale='RdYlGn',
         zmid=0
     ))
-    
+
     fig.update_layout(
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
@@ -338,5 +339,5 @@ def create_heatmap(data: pd.DataFrame, title: str = "Correlation Heatmap") -> go
         autosize=True,
         margin=dict(l=100, r=50, t=100, b=100)
     )
-    
+
     return fig

@@ -1,10 +1,11 @@
 """Agent 13: A/B Testing Framework - Test and compare model variants."""
 import logging
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta, timezone
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+
 import numpy as np
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from src.models.predictions import Prediction, PredictionOutcome
 
@@ -34,7 +35,7 @@ class ABTestingAgent:
         model_b: str,
         traffic_split: float = 0.5,
         duration_days: int = 30
-    ) -> Dict:
+    ) -> dict:
         """
         Create a new A/B test.
 
@@ -49,13 +50,13 @@ class ABTestingAgent:
             Test configuration
         """
         test_config = {
-            'test_id': f"test_{test_name}_{datetime.now(timezone.utc).timestamp()}",
+            'test_id': f"test_{test_name}_{datetime.now(UTC).timestamp()}",
             'test_name': test_name,
             'model_a': model_a,
             'model_b': model_b,
             'traffic_split': traffic_split,
-            'start_date': datetime.now(timezone.utc),
-            'end_date': datetime.now(timezone.utc) + timedelta(days=duration_days),
+            'start_date': datetime.now(UTC),
+            'end_date': datetime.now(UTC) + timedelta(days=duration_days),
             'status': 'active'
         }
 
@@ -73,7 +74,7 @@ class ABTestingAgent:
         model_a: str,
         model_b: str,
         lookback_days: int = 30
-    ) -> Dict:
+    ) -> dict:
         """
         Analyze A/B test results.
 
@@ -85,7 +86,7 @@ class ABTestingAgent:
         Returns:
             Test results with statistical significance
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
         # Get predictions for both models
         predictions_a = self.db.query(Prediction).join(
@@ -148,7 +149,7 @@ class ABTestingAgent:
             'confidence_level': significance.get('confidence_level', 0.0)
         }
 
-    def _calculate_metrics(self, predictions: List[Prediction]) -> Dict:
+    def _calculate_metrics(self, predictions: list[Prediction]) -> dict:
         """Calculate metrics for a set of predictions."""
         correct = 0
         accuracies = []
@@ -186,10 +187,10 @@ class ABTestingAgent:
 
     def _test_significance(
         self,
-        sample_a: List[float],
-        sample_b: List[float],
+        sample_a: list[float],
+        sample_b: list[float],
         alpha: float = 0.05
-    ) -> Dict:
+    ) -> dict:
         """
         Perform t-test for statistical significance.
 
@@ -230,7 +231,7 @@ class ABTestingAgent:
         model_a: str,
         model_b: str,
         min_improvement: float = 0.05
-    ) -> Dict:
+    ) -> dict:
         """
         Recommend which model to use based on A/B test.
 
@@ -274,7 +275,7 @@ class ABTestingAgent:
                 'improvement': improvement
             }
 
-    def process_batch(self, limit: int = 5) -> Dict:
+    def process_batch(self, limit: int = 5) -> dict:
         """
         Analyze active A/B tests.
 
@@ -315,7 +316,7 @@ class ABTestingAgent:
         logger.info(f"A/B testing complete. Stats: {stats}")
         return stats
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get A/B testing statistics."""
         return {
             'active_tests': len(self._active_tests),

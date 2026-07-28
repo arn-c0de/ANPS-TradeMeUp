@@ -8,14 +8,20 @@ from dash import Input, Output, State, dcc, html
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from src.models.database import engine as _engine
 from src.gui.utils.callbacks import safe_callback
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
+from src.models.analysis import (
+    FactVerification,
+    ImpactScore,
+    MarketRegime,
+    SignalDecayModel,
+    SurpriseScore,
+)
+from src.models.data_quality import DataQualityScore
+from src.models.database import engine as _engine
 from src.models.entities import Entity
 from src.models.predictions import Prediction
-from src.models.analysis import ImpactScore, SurpriseScore, SignalDecayModel, FactVerification, MarketRegime
-from src.models.data_quality import DataQualityScore
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
 from src.models.system_logs import SystemLog
 
 # ── constants ─────────────────────────────────────────────────────────────────

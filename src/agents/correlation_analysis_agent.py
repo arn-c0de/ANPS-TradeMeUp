@@ -1,10 +1,11 @@
 """Agent 5.6: Correlation Analysis Agent - Analyze entity correlations and relationships."""
 import logging
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta, timezone
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+
 import numpy as np
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from src.models.entities import Entity, EntityRelationship
 from src.models.predictions import MarketData
@@ -37,7 +38,7 @@ class CorrelationAnalysisAgent:
         entity_1: str,
         entity_2: str,
         lookback_days: int = 90
-    ) -> Optional[float]:
+    ) -> float | None:
         """
         Calculate price correlation between two entities.
 
@@ -55,7 +56,7 @@ class CorrelationAnalysisAgent:
         if cache_key in self._correlation_cache:
             return self._correlation_cache[cache_key]
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
         # Fetch price data for both entities
         data_1 = db.query(MarketData).filter(
@@ -104,7 +105,7 @@ class CorrelationAnalysisAgent:
         db: Session,
         entity_id: str,
         min_correlation: float = 0.5
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Analyze relationships for a specific entity.
 
@@ -156,7 +157,7 @@ class CorrelationAnalysisAgent:
             Number of relationships updated
         """
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             logger.info(f"Updating relationships for {entity_id}")
 
@@ -177,7 +178,7 @@ class CorrelationAnalysisAgent:
                     strength=abs(rel['correlation']),
                     direction='positive' if rel['correlation'] > 0 else 'negative',
                     metadata={'lookback_days': 90},
-                    created_at=datetime.now(timezone.utc)
+                    created_at=datetime.now(UTC)
                 )
                 relationship_objects.append(relationship)
 
@@ -195,7 +196,7 @@ class CorrelationAnalysisAgent:
         entity_1: str,
         entity_2: str,
         window_days: int = 30
-    ) -> Dict:
+    ) -> dict:
         """
         Detect unusual correlation patterns.
 
@@ -242,7 +243,7 @@ class CorrelationAnalysisAgent:
             'corr_180d': corr_180d
         }
 
-    def process_batch(self, limit: int = 10) -> Dict:
+    def process_batch(self, limit: int = 10) -> dict:
         """
         Process batch of entities for correlation analysis.
 
@@ -254,7 +255,7 @@ class CorrelationAnalysisAgent:
         """
         from src.models.database import get_scoped_session
         from src.models.entities import NewsEntityMapping
-        
+
         with get_scoped_session() as db:
             # Get top entities by mention count
             top_entities = db.query(
@@ -301,10 +302,10 @@ class CorrelationAnalysisAgent:
             logger.info(f"Correlation analysis complete. Stats: {stats}")
             return stats
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get correlation analysis statistics."""
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             total_relationships = db.query(EntityRelationship).filter(
                 EntityRelationship.relationship_type == 'correlation'

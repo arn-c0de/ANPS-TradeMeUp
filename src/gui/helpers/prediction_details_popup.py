@@ -6,20 +6,22 @@ prediction information. It can be used by multiple tabs (predictions, simulation
 """
 
 import logging
+from datetime import UTC, datetime, timezone
+
 import dash_bootstrap_components as dbc
 from dash import html
-from sqlalchemy.orm import Session, joinedload, defer
-from sqlalchemy import desc, and_
-from datetime import datetime, timezone
+from sqlalchemy import and_, desc
+from sqlalchemy.orm import Session, defer, joinedload
 
-from src.models.predictions import Prediction, PredictionOutcome
-from src.models.trading_simulation import TradingSimulation
-from src.models.entities import Entity
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
 from src.models.analysis import ImpactScore
+from src.models.entities import Entity
+from src.models.predictions import Prediction, PredictionOutcome
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
+from src.models.trading_simulation import TradingSimulation
 from src.services.prediction_performance_service import prediction_performance_service
-from src.utils.json_helpers import ensure_dict as _ensure_dict, ensure_list as _ensure_list
+from src.utils.json_helpers import ensure_dict as _ensure_dict
+from src.utils.json_helpers import ensure_list as _ensure_list
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,7 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
             market_data = MarketDataProvider()
 
             # Calculate days since prediction (use timezone-aware datetime)
-            days_since = (datetime.now(timezone.utc) - pred.timestamp).days if pred.timestamp else 0
+            days_since = (datetime.now(UTC) - pred.timestamp).days if pred.timestamp else 0
             logger.info(f"   Days since prediction: {days_since}")
 
             # Get historical data since prediction
@@ -92,7 +94,7 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
                 logger.info(f"   Got {len(hist_data)} days of historical data")
 
                 # Get prediction date
-                prediction_date = pred.timestamp.date() if pred.timestamp else datetime.now(timezone.utc).date()
+                prediction_date = pred.timestamp.date() if pred.timestamp else datetime.now(UTC).date()
                 logger.info(f"   Prediction date: {prediction_date}")
 
                 # Filter data from prediction date onwards
@@ -115,7 +117,7 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
                     logger.info(f"   Entry: {_format_price_ui(prediction_price)}, Current: {_format_price_ui(current_price)}")
                     logger.info(f"   High: {_format_price_ui(high_since)}, Low: {_format_price_ui(low_since)}, Vol: {volatility:.2f}%")
                 else:
-                    logger.warning(f"   No data since prediction date, using all available")
+                    logger.warning("   No data since prediction date, using all available")
                     prediction_price = hist_data.iloc[0]['Close']
                     current_price = hist_data.iloc[-1]['Close']
                     high_since = hist_data['High'].max()
@@ -135,7 +137,7 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
                     # Only one day of data available
                     price_24h_ago = hist_data.iloc[0]['Close']
                     return_24h = 0
-                    logger.info(f"   24h return: Only 1 day of data available")
+                    logger.info("   24h return: Only 1 day of data available")
 
                 # Try to get real-time current price (more accurate than historical close)
                 try:
@@ -160,10 +162,10 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
             logger.error(f"❌ Error getting price data for {ticker}: {e}")
             logger.exception(e)
     elif ticker and not load_live_prices:
-        logger.info(f"   Skipping live price data for fast loading")
+        logger.info("   Skipping live price data for fast loading")
 
     # Calculate days since prediction (use timezone-aware datetime)
-    days_since = (datetime.now(timezone.utc) - pred.timestamp).days if pred.timestamp else 0
+    days_since = (datetime.now(UTC) - pred.timestamp).days if pred.timestamp else 0
 
     # Calculate actual return from live prices if available, otherwise use saved data
     actual_return_pct = 0
@@ -225,7 +227,7 @@ def _save_performance(db: Session, prediction_id, performance: dict, label: str)
         tr = performance.get('total_return_pct')
         logger.info(f"✅ Saved {label} performance: {tr:.2f}%" if tr is not None else f"✅ Saved {label} performance: N/A")
         # Notify UI to refresh predictions table
-        return {"prediction_id": prediction_id, "ts": datetime.now(timezone.utc).isoformat()}
+        return {"prediction_id": prediction_id, "ts": datetime.now(UTC).isoformat()}
     except Exception as save_error:
         logger.warning(f"Could not save {label} performance: {save_error}")
         db.rollback()

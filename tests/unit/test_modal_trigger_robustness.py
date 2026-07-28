@@ -2,8 +2,9 @@
 Test for robust modal trigger handling when multiple inputs fire simultaneously
 """
 import json
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 
 
 class MockCallbackContext:
@@ -19,14 +20,14 @@ def test_modal_opens_when_sim_detail_btn_is_second_trigger():
     """
     import importlib
     predictions = importlib.import_module('src.gui.tabs.predictions')
-    
+
     # Simulate multiple triggers where first has value=0 (ignored)
     # and second is the actual sim-detail-btn click
     mock_triggered = [
         {"prop_id": "some-other-input.value", "value": 0},  # Should be skipped
         {"prop_id": '{"type":"sim-detail-btn","index":"test-pred-123"}.n_clicks', "value": 1}
     ]
-    
+
     # Directly test helper that parses triggered list
     action, pid = predictions._find_first_valid_trigger(mock_triggered)
 
@@ -39,7 +40,7 @@ def test_modal_handles_pred_detail_btn_as_first_trigger():
     mock_triggered = [
         {"prop_id": '{"type":"pred-detail-btn","index":"pred-456"}.n_clicks', "value": 1}
     ]
-    
+
     import importlib
     predictions = importlib.import_module('src.gui.tabs.predictions')
 
@@ -55,7 +56,7 @@ def test_modal_ignores_all_zero_triggers():
         {"prop_id": "input1.value", "value": 0},
         {"prop_id": "input2.value", "value": None},
     ]
-    
+
     import importlib
     predictions = importlib.import_module('src.gui.tabs.predictions')
 

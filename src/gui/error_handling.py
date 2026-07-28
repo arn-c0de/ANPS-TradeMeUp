@@ -1,8 +1,9 @@
 """Error handling utilities for GUI components."""
 import logging
 from functools import wraps
-from dash import html
+
 import dash_bootstrap_components as dbc
+from dash import html
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ def handle_db_errors(default_message="Unable to load data", show_details=True):
                 return func(*args, **kwargs)
             except Exception as e:
                 logger.error(f"Error in {func.__name__}: {e}", exc_info=True)
-                
+
                 # Create user-friendly error message
                 if show_details:
                     return dbc.Alert([
@@ -62,7 +63,7 @@ def create_empty_state(title, message, icon="📭", action_text=None, action_lin
             html.P(message, className="text-muted mb-3")
         ], className="text-center py-5")
     ]
-    
+
     if action_text:
         if action_link:
             components.append(
@@ -74,7 +75,7 @@ def create_empty_state(title, message, icon="📭", action_text=None, action_lin
             components.append(
                 html.P(action_text, className="text-center text-info small")
             )
-    
+
     return html.Div(components)
 
 
@@ -133,7 +134,7 @@ def format_error_for_display(error, context=""):
     """
     error_type = type(error).__name__
     error_msg = str(error)
-    
+
     # Simplify common database errors
     if "no such table" in error_msg:
         return "Database table not found. Run migrations: `alembic upgrade head`"
@@ -141,17 +142,17 @@ def format_error_for_display(error, context=""):
         return "Database connection error. Check your database configuration."
     elif "locked" in error_msg.lower():
         return "Database is locked. Try again in a moment."
-    
+
     # Generic error with context
     if context:
         return f"{context}: {error_type} - {error_msg[:100]}"
-    
+
     return f"{error_type}: {error_msg[:100]}"
 
 
 class DatabaseErrorHandler:
     """Context manager for database operations with error handling."""
-    
+
     def __init__(self, default_return=None, log_errors=True, reraise=False):
         """
         Initialize error handler.
@@ -165,10 +166,10 @@ class DatabaseErrorHandler:
         self.log_errors = log_errors
         self.reraise = reraise
         self.error = None
-    
+
     def __enter__(self):
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type is not None:
             self.error = exc_val
@@ -178,7 +179,7 @@ class DatabaseErrorHandler:
                 return False  # Re-raise the exception
             return True  # Suppress the exception
         return False
-    
+
     def get_result(self, result):
         """Get result or default if error occurred."""
         return self.default_return if self.error else result

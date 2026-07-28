@@ -1,9 +1,20 @@
 """Database models for predictions and outcomes."""
+import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Float, Boolean, DateTime, ForeignKey, Index, Integer, PrimaryKeyConstraint
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    PrimaryKeyConstraint,
+    String,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
-import uuid
 
 from src.models.database import Base, utc_now
 from src.models.types import GUID

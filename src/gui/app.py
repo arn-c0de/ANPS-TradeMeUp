@@ -4,15 +4,18 @@ Multi-tab dashboard for monitoring news, predictions, and system health
 """
 
 # Suppress pandas deprecation warnings from yfinance library
+import os
 import warnings
+
 warnings.filterwarnings('ignore', category=DeprecationWarning, module='yfinance')
 warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
 
-import dash
-from dash import dcc, html
-import dash_bootstrap_components as dbc
-
 import logging
+
+import dash
+import dash_bootstrap_components as dbc
+from dash import dcc, html
+
 from src.config.settings import VERSION
 from src.gui.components import create_navbar
 
@@ -25,16 +28,16 @@ except Exception:
 from src.gui.callbacks import register_charts_callbacks, register_common_callbacks
 from src.gui.helpers.prediction_details_popup import create_prediction_modal
 from src.gui.tabs import (
-    dashboard,
-    predictions,
-    news,
-    statistics,
     charts,
-    simulations,
-    system,
     control,
-    testing,
+    dashboard,
     databases,
+    news,
+    predictions,
+    simulations,
+    statistics,
+    system,
+    testing,
 )
 from src.gui.tabs import settings as settings_tab
 
@@ -89,18 +92,18 @@ app.layout = html.Div([
     dcc.Store(id="delete-action-store", data={"action": None, "params": None}),
     dcc.Store(id="rss-fetch-status-store", data=None),
     dcc.Store(id="portfolio-capital-store", storage_type="local", data={"capital": 100000, "currency": "USD", "risk_adjustment": 0.3}),
-    
+
     # Shared stores for prediction modal (used by multiple tabs)
     dcc.Store(id="prediction-detail-cache", data={}),
     dcc.Store(id="current-prediction-id", data=None),
     dcc.Store(id="refresh-loading-state", data={}),
     dcc.Store(id="simulation-sync-trigger", data={}),
-    
+
     html.Button(id='refresh-all-panels', style={'display': 'none'}),
-    
+
     # Shared prediction details modal (used by dashboard, predictions, simulations tabs)
     create_prediction_modal(),
-    
+
     create_navbar(),
     dbc.Container([
         dbc.Tabs([
@@ -133,6 +136,12 @@ settings_tab.register_callbacks(app)
 databases.register_callbacks(app)
 
 if __name__ == "__main__":
+    # Defaults match scripts/runtime/run_dashboard.py: loopback only and debug
+    # off, so a direct `python src/gui/app.py` never exposes the dashboard (which
+    # has no authentication) or the debug console to the network by accident.
+    debug_mode = os.getenv("DASH_DEBUG", "").lower() in {"1", "true", "yes"}
+    host = os.getenv("DASH_HOST", "127.0.0.1")
+
     print(f"🚀 Starting ANPS-TradeMeUp Dashboard v{VERSION}...")
-    print("📊 Dashboard will be available at: http://127.0.0.1:8050")
-    app.run(debug=True, host="0.0.0.0", port=8050)
+    print(f"📊 Dashboard will be available at: http://{host}:8050")
+    app.run(debug=debug_mode, host=host, port=8050)

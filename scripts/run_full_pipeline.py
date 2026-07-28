@@ -6,13 +6,14 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models.database import SessionLocal
-from src.agents.ingestion_agent import IngestionAgent
-from src.agents.data_quality_agent import DataQualityAgent
-from src.agents.content_understanding_agent import ContentUnderstandingAgent
-from src.agents.entity_mapping_agent import EntityMappingAgent
-from src.config.settings import settings
 import logging
+
+from src.agents.content_understanding_agent import ContentUnderstandingAgent
+from src.agents.data_quality_agent import DataQualityAgent
+from src.agents.entity_mapping_agent import EntityMappingAgent
+from src.agents.ingestion_agent import IngestionAgent
+from src.config.settings import settings
+from src.models.database import SessionLocal
 
 logging.basicConfig(
     level=logging.INFO,

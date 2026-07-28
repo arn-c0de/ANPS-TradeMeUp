@@ -10,11 +10,16 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from src.config.settings import settings
 from src.utils.redact import redact_url
 
+# Without a timeout a hung Ollama server blocks the pipeline forever, and the
+# @retry wrapper never fires because the call simply never returns.
+OLLAMA_PROBE_TIMEOUT = 10        # seconds, connection test only
+OLLAMA_GENERATE_TIMEOUT = 300    # seconds, local generation can be slow
+
 logger = logging.getLogger(__name__)
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 
-def normalize_openai_base_url(base_url: Optional[str]) -> str:
+def normalize_openai_base_url(base_url: str | None) -> str:
     """Return a safe OpenAI base URL, falling back to the official endpoint."""
     if not base_url:
         return DEFAULT_OPENAI_BASE_URL
@@ -42,7 +47,7 @@ class LLMService:
     - Anthropic (Claude)
     """
 
-    def __init__(self, provider: Optional[str] = None):
+    def __init__(self, provider: str | None = None):
         """
         Initialize LLM service.
 
@@ -59,10 +64,11 @@ class LLMService:
         # Initialize provider-specific clients
         if self.provider == "openai":
             try:
-                from openai import OpenAI
                 import os
+
                 import httpx
-                
+                from openai import OpenAI
+
                 openai_base_url = normalize_openai_base_url(settings.openai_base_url)
 
                 # Configure OpenAI client with timeout and proxy support
@@ -76,15 +82,15 @@ class LLMService:
                     logger.info(f"Using custom OpenAI base URL: {redact_url(openai_base_url)}")
                 else:
                     logger.info("Using default OpenAI base URL")
-                
+
                 # Check proxy configuration
                 http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
                 https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-                
+
                 # Detect invalid proxy configurations (e.g., discard port 9)
                 invalid_proxy_ports = [9]  # Port 9 is discard port
                 use_proxy = True
-                
+
                 if http_proxy or https_proxy:
                     # Check if proxy points to invalid port
                     for proxy_url in [http_proxy, https_proxy]:
@@ -99,10 +105,10 @@ class LLMService:
                                     break
                             except Exception:
                                 pass
-                    
+
                     if use_proxy:
                         logger.info(f"Proxy detected: HTTP_PROXY={http_proxy}, HTTPS_PROXY={https_proxy}")
-                
+
                 # Configure httpx client - disable proxy if invalid, otherwise trust_env
                 if use_proxy:
                     client_kwargs["http_client"] = httpx.Client(timeout=60.0, trust_env=True)
@@ -110,7 +116,7 @@ class LLMService:
                     # Explicitly disable proxy by setting trust_env=False
                     client_kwargs["http_client"] = httpx.Client(timeout=60.0, trust_env=False)
                     logger.info("Proxy disabled due to invalid configuration")
-                
+
                 self.openai_client = OpenAI(**client_kwargs)
                 self.model = settings.openai_model
                 logger.info(f"OpenAI client initialized with model: {self.model}")
@@ -142,7 +148,7 @@ class LLMService:
     def _test_ollama_connection(self):
         """Test connection to Ollama server."""
         try:
-            response = requests.get(f"{self.ollama_base_url}/api/tags")
+            response = requests.get(f"{self.ollama_base_url}/api/tags", timeout=OLLAMA_PROBE_TIMEOUT)
             if response.status_code == 200:
                 models = response.json().get("models", [])
                 logger.info(f"Connected to Ollama. Available models: {[m['name'] for m in models]}")
@@ -156,9 +162,9 @@ class LLMService:
     def generate(
         self,
         prompt: str,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None
     ) -> str:
         """
         Generate text using the configured LLM provider.
@@ -189,7 +195,7 @@ class LLMService:
     def _generate_ollama(
         self,
         prompt: str,
-        system_prompt: Optional[str],
+        system_prompt: str | None,
         temperature: float,
         max_tokens: int
     ) -> str:
@@ -211,7 +217,7 @@ class LLMService:
             }
         }
 
-        response = requests.post(url, json=payload)
+        response = requests.post(url, json=payload, timeout=OLLAMA_GENERATE_TIMEOUT)
         response.raise_for_status()
 
         result = response.json()
@@ -220,7 +226,7 @@ class LLMService:
     def _generate_openai(
         self,
         prompt: str,
-        system_prompt: Optional[str],
+        system_prompt: str | None,
         temperature: float,
         max_tokens: int
     ) -> str:
@@ -244,7 +250,7 @@ class LLMService:
         except Exception as e:
             error_msg = str(e)
             logger.error(f"OpenAI API error: {error_msg}")
-            
+
             # Provide helpful error messages
             if "Connection error" in error_msg or "10061" in error_msg:
                 logger.error("Connection to OpenAI API failed. Possible causes:")
@@ -252,13 +258,13 @@ class LLMService:
                 logger.error("  2. Firewall blocking connection")
                 logger.error("  3. OpenAI API endpoint unreachable")
                 logger.error("  4. Check OPENAI_BASE_URL in .env.local if using custom endpoint")
-            
+
             raise
 
     def _generate_anthropic(
         self,
         prompt: str,
-        system_prompt: Optional[str],
+        system_prompt: str | None,
         temperature: float,
         max_tokens: int
     ) -> str:
@@ -278,9 +284,9 @@ class LLMService:
     def generate_json(
         self,
         prompt: str,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None
-    ) -> Dict:
+        system_prompt: str | None = None,
+        temperature: float | None = None
+    ) -> dict:
         """
         Generate JSON output from LLM.
 
@@ -303,7 +309,7 @@ class LLMService:
             return json.loads(response)
         except json.JSONDecodeError as e:
             logger.warning(f"Initial JSON parse failed: {e}. Attempting extraction...")
-            
+
             # Try to find JSON in code blocks
             import re
             json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
@@ -317,7 +323,7 @@ class LLMService:
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 json_str = json_match.group(0)
-                
+
                 # Try to fix common JSON issues
                 try:
                     # Remove trailing commas before closing braces/brackets
@@ -331,7 +337,7 @@ class LLMService:
             logger.error(f"Failed to parse JSON from response: {response[:500]}")
             raise ValueError("Could not parse valid JSON from LLM response")
 
-    def get_embedding(self, text: str) -> List[float]:
+    def get_embedding(self, text: str) -> list[float]:
         """
         Get text embedding using configured provider.
 
@@ -351,16 +357,16 @@ class LLMService:
                 return response.data[0].embedding
             except Exception as e:
                 logger.warning(f"Failed to get embedding from OpenAI: {e}. Falling back to CPU embeddings.")
-        
+
         # Fallback: use sentence-transformers on CPU
         try:
             import torch
             from sentence_transformers import SentenceTransformer
-            
+
             # Force CPU to avoid GPU memory overflow
             device = "cpu"
             logger.info(f"Loading SentenceTransformer on {device} device")
-            
+
             model = SentenceTransformer('all-mpnet-base-v2')
             model = model.to(device)
             embedding = model.encode(text, convert_to_numpy=True, device=device)

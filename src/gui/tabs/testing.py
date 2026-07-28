@@ -3,8 +3,8 @@ Testing Tab - Individual Agent Testing and Health Checks
 Modular design for easy expansion as new agents are added
 """
 
-from datetime import datetime, timezone
 import traceback
+from datetime import UTC, datetime, timezone
 
 import dash
 import dash_bootstrap_components as dbc
@@ -191,7 +191,7 @@ AGENT_TESTS = {
 
 def create_layout():
     """Create testing tab layout"""
-    
+
     # Group agents by tier
     tiers = {}
     for agent_key, agent_info in AGENT_TESTS.items():
@@ -199,7 +199,7 @@ def create_layout():
         if tier not in tiers:
             tiers[tier] = []
         tiers[tier].append((agent_key, agent_info))
-    
+
     # Create agent test cards grouped by tier
     tier_sections = []
     for tier_name, agents in sorted(tiers.items()):
@@ -207,13 +207,13 @@ def create_layout():
         for agent_key, agent_info in agents:
             card = create_agent_test_card(agent_key, agent_info)
             agent_cards.append(dbc.Col(card, width=6, className="mb-3"))
-        
+
         tier_section = html.Div([
             html.H5(tier_name, className="text-primary mb-3 mt-3"),
             dbc.Row(agent_cards)
         ])
         tier_sections.append(tier_section)
-    
+
     return dbc.Container([
         # Header with bulk actions
         dbc.Row([
@@ -234,17 +234,17 @@ def create_layout():
                 ])
             ], width=12)
         ], className="mb-3"),
-        
+
         # Overall status summary
         dbc.Row([
             dbc.Col([
                 html.Div(id="test-summary")
             ], width=12)
         ], className="mb-3"),
-        
+
         # Agent test cards grouped by tier
         html.Div(tier_sections),
-        
+
         # Detailed error log modal
         dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle("Error Details")),
@@ -255,11 +255,11 @@ def create_layout():
                 dbc.Button("Close", id="close-error-modal", className="ms-auto")
             ),
         ], id="error-modal", size="xl", scrollable=True),
-        
+
         # Store for test results
         dcc.Store(id="store-test-results", data={}),
         dcc.Interval(id="interval-test-monitor", interval=1000, disabled=True)
-        
+
     ], fluid=True)
 
 
@@ -323,9 +323,9 @@ def test_agent(agent_key):
     agent_info = AGENT_TESTS.get(agent_key)
     if not agent_info:
         return False, "Agent configuration not found", {}
-    
+
     start_time = datetime.now()
-    
+
     # List of refactored agents that DON'T need db parameter
     REFACTORED_AGENTS = {
         "agent_1_5",  # DataQualityAgent
@@ -341,46 +341,46 @@ def test_agent(agent_key):
         "agent_12",   # MetaStrategyAgent
         "simulation_engine",  # TradingSimulationEngine
     }
-    
+
     try:
         # Dynamic import
         module_path = agent_info["module"]
         class_name = agent_info["class"]
-        
+
         # Import module
         module = __import__(module_path, fromlist=[class_name])
         agent_class = getattr(module, class_name)
-        
+
         # Initialize database session (for non-refactored agents)
         from src.models.database import normalize_database_url
         engine = create_engine(normalize_database_url(settings.database_url))
         db = Session(engine)
-        
+
         # Initialize agent - REFACTORED agents don't need db parameter
         if agent_key in REFACTORED_AGENTS:
             agent = agent_class()  # ✅ No db parameter for refactored agents
         else:
             agent = agent_class(db)  # Old style for non-refactored agents
-        
+
         # Check if agent has required methods
         required_methods = ['process_batch', '__init__']
         missing_methods = [m for m in required_methods if not hasattr(agent, m)]
         if missing_methods:
             db.close()
             return False, f"Missing methods: {', '.join(missing_methods)}", {"missing": missing_methods}
-        
+
         # Agent-specific tests
         test_result = run_agent_specific_test(agent, agent_key)
-        
+
         db.close()
-        
+
         duration = (datetime.now() - start_time).total_seconds()
-        
+
         if test_result["success"]:
             return True, f"✅ Test passed in {duration:.2f}s", test_result
         else:
             return False, f"❌ {test_result.get('message', 'Test failed')}", test_result
-            
+
     except ImportError as e:
         return False, f"Import Error: {str(e)}", {"error": str(e), "traceback": traceback.format_exc()}
     except Exception as e:
@@ -396,61 +396,61 @@ def run_agent_specific_test(agent, agent_key):
             if rss_feeds and len(rss_feeds) > 0:
                 return {"success": True, "message": f"Found {len(rss_feeds)} RSS feeds configured"}
             return {"success": False, "message": "No RSS feeds configured"}
-            
+
         elif agent_key == "agent_1_5":
             # Test quality scoring logic
             if hasattr(agent, 'calculate_quality_score'):
                 return {"success": True, "message": "Quality scoring method available"}
             return {"success": False, "message": "Missing calculate_quality_score method"}
-            
+
         elif agent_key == "agent_2":
             # Test LLM connection
             if hasattr(agent, 'llm'):
                 return {"success": True, "message": f"LLM service initialized: {agent.llm.provider}"}
             return {"success": False, "message": "LLM service not initialized"}
-            
+
         elif agent_key == "agent_3":
             # Test entity extraction - check for process_batch (refactored)
             if hasattr(agent, 'process_batch'):
                 return {"success": True, "message": "✅ Entity mapping agent ready (refactored)"}
             return {"success": False, "message": "Missing process_batch method"}
-            
+
         elif agent_key == "agent_4":
             # Test impact calculation - check for process_batch (refactored)
             if hasattr(agent, 'process_batch'):
                 return {"success": True, "message": "✅ Impact scoring agent ready (refactored)"}
             return {"success": False, "message": "Missing process_batch method"}
-            
+
         elif agent_key == "agent_4_5":
             # Test surprise calculation
             if hasattr(agent, 'calculate_surprise'):
                 return {"success": True, "message": "Surprise calculation method available"}
             return {"success": False, "message": "Missing calculate_surprise method"}
-            
+
         elif agent_key == "agent_5":
             # Test regime detection
             if hasattr(agent, 'detect_regime'):
                 return {"success": True, "message": "Regime detection method available"}
             return {"success": False, "message": "Missing detect_regime method"}
-            
+
         elif agent_key == "agent_6":
             # Test prediction generation - check for process_batch (refactored)
             if hasattr(agent, 'process_batch'):
                 return {"success": True, "message": "✅ Prediction agent ready (refactored)"}
             return {"success": False, "message": "Missing process_batch method"}
-        
+
         elif agent_key == "agent_7":
             # Test fact verification - check for process_batch (refactored)
             if hasattr(agent, 'process_batch'):
                 return {"success": True, "message": "✅ Fact verification agent ready (refactored)"}
             return {"success": False, "message": "Missing process_batch method"}
-        
+
         elif agent_key == "agent_8":
             # Test correlation analysis - check for process_batch (refactored)
             if hasattr(agent, 'process_batch'):
                 return {"success": True, "message": "✅ Correlation agent ready (refactored)"}
             return {"success": False, "message": "Missing process_batch method"}
-        
+
         elif agent_key == "agent_9":
             # Test signal decay - check for process_batch (refactored)
             if hasattr(agent, 'process_batch'):
@@ -495,7 +495,7 @@ def run_agent_specific_test(agent, agent_key):
 
             # Validate cost estimation and decision logic
             total_bps, breakdown = agent._estimate_costs_bps(
-                price=150.0, 
+                price=150.0,
                 volatility_regime="medium",
                 predicted_direction="up",
                 horizon="5d"
@@ -529,7 +529,7 @@ def run_agent_specific_test(agent, agent_key):
                         "symbol": ticker,
                         "price": 123.45,
                         "change_percent": 0.12,
-                        "timestamp": datetime.now(timezone.utc),
+                        "timestamp": datetime.now(UTC),
                     }
 
             agent.market_data_provider = _StaticMarketDataProvider()
@@ -547,10 +547,10 @@ def run_agent_specific_test(agent, agent_key):
                 "risk_score": risk_score,
                 "decision": decision,
             }
-            
+
         else:
             return {"success": True, "message": "Basic initialization successful"}
-            
+
     except Exception as e:
         return {"success": False, "message": str(e), "traceback": traceback.format_exc()}
 
@@ -559,11 +559,11 @@ def get_test_summary(test_results):
     """Generate summary of test results"""
     if not test_results:
         return dbc.Alert("No tests run yet. Click 'Test All Agents' or test individual agents.", color="info")
-    
+
     total = len(test_results)
     passed = sum(1 for r in test_results.values() if r.get("success"))
     failed = total - passed
-    
+
     return dbc.Card([
         dbc.CardBody([
             dbc.Row([

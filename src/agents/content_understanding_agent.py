@@ -8,14 +8,15 @@ OPTIMIZED VERSION:
 - ✅ No session state leaks between batches
 """
 import logging
-from typing import Dict, Optional, List
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
+from typing import Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
 from src.models.database import get_scoped_session
-from src.models.raw_news import RawNews
 from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
 from src.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ class ContentUnderstandingAgent:
         # Load prompt template
         prompt_path = Path("config/prompts/content_understanding.txt")
         if prompt_path.exists():
-            with open(prompt_path, 'r') as f:
+            with open(prompt_path) as f:
                 self.prompt_template = f.read()
         else:
             # Fallback inline prompt
@@ -79,7 +80,7 @@ Sentiment: -1 (negative) to +1 (positive)
 
 Respond ONLY with JSON."""
 
-    def process_batch(self, limit: int = 30) -> Dict:
+    def process_batch(self, limit: int = 30) -> dict:
         """
         Process batch of unprocessed articles with optimized database operations.
 
@@ -145,7 +146,7 @@ Respond ONLY with JSON."""
             logger.info(f"Content understanding complete. Stats: {stats}")
             return stats
 
-    def _find_unprocessed_articles(self, db: Session, limit: int) -> List[RawNews]:
+    def _find_unprocessed_articles(self, db: Session, limit: int) -> list[RawNews]:
         """
         Find high-quality articles that haven't been processed yet.
 
@@ -177,7 +178,7 @@ Respond ONLY with JSON."""
         self,
         db: Session,
         article: RawNews
-    ) -> Optional[ProcessedNews]:
+    ) -> ProcessedNews | None:
         """
         Process single article WITHOUT committing to database.
 
@@ -211,7 +212,7 @@ Respond ONLY with JSON."""
                 existing.confidence = analysis.get('confidence', 0.0)
                 existing.embedding = analysis.get('embedding', [])
                 existing.llm_metadata = analysis.get('llm_metadata', {})
-                existing.processing_timestamp = datetime.now(timezone.utc)
+                existing.processing_timestamp = datetime.now(UTC)
 
                 logger.info(
                     f"Updated article {article.news_id}: "
@@ -233,7 +234,7 @@ Respond ONLY with JSON."""
                     confidence=analysis.get('confidence', 0.0),
                     embedding=analysis.get('embedding', []),
                     llm_metadata=analysis.get('llm_metadata', {}),
-                    processing_timestamp=datetime.now(timezone.utc)
+                    processing_timestamp=datetime.now(UTC)
                 )
 
                 logger.info(
@@ -248,7 +249,7 @@ Respond ONLY with JSON."""
             logger.error(f"Error processing article {article.news_id}: {e}", exc_info=True)
             return None
 
-    def _analyze_article(self, db: Session, article: RawNews) -> Dict:
+    def _analyze_article(self, db: Session, article: RawNews) -> dict:
         """
         Analyze article using LLM.
 
@@ -294,7 +295,7 @@ Respond ONLY with JSON."""
                 'provider': self.llm.provider,
                 'model': self.llm.model,
                 'temperature': 0.1,
-                'timestamp': datetime.now(timezone.utc).isoformat()
+                'timestamp': datetime.now(UTC).isoformat()
             }
 
             return analysis
@@ -307,7 +308,7 @@ Respond ONLY with JSON."""
             # Return minimal valid analysis
             try:
                 embedding = self.llm.get_embedding(article.full_text[:1000])
-            except:
+            except Exception:
                 embedding = []
 
             return {
@@ -325,20 +326,20 @@ Respond ONLY with JSON."""
                     'model': self.llm.model,
                     'error': str(e),
                     'fallback': True,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
+                    'timestamp': datetime.now(UTC).isoformat()
                 }
             }
         except Exception as e:
             logger.error(f"Error analyzing article {article.news_id}: {e}")
             raise
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """
         Get processing statistics.
 
         Uses scoped session for isolation.
         """
-        from sqlalchemy import func, Float
+        from sqlalchemy import Float, func
 
         with get_scoped_session() as db:
             total_processed = db.query(ProcessedNews).count()

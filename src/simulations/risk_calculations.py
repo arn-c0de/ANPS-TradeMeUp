@@ -51,14 +51,14 @@ class RiskInputs:
 
     model_uncertainty: float
     divergence_pct: float
-    volatility_regime: Optional[str] = None
-    liquidity_stress: Optional[float] = None
-    regime_confidence: Optional[float] = None
-    transaction_cost_ratio: Optional[float] = None
-    market_impact_bps: Optional[float] = None
-    correlation_breakdown: Optional[float] = None
-    position_size_pct: Optional[float] = None
-    daily_volume_usd: Optional[float] = None
+    volatility_regime: str | None = None
+    liquidity_stress: float | None = None
+    regime_confidence: float | None = None
+    transaction_cost_ratio: float | None = None
+    market_impact_bps: float | None = None
+    correlation_breakdown: float | None = None
+    position_size_pct: float | None = None
+    daily_volume_usd: float | None = None
 
 
 class RiskCalculator:
@@ -66,7 +66,7 @@ class RiskCalculator:
 
     def __init__(
         self,
-        weights: Optional[Dict[str, float]] = None,
+        weights: dict[str, float] | None = None,
         max_divergence_pct: float = 10.0,
         max_impact_bps: float = 50.0,
     ):
@@ -74,7 +74,7 @@ class RiskCalculator:
         self.max_divergence_pct = max_divergence_pct
         self.max_impact_bps = max_impact_bps
 
-    def calculate(self, inputs: RiskInputs) -> Dict:
+    def calculate(self, inputs: RiskInputs) -> dict:
         """Calculate risk score and component breakdown."""
         volatility_key = (inputs.volatility_regime or "unknown").lower()
         volatility_score = VOLATILITY_RISK_MAP.get(volatility_key, VOLATILITY_RISK_MAP["unknown"])
@@ -116,7 +116,7 @@ class RiskCalculator:
             "weights": dict(self.weights),
         }
 
-    def _calculate_position_concentration(self, position_size_pct: Optional[float]) -> float:
+    def _calculate_position_concentration(self, position_size_pct: float | None) -> float:
         """
         Calculate risk from position size concentration.
 
@@ -133,7 +133,7 @@ class RiskCalculator:
         risk = min((position_size_pct / 10.0) ** 1.5, 1.0)
         return clamp(risk)
 
-    def _calculate_liquidity_constraint(self, daily_volume_usd: Optional[float]) -> float:
+    def _calculate_liquidity_constraint(self, daily_volume_usd: float | None) -> float:
         """
         Calculate risk from liquidity constraints.
 

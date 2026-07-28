@@ -2,16 +2,22 @@
 Charts Tab - Component Creation Functions
 """
 
-from typing import Optional, Tuple, Dict
+from typing import Dict, Optional, Tuple
+
+import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import dcc, html
-import dash_bootstrap_components as dbc
 
-from src.services.market_data import MarketDataProvider
-from src.gui.tabs.charts.live_charts import create_empty_chart, create_price_indicator_card, create_multi_line_chart
 from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager
-from .data import _fetch_chart_data, _calculate_stats
-from .utils import _build_stats_card, _build_chart_figure
+from src.gui.tabs.charts.live_charts import (
+    create_empty_chart,
+    create_multi_line_chart,
+    create_price_indicator_card,
+)
+from src.services.market_data import MarketDataProvider
+
+from .data import _calculate_stats, _fetch_chart_data
+from .utils import _build_chart_figure, _build_stats_card
 
 # Initialize market data provider
 market_data = MarketDataProvider()
@@ -23,13 +29,13 @@ def get_stock_chart_components(
     chart_type: str = 'candlestick',
     show_volume: bool = True,
     show_ma: bool = False,
-    overlays: Optional[dict] = None,
-    graph_id: Optional[dict] = None,
+    overlays: dict | None = None,
+    graph_id: dict | None = None,
     dragmode: str = 'zoom',
     auto_scroll: bool = False,
-    view_state: Optional[dict] = None,
-    loaded_data: Optional[pd.DataFrame] = None
-) -> Tuple[dcc.Graph, Optional[Dict]]:
+    view_state: dict | None = None,
+    loaded_data: pd.DataFrame | None = None
+) -> tuple[dcc.Graph, dict | None]:
     """
     Get chart graph component and stats data.
     
@@ -52,7 +58,7 @@ def get_stock_chart_components(
     try:
         # Fetch data
         df = _fetch_chart_data(symbol, timeframe, loaded_data)
-        
+
         if df is None or df.empty:
             return dbc.Alert(f"No data available for {symbol}", color="warning"), None
 
@@ -98,7 +104,7 @@ def get_stock_chart_components(
             graph_props["id"] = graph_id
 
         chart_graph = dcc.Graph(**graph_props)
-        
+
         # Wrap in div with data-last-update attribute for JavaScript access
         # JavaScript will check both the graph element and its parent for this attribute
         if last_update_time is not None:
@@ -110,7 +116,7 @@ def get_stock_chart_components(
             else:
                 from datetime import datetime
                 last_update_str = datetime.fromtimestamp(last_update_time).isoformat() if isinstance(last_update_time, (int, float)) else str(last_update_time)
-            
+
             # Wrap graph in div with data attribute
             # The Graph component will still have its ID, and JavaScript can access the data attribute from parent
             chart_graph = html.Div(
@@ -156,7 +162,7 @@ def get_comparison_chart(symbols: list, timeframe: str = '3mo'):
     try:
         if not symbols or len(symbols) == 0:
             return dcc.Graph(figure=create_empty_chart("Enter symbols to compare"))
-        
+
         data_dict = {}
         for symbol in symbols:
             df = market_data.get_historical_data(symbol.strip().upper(), period=timeframe)
@@ -164,15 +170,15 @@ def get_comparison_chart(symbols: list, timeframe: str = '3mo'):
                 # Normalize to percentage change
                 df['Close'] = (df['Close'] / df['Close'].iloc[0] - 1) * 100
                 data_dict[symbol.strip().upper()] = df
-        
+
         if not data_dict:
             return dcc.Graph(figure=create_empty_chart("No data available for comparison"))
-        
+
         fig = create_multi_line_chart(data_dict, "Stock Performance Comparison (% Change)")
         fig.update_yaxes(title="% Change from Start")
-        
+
         return dcc.Graph(figure=fig)
-    
+
     except Exception as e:
         return html.Div(f"Error creating comparison: {str(e)}", className="text-danger")
 
@@ -181,11 +187,11 @@ def get_market_indices_cards():
     """Get market indices as Bootstrap cards"""
     try:
         indices = market_data.get_market_indices()
-        
+
         cards = []
         for symbol, data in indices.items():
             card_data = create_price_indicator_card(data)
-            
+
             card = dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
@@ -198,11 +204,11 @@ def get_market_indices_cards():
                     ], className="text-center")
                 ], className="h-100")
             ], md=3, sm=6, className="mb-2")
-            
+
             cards.append(card)
-        
+
         return dbc.Row(cards)
-    
+
     except Exception as e:
         return html.Div(f"Error loading market indices: {str(e)}", className="text-danger")
 
@@ -213,9 +219,9 @@ def get_price_indicator(symbol: str):
         quote = market_data.get_live_price(symbol)
         if not quote:
             return html.Div(f"Could not load data for {symbol}", className="text-warning")
-        
+
         card_data = create_price_indicator_card(quote)
-        
+
         return dbc.Card([
             dbc.CardBody([
                 dbc.Row([
@@ -249,7 +255,7 @@ def get_price_indicator(symbol: str):
                 ])
             ])
         ], className="mb-3")
-    
+
     except Exception as e:
         return html.Div(f"Error loading price data: {str(e)}", className="text-danger")
 
@@ -284,11 +290,11 @@ def create_overlay_list(panel_id: str, symbol: str, overlays_data: dict = None, 
                 'display': 'flex'  # Always visible
             }
         )
-    
+
     # Get overlays for this symbol/timeframe - overlays are stored by tab_id = "symbol_timeframe"
     if not overlays_data:
         overlays_data = {'tabs': {}}
-    
+
     # Construct tab_id from symbol and timeframe
     if timeframe:
         tab_id = f"{symbol}_{timeframe}"
@@ -299,16 +305,16 @@ def create_overlay_list(panel_id: str, symbol: str, overlays_data: dict = None, 
             if key.startswith(f"{symbol}_"):
                 tab_id = key
                 break
-    
+
     if not tab_id:
         # No overlays found for this symbol/timeframe
         panel_overlays = {'brackets': [], 'breaks': []}
     else:
         panel_overlays = overlays_data.get('tabs', {}).get(tab_id, {})
-    
+
     brackets = panel_overlays.get('brackets', []) or []
     breaks = panel_overlays.get('breaks', []) or []
-    
+
     # Combine and sort by price
     all_items = []
     for item in brackets:
@@ -329,16 +335,16 @@ def create_overlay_list(panel_id: str, symbol: str, overlays_data: dict = None, 
                 'color': item.get('color', '#ff4444'),
                 'id': item.get('id', '')
             })
-    
+
     # Sort by price (descending)
     all_items.sort(key=lambda x: float(x['price']) if x['price'] is not None else 0, reverse=True)
-    
+
     # Create list items (max 4 visible, scrollable if more)
     list_items = []
     for item in all_items:
         price_str = f"${float(item['price']):.2f}" if item['price'] is not None else "N/A"
         name_str = item['name'] if item['name'] else item['type']
-        
+
         list_items.append(
             html.Button(
                 [
@@ -368,7 +374,7 @@ def create_overlay_list(panel_id: str, symbol: str, overlays_data: dict = None, 
                 title=f"Click to center line at {price_str}"
             )
         )
-    
+
     if not list_items:
         list_items.append(
             html.Div(
@@ -381,7 +387,7 @@ def create_overlay_list(panel_id: str, symbol: str, overlays_data: dict = None, 
                 }
             )
         )
-    
+
     return html.Div(
         list_items,
         id={"type": "overlay-list", "index": panel_id},
@@ -462,7 +468,7 @@ def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, pan
             'marginBottom': '6px'
         }
     ))
-    
+
     # Button and list row
     manage_button = None
     overlay_list = None
@@ -481,14 +487,14 @@ def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, pan
                 'padding': '1px 2px'  # Even tighter padding
             }
         )
-        
+
         # Always create overlay list when panel_id exists (create_overlay_list handles None overlays_data)
         if symbol:
             overlay_list = create_overlay_list(panel_id, symbol, overlays_data, timeframe)
         else:
             # Create empty list container if no symbol yet
             overlay_list = create_overlay_list(panel_id, '', overlays_data, timeframe)
-    
+
     overlay_children.extend([
         html.Div(
             [
@@ -528,12 +534,12 @@ def create_trading_overlay(stats_data: dict = None, show_stats: bool = True, pan
     })
 
 
-def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, overlays: dict = None, view_state: dict = None, loaded_data: Optional[pd.DataFrame] = None, overlays_data: dict = None):
+def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, overlays: dict = None, view_state: dict = None, loaded_data: pd.DataFrame | None = None, overlays_data: dict = None):
     """Create a single chart panel with controls and a trading action overlay."""
     # Handle None config
     if not config:
         config = {}
-    
+
     # Extract configuration with sensible defaults
     symbol = config.get('symbol', 'AAPL')
     timeframe = config.get('timeframe', '1mo')
@@ -568,12 +574,12 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, 
 
     # Get chart content and stats for overlay
     overlay_payload = overlays if show_stats else {}
-    
+
     # Get interaction mode for this panel (default: zoom)
     # This will be set by callbacks in app.py
     interaction_mode = config.get('dragmode', 'zoom')
     auto_scroll_enabled = config.get('auto_scroll', False)
-    
+
     chart_component, stats_data = get_stock_chart_components(
         symbol,
         timeframe,
@@ -623,47 +629,47 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, 
 
 def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool = False, overlays_data: dict = None, view_state_data: dict = None, loaded_data_store: dict = None):
     """Render the multi-panel layout based on selected mode"""
-    
+
     def get_panel_overlays(panel_id: str):
         """Get overlays for a panel by looking up symbol_timeframe from panels_config."""
         if not overlays_data or not panels_config:
             return {}
-        
+
         panel_config = panels_config.get('panels', {}).get(panel_id, {})
         symbol = panel_config.get('symbol')
         timeframe = panel_config.get('timeframe')
-        
+
         if symbol and timeframe:
             tab_id = f"{symbol}_{timeframe}"
             return (overlays_data or {}).get('tabs', {}).get(tab_id, {})
         return {}
-    
+
     def get_panel_view_state(panel_id: str):
         return (view_state_data or {}).get('tabs', {}).get(panel_id) if view_state_data else None
-    
+
     def get_panel_loaded_data(panel_id: str):
         """Get loaded data for a panel from cache."""
         if not loaded_data_store or not loaded_data_store.get('tabs'):
             return None
-        
+
         tab_loaded = loaded_data_store.get('tabs', {}).get(panel_id)
         if not tab_loaded:
             return None
-        
+
         # Get cached data from ChartDataManager
         data_manager = get_chart_data_manager()
         symbol = tab_loaded.get('symbol')
         timeframe = tab_loaded.get('timeframe')
-        
+
         if symbol and timeframe:
             return data_manager.get_cached_data(symbol, timeframe)
-        
+
         return None
-    
+
     # Handle empty panels_config
     if not panels_config:
         panels_config = {}
-    
+
     # Determine panel height based on fullscreen and layout
     if fullscreen:
         if layout == 'quad':
@@ -682,14 +688,14 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
             panel_height = '500px'
         else:
             panel_height = '600px'
-    
+
     panel_style = {
-        'height': panel_height, 
+        'height': panel_height,
         'minHeight': '200px',
         'maxHeight': panel_height,
         'overflow': 'hidden'
     }
-    
+
     # Fullscreen control bar (only shown in fullscreen mode)
     fullscreen_controls = None
     if fullscreen:
@@ -713,7 +719,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
                 ])
             ], className="py-1 px-2", style={'padding': '3px 8px'})
         ], className="mb-1", style={'marginBottom': '5px'})
-    
+
     # Build layout content
     layout_content = None
     if layout == 'single':
@@ -730,7 +736,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
                     )
                 ], width=12)
             ])
-    
+
     elif layout == 'split-horizontal':
         # Two panels side by side
         margin_class = "mb-1" if fullscreen else "mb-3"
@@ -749,7 +755,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
                 )
             ], md=6, className=margin_class)
         ], className=gutter_class)
-    
+
     elif layout == 'split-vertical':
         # Two panels stacked vertically
         margin_class = "mb-1" if fullscreen else "mb-3"
@@ -771,7 +777,7 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
                 ], width=12)
             ], className="gx-1" if fullscreen else "gx-3")
         ])
-    
+
     elif layout == 'quad':
         # Four panels in a 2x2 grid
         margin_class = "mb-1" if fullscreen else "mb-3"
@@ -806,10 +812,10 @@ def render_multi_panel_layout(layout: str, panels_config: dict, fullscreen: bool
                 ], md=6)
             ], className=gutter_class)
         ])
-    
+
     else:
         layout_content = html.Div("Invalid layout mode", className="text-danger")
-    
+
     # Return with or without fullscreen controls
     if fullscreen:
         return html.Div([

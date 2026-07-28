@@ -1,8 +1,9 @@
 """API endpoints for entities."""
 from typing import List
-from fastapi import APIRouter, Depends, Query, HTTPException
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
 
 from src.models.database import get_db
 from src.models.entities import Entity, NewsEntityMapping
@@ -17,12 +18,10 @@ class EntityResponse(BaseModel):
     entity_name: str
     metadata: dict | None = None
 
-    class Config:
-        from_attributes = True
-        populate_by_name = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
-@router.get("/", response_model=List[EntityResponse])
+@router.get("/", response_model=list[EntityResponse])
 def list_entities(
     entity_type: str = Query(None, description="Filter by type (company, sector, etc.)"),
     limit: int = Query(100, le=500, description="Maximum results"),

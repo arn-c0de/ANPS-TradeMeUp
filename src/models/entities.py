@@ -1,9 +1,10 @@
 """Database models for entities and their relationships."""
+import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Float, Integer, Index
+
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
-import uuid
 
 from src.models.database import Base, utc_now
 from src.models.types import GUID

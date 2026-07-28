@@ -18,21 +18,22 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models.database import SessionLocal
-from src.agents.ingestion_agent import IngestionAgent
-from src.agents.data_quality_agent import DataQualityAgent
-from src.agents.content_understanding_agent import ContentUnderstandingAgent
-from src.agents.entity_mapping_agent import EntityMappingAgent
-from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
-from src.agents.regime_detection_agent import RegimeDetectionAgent
-from src.agents.impact_scoring_agent import ImpactScoringAgent
-from src.agents.prediction_agent import PredictionAgent
-from src.agents.trading_simulation_agent import TradingSimulationAgent
-from src.config.settings import settings
-from src.utils.redact import redact_url
-from src.utils.activity_logger import activity_logger
 import logging
 from datetime import datetime
+
+from src.agents.content_understanding_agent import ContentUnderstandingAgent
+from src.agents.data_quality_agent import DataQualityAgent
+from src.agents.entity_mapping_agent import EntityMappingAgent
+from src.agents.impact_scoring_agent import ImpactScoringAgent
+from src.agents.ingestion_agent import IngestionAgent
+from src.agents.prediction_agent import PredictionAgent
+from src.agents.regime_detection_agent import RegimeDetectionAgent
+from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
+from src.agents.trading_simulation_agent import TradingSimulationAgent
+from src.config.settings import settings
+from src.models.database import SessionLocal
+from src.utils.activity_logger import activity_logger
+from src.utils.redact import redact_url
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,7 +54,7 @@ def main():
     start_time = datetime.now()
 
     activity_logger.log_pipeline_start("TradeMeUp MVP Pipeline")
-    
+
     print_section("TradeMeUp MVP Pipeline - Complete Run")
     logger.info(f"Start Time: {start_time}")
     logger.info(f"LLM Provider: {settings.llm_provider}")
@@ -187,10 +188,10 @@ def main():
         # ===== AUTO-PROCESS NEW PREDICTIONS =====
         print_section("AUTO-PROCESSING: Calculate Performance & Simulations")
         logger.info("🔄 Auto-processing new predictions (last 60 minutes)...")
-        
+
         from src.services.auto_prediction_processor import auto_processor
         auto_stats = auto_processor.process_new_predictions(db, lookback_minutes=60)
-        
+
         logger.info(f"✅ Auto-processed {auto_stats['total_found']} predictions:")
         logger.info(f"   - Outcomes created: {auto_stats['outcomes_created']}")
         logger.info(f"   - Simulations created: {auto_stats['simulations_created']}")
@@ -245,7 +246,7 @@ def main():
         logger.info("=" * 70)
         logger.info("\n✅ MVP PIPELINE COMPLETED SUCCESSFULLY!")
         logger.info(f"End Time: {end_time}")
-        
+
         activity_logger.log_pipeline_complete("TradeMeUp MVP Pipeline", duration)
 
     except Exception as e:

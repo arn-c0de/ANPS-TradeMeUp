@@ -209,22 +209,6 @@ This document contains the licenses of all third-party dependencies used in the 
 
 ---
 
-## Security
-
-### Python-Jose
-- **Version:** 3.4.0
-- **License:** MIT License
-- **Homepage:** https://github.com/mpdavis/python-jose
-- **Copyright:** Copyright (c) 2016-2024 Michael Davis and contributors
-
-### Passlib
-- **Version:** 1.7.4
-- **License:** BSD License
-- **Homepage:** https://github.com/passlib/passlib
-- **Copyright:** Copyright (c) 2008-2024 Assurance Technologies LLC
-
----
-
 ## Testing
 
 ### Pytest

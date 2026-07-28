@@ -1,9 +1,9 @@
 """Database connection and session management."""
-from datetime import datetime, timezone
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from datetime import UTC, datetime, timezone
 from typing import Generator
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from src.config.settings import settings
 
@@ -15,7 +15,7 @@ def utc_now():
     Use this instead of datetime.utcnow() which returns naive datetime.
     PostgreSQL DateTime(timezone=True) columns require timezone-aware datetimes.
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def normalize_database_url(database_url: str) -> str:

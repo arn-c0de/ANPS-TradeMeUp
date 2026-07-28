@@ -4,37 +4,37 @@ Backfill Script - Process all existing articles through all agents
 Completes missing analyses for articles already in the database
 Uses the same LLM settings (Ollama/OpenAI) as configured in environment
 """
-import sys
-from pathlib import Path
-from datetime import datetime
 import argparse
+import sys
+from datetime import datetime
+from pathlib import Path
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models.database import SessionLocal
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
-from src.models.entities import NewsEntityMapping
-from src.models.analysis import SurpriseScore, ImpactScore, FactVerification
-from src.models.data_quality import DataQualityScore
+import logging
 
-# Import settings to use environment configuration
-from src.config.settings import settings
-from src.utils.redact import redact_url, set_status
+from src.agents.content_understanding_agent import ContentUnderstandingAgent
 
 # Import all agents
 from src.agents.data_quality_agent import DataQualityAgent
-from src.agents.content_understanding_agent import ContentUnderstandingAgent
 from src.agents.entity_mapping_agent import EntityMappingAgent
-from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
+from src.agents.fact_verification_agent import FactVerificationAgent
 from src.agents.impact_scoring_agent import ImpactScoringAgent
 from src.agents.prediction_agent import PredictionAgent
-from src.agents.fact_verification_agent import FactVerificationAgent
 from src.agents.regime_detection_agent import RegimeDetectionAgent
+from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
 
-import logging
+# Import settings to use environment configuration
+from src.config.settings import settings
+from src.models.analysis import FactVerification, ImpactScore, SurpriseScore
+from src.models.data_quality import DataQualityScore
+from src.models.database import SessionLocal
+from src.models.entities import NewsEntityMapping
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
+from src.utils.redact import redact_url, set_status
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,7 +54,7 @@ def print_llm_config():
     """Print current LLM configuration"""
     print_section("LLM Configuration")
     print(f"Provider: {settings.llm_provider}")
-    
+
     if settings.llm_provider == "ollama":
         print(f"Ollama URL: {redact_url(settings.ollama_base_url)}")
         print(f"Ollama Model: {settings.ollama_model}")
@@ -64,7 +64,7 @@ def print_llm_config():
     elif settings.llm_provider == "anthropic":
         print(f"Anthropic API Key: {set_status(settings.anthropic_api_key)}")
         print(f"Anthropic Model: {settings.anthropic_model}")
-    
+
     print(f"Database: {redact_url(settings.database_url)}")
     print()
 
@@ -76,8 +76,8 @@ def backfill_quality_assessment(db, batch_size=100):
     # Count articles needing processing
     unassessed = db.query(RawNews).outerjoin(
         DataQualityScore, RawNews.news_id == DataQualityScore.news_id
-    ).filter(DataQualityScore.news_id == None).count()
-    
+    ).filter(DataQualityScore.news_id.is_(None)).count()
+
     logger.info(f"Articles needing quality assessment: {unassessed}")
 
     if unassessed == 0:
@@ -99,7 +99,7 @@ def backfill_quality_assessment(db, batch_size=100):
 
         processed += batch_processed
         logger.info(f"Progress: {processed}/{unassessed} articles assessed")
-        
+
         # Commit periodically to prevent data loss
         if processed % (batch_size * 5) == 0:
             db.commit()
@@ -121,7 +121,7 @@ def backfill_content_understanding(db, batch_size=50):
         DataQualityScore.quality_score >= 0.6
     ).outerjoin(
         ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-    ).filter(ProcessedNews.news_id == None).count()
+    ).filter(ProcessedNews.news_id.is_(None)).count()
 
     logger.info(f"Articles needing NLP processing: {unprocessed}")
 
@@ -146,7 +146,7 @@ def backfill_content_understanding(db, batch_size=50):
 
         processed += batch_processed
         logger.info(f"Progress: {processed}/{unprocessed} articles analyzed (errors: {errors})")
-        
+
         if processed % (batch_size * 5) == 0:
             db.commit()
             logger.info("Database checkpoint committed")
@@ -163,7 +163,7 @@ def backfill_entity_mapping(db, batch_size=30):
     # Count articles needing processing
     unmapped = db.query(ProcessedNews).outerjoin(
         NewsEntityMapping, ProcessedNews.news_id == NewsEntityMapping.news_id
-    ).filter(NewsEntityMapping.news_id == None).count()
+    ).filter(NewsEntityMapping.news_id.is_(None)).count()
 
     logger.info(f"Articles needing entity mapping: {unmapped}")
 
@@ -196,7 +196,7 @@ def backfill_fact_verification(db, batch_size=50):
     # Count articles needing processing
     unverified = db.query(ProcessedNews).outerjoin(
         FactVerification, ProcessedNews.news_id == FactVerification.news_id
-    ).filter(FactVerification.news_id == None).count()
+    ).filter(FactVerification.news_id.is_(None)).count()
 
     logger.info(f"Articles needing fact verification: {unverified}")
 
@@ -219,7 +219,7 @@ def backfill_fact_verification(db, batch_size=50):
 
         processed += batch_processed
         logger.info(f"Progress: {processed}/{unverified} articles verified")
-        
+
         if processed % (batch_size * 5) == 0:
             db.commit()
             logger.info("Database checkpoint committed")
@@ -236,7 +236,7 @@ def backfill_surprise_scoring(db, batch_size=50):
     # Count articles needing processing
     unsurprised = db.query(ProcessedNews).outerjoin(
         SurpriseScore, ProcessedNews.news_id == SurpriseScore.news_id
-    ).filter(SurpriseScore.news_id == None).count()
+    ).filter(SurpriseScore.news_id.is_(None)).count()
 
     logger.info(f"Articles needing surprise scoring: {unsurprised}")
 
@@ -262,7 +262,7 @@ def backfill_surprise_scoring(db, batch_size=50):
         processed += batch_processed
         total_surprises += result.get('surprises_found', 0)
         logger.info(f"Progress: {processed}/{unsurprised} articles scored ({total_surprises} surprises found)")
-        
+
         if processed % (batch_size * 5) == 0:
             db.commit()
             logger.info("Database checkpoint committed")
@@ -279,7 +279,7 @@ def backfill_impact_scoring(db, batch_size=50):
     # Count articles needing processing
     unscored = db.query(ProcessedNews).outerjoin(
         ImpactScore, ProcessedNews.news_id == ImpactScore.news_id
-    ).filter(ImpactScore.news_id == None).count()
+    ).filter(ImpactScore.news_id.is_(None)).count()
 
     logger.info(f"Articles needing impact scoring: {unscored}")
 
@@ -305,7 +305,7 @@ def backfill_impact_scoring(db, batch_size=50):
         processed += batch_processed
         total_scores += result.get('impact_scores', 0)
         logger.info(f"Progress: {processed}/{unscored} articles scored ({total_scores} impact scores created)")
-        
+
         if processed % (batch_size * 5) == 0:
             db.commit()
             logger.info("Database checkpoint committed")
@@ -322,18 +322,18 @@ def backfill_predictions(db, batch_size=50):
     # Count impact scores needing predictions
     from src.models.analysis import ImpactScore
     from src.models.predictions import Prediction
-    
+
     # Get all high-impact scores
     high_impact = db.query(ImpactScore).filter(
         ImpactScore.impact_score >= 0.4
     ).count()
-    
+
     logger.info(f"High-impact scores in database: {high_impact}")
-    
+
     # Estimate how many need predictions (rough estimate)
     existing_predictions = db.query(Prediction).count()
     logger.info(f"Existing predictions: {existing_predictions}")
-    
+
     if high_impact == 0:
         logger.info("✓ No high-impact scores to predict")
         return 0
@@ -358,7 +358,7 @@ def backfill_predictions(db, batch_size=50):
         total_processed += batch_processed
         total_predictions += batch_predictions
         logger.info(f"Progress: {total_processed} scores processed, {total_predictions} predictions generated")
-        
+
         # Commit periodically to prevent data loss
         if total_processed % (batch_size * 5) == 0:
             db.commit()
@@ -392,9 +392,9 @@ def main():
     parser.add_argument('--skip-impact', action='store_true', help='Skip impact scoring')
     parser.add_argument('--skip-predictions', action='store_true', help='Skip predictions')
     parser.add_argument('--batch-size', type=int, default=50, help='Batch size for processing')
-    
+
     args = parser.parse_args()
-    
+
     start_time = datetime.now()
 
     print("=" * 80)
@@ -402,7 +402,7 @@ def main():
     print("  Processing all existing articles through all agents")
     print("=" * 80)
     print(f"Start time: {start_time}")
-    
+
     # Print LLM configuration
     print_llm_config()
 

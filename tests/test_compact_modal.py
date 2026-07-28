@@ -19,7 +19,7 @@ def test_compact_modal():
 
     try:
         from src.gui.tabs.predictions import get_prediction_details
-        from src.models.database import get_scoped_session, engine
+        from src.models.database import engine, get_scoped_session
         from src.models.predictions import Prediction
         from src.models.trading_simulation import TradingSimulation
 
@@ -43,12 +43,12 @@ def test_compact_modal():
             # Test loading details without performance (fast)
             title, body, _ = get_prediction_details(engine, prediction.prediction_id, load_performance=False)
 
-            logger.info(f"✓ Modal loaded successfully")
+            logger.info("✓ Modal loaded successfully")
 
             # Check that the body is a Container
             from dash_bootstrap_components._components.Container import Container
             if isinstance(body, Container):
-                logger.info(f"✓ Body is a Container (correct type)")
+                logger.info("✓ Body is a Container (correct type)")
             else:
                 logger.warning(f"⚠ Body type: {type(body)} (expected Container)")
 
@@ -60,7 +60,7 @@ def test_compact_modal():
             has_compact_padding = "py-1" in body_str or "py-2" in body_str
             has_small_margins = "mb-2" in body_str
 
-            logger.info(f"✓ Compact features:")
+            logger.info("✓ Compact features:")
             logger.info(f"  - Small fonts (0.75em, 0.7em, 0.85em): {has_small_fonts}")
             logger.info(f"  - Compact padding (py-1, py-2): {has_compact_padding}")
             logger.info(f"  - Small margins (mb-2): {has_small_margins}")

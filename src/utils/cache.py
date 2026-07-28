@@ -2,11 +2,12 @@
 Database Query Caching Utilities
 Redis-based caching layer for expensive database queries
 """
-import redis
 import json
-from typing import Optional, Any, Callable
-from functools import wraps
 import logging
+from functools import wraps
+from typing import Any, Callable, Optional
+
+import redis
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class DatabaseCache:
             self.enabled = False
             self.redis = None
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """
         Get value from cache
 

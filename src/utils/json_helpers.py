@@ -5,11 +5,12 @@ Utilities for handling JSON data, particularly when migrating from SQLite to Pos
 SQLite stores JSON as TEXT, while PostgreSQL has native JSONB support.
 """
 import json
-from typing import Any, Dict, List, Union, Optional
+from typing import Any, Dict, List, Optional, Union
+
 import numpy as np
 
 
-def ensure_dict(value: Any, default: Optional[Dict] = None) -> Dict:
+def ensure_dict(value: Any, default: dict | None = None) -> dict:
     """
     Ensure a JSONB value is deserialized to a dictionary.
     
@@ -35,13 +36,13 @@ def ensure_dict(value: Any, default: Optional[Dict] = None) -> Dict:
     """
     if default is None:
         default = {}
-    
+
     if value is None:
         return default
-    
+
     if isinstance(value, dict):
         return value
-    
+
     if isinstance(value, str):
         try:
             parsed = json.loads(value)
@@ -50,11 +51,11 @@ def ensure_dict(value: Any, default: Optional[Dict] = None) -> Dict:
             return default
         except (json.JSONDecodeError, ValueError, TypeError):
             return default
-    
+
     return default
 
 
-def ensure_list(value: Any, default: Optional[List] = None) -> List:
+def ensure_list(value: Any, default: list | None = None) -> list:
     """
     Ensure a JSONB value is deserialized to a list.
     
@@ -80,13 +81,13 @@ def ensure_list(value: Any, default: Optional[List] = None) -> List:
     """
     if default is None:
         default = []
-    
+
     if value is None:
         return default
-    
+
     if isinstance(value, list):
         return value
-    
+
     if isinstance(value, str):
         try:
             parsed = json.loads(value)
@@ -95,11 +96,11 @@ def ensure_list(value: Any, default: Optional[List] = None) -> List:
             return default
         except (json.JSONDecodeError, ValueError, TypeError):
             return default
-    
+
     return default
 
 
-def ensure_json(value: Any, default: Any = None) -> Union[Dict, List, Any]:
+def ensure_json(value: Any, default: Any = None) -> dict | list | Any:
     """
     Ensure a JSONB value is deserialized (dict, list, or other JSON type).
     
@@ -122,10 +123,10 @@ def ensure_json(value: Any, default: Any = None) -> Union[Dict, List, Any]:
     """
     if value is None:
         return default
-    
+
     if not isinstance(value, str):
         return value
-    
+
     try:
         return json.loads(value)
     except (json.JSONDecodeError, ValueError, TypeError):
@@ -157,24 +158,24 @@ def to_python_type(value: Any) -> Any:
     """
     if value is None:
         return None
-    
+
     # Handle numpy types
     if hasattr(value, 'item'):  # numpy scalars have .item() method
         return value.item()
-    
+
     # Handle numpy bool specifically (doesn't always have .item())
     # Note: np.bool8 was removed in newer numpy versions, only use np.bool_
     if isinstance(value, np.bool_):
         return bool(value)
-    
+
     # Handle numpy integers
     if isinstance(value, (np.integer, np.signedinteger, np.unsignedinteger)):
         return int(value)
-    
+
     # Handle numpy floats
     if isinstance(value, (np.floating, np.float16, np.float32, np.float64)):
         return float(value)
-    
+
     # Already a native Python type
     return value
 
@@ -199,15 +200,15 @@ def clean_numpy_types(obj: Any) -> Any:
     """
     if obj is None:
         return None
-    
+
     if isinstance(obj, dict):
         return {key: clean_numpy_types(value) for key, value in obj.items()}
-    
+
     if isinstance(obj, list):
         return [clean_numpy_types(item) for item in obj]
-    
+
     if isinstance(obj, tuple):
         return tuple(clean_numpy_types(item) for item in obj)
-    
+
     # Convert numpy types
     return to_python_type(obj)

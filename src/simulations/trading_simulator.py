@@ -1,22 +1,22 @@
 """Trading simulation engine that converts predictions into trade decisions."""
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
-import logging
 import json
+import logging
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from src.models.database import get_scoped_session
-from src.models.predictions import Prediction
-from src.models.entities import Entity
 from src.models.analysis import MarketRegime
+from src.models.database import get_scoped_session
+from src.models.entities import Entity
+from src.models.predictions import Prediction
 from src.models.trading_simulation import TradingSimulation
-from src.services.prediction_performance_service import PredictionPerformanceService
 from src.services.market_data import MarketDataProvider
-from src.simulations.risk_calculations import RiskCalculator, RiskInputs
+from src.services.prediction_performance_service import PredictionPerformanceService
 from src.simulations.exit_strategy import ExitStrategyCalculator
-from src.utils.json_helpers import ensure_dict, to_python_type, clean_numpy_types
+from src.simulations.risk_calculations import RiskCalculator, RiskInputs
+from src.utils.json_helpers import clean_numpy_types, ensure_dict, to_python_type
 
 logger = logging.getLogger(__name__)
 
@@ -32,27 +32,27 @@ class TradingSimulationEngine:
 
     def __init__(
         self,
-        market_data_provider: Optional[MarketDataProvider] = None,
-        performance_service: Optional[PredictionPerformanceService] = None,
-        risk_calculator: Optional[RiskCalculator] = None,
-        config_path: Optional[str] = None,
+        market_data_provider: MarketDataProvider | None = None,
+        performance_service: PredictionPerformanceService | None = None,
+        risk_calculator: RiskCalculator | None = None,
+        config_path: str | None = None,
     ):
         # Use shared market_data instance by default to centralize rate limiting
         from src.services.market_data import market_data as _global_market_data
         self.market_data_provider = market_data_provider or _global_market_data
         self.performance_service = performance_service or PredictionPerformanceService()
         self.risk_calculator = risk_calculator or RiskCalculator()
-        self._market_cache: Dict[str, Dict] = {}
+        self._market_cache: dict[str, dict] = {}
         self._market_cache_ttl = timedelta(minutes=10)
 
         # Load simulation parameters from config
         self.config = self._load_config(config_path)
         self._update_thresholds_from_config()
-        
+
         # Initialize exit strategy calculator
         self.exit_calculator = ExitStrategyCalculator(config=self.config)
 
-    def _load_config(self, config_path: Optional[str] = None) -> Dict:
+    def _load_config(self, config_path: str | None = None) -> dict:
         """Load simulation parameters from JSON config file."""
         if config_path is None:
             # Default path relative to project root
@@ -61,7 +61,7 @@ class TradingSimulationEngine:
             config_path = Path(config_path)
 
         try:
-            with open(config_path, 'r') as f:
+            with open(config_path) as f:
                 config = json.load(f)
                 logger.info(f"Loaded simulation config from {config_path}")
                 return config
@@ -72,7 +72,7 @@ class TradingSimulationEngine:
             logger.error(f"Invalid JSON in config file: {e}, using defaults")
             return self._get_default_config()
 
-    def _get_default_config(self) -> Dict:
+    def _get_default_config(self) -> dict:
         """Fallback default configuration if file not found."""
         return {
             "cost_parameters": {
@@ -164,16 +164,16 @@ class TradingSimulationEngine:
     def _get_predicted_direction(self, prediction: Prediction) -> str:
         # Handle case where probabilities might be a JSON string (from SQLite migration)
         probabilities = ensure_dict(prediction.direction_probabilities, {})
-        
+
         if not probabilities:
             return "flat"
-        
+
         return max(probabilities, key=probabilities.get)
 
-    def _get_latest_regime(self, db: Session) -> Optional[MarketRegime]:
+    def _get_latest_regime(self, db: Session) -> MarketRegime | None:
         return db.query(MarketRegime).order_by(MarketRegime.created_at.desc()).first()
 
-    def _regime_liquidity_stress(self, regime: Optional[MarketRegime]) -> float:
+    def _regime_liquidity_stress(self, regime: MarketRegime | None) -> float:
         if not regime or not isinstance(regime.regime, dict):
             return 0.5
         liquidity = (regime.regime.get("liquidity") or "normal").lower()
@@ -257,7 +257,7 @@ class TradingSimulationEngine:
         cost_method: str,
         predicted_direction: str,
         horizon: str,
-    ) -> Tuple[float, Dict]:
+    ) -> tuple[float, dict]:
         """
         Estimate costs for penny stocks using alternative methods.
 
@@ -383,8 +383,8 @@ class TradingSimulationEngine:
         predicted_direction: str,
         horizon: str,
         shares: int = DEFAULT_SHARES,
-        daily_volume: Optional[float] = None,
-    ) -> Tuple[float, Dict]:
+        daily_volume: float | None = None,
+    ) -> tuple[float, dict]:
         """
         Estimate comprehensive transaction costs in basis points.
 
@@ -479,7 +479,7 @@ class TradingSimulationEngine:
         self,
         price: float,
         shares: int,
-        daily_volume: Optional[float],
+        daily_volume: float | None,
         vol_regime: str
     ) -> float:
         """Calculate dynamic market impact based on order size vs daily volume."""
@@ -539,8 +539,8 @@ class TradingSimulationEngine:
 
         return borrow_bps
 
-    def _get_market_snapshot(self, ticker: str) -> Optional[Dict]:
-        now = datetime.utcnow()
+    def _get_market_snapshot(self, ticker: str) -> dict | None:
+        now = datetime.now(UTC)
         cached = self._market_cache.get(ticker)
         if cached and now - cached["timestamp"] <= self._market_cache_ttl:
             return cached["data"]
@@ -559,8 +559,8 @@ class TradingSimulationEngine:
         confidence: float,
         risk_score: float,
         cost_ratio: float,
-        position_constraints: Optional[Dict] = None,
-    ) -> Tuple[str, Dict]:
+        position_constraints: dict | None = None,
+    ) -> tuple[str, dict]:
         """
         Calculate trading decision with position sizing constraints.
 
@@ -629,7 +629,7 @@ class TradingSimulationEngine:
         db: Session,
         prediction: Prediction,
         entity: Entity,
-    ) -> Tuple[Optional[Dict], Optional[float]]:
+    ) -> tuple[dict | None, float | None]:
         """
         Resolve the actual return for a prediction.
 
@@ -680,7 +680,7 @@ class TradingSimulationEngine:
         existing.cost_breakdown = {}
         existing.risk_breakdown = {}
         existing.simulation_metadata = {"note": "skipped - invalid/too-small market price", "market_price": price}
-        existing.created_at = datetime.now(timezone.utc)
+        existing.created_at = datetime.now(UTC)
         return existing
 
     def simulate_prediction(
@@ -688,7 +688,7 @@ class TradingSimulationEngine:
         db: Session,
         prediction: Prediction,
         entity: Entity,
-    ) -> Optional[TradingSimulation]:
+    ) -> TradingSimulation | None:
         if not prediction or not entity:
             return None
 
@@ -753,7 +753,7 @@ class TradingSimulationEngine:
         assumed_portfolio_value = 5000  # $5k default portfolio
         baseline_dollar_position = 250  # $250 baseline position (5% of portfolio)
         baseline_position_size_pct = (baseline_dollar_position / assumed_portfolio_value) * 100
-        
+
         # Calculate daily volume and initial metrics for risk calculation
         daily_volume_usd = (daily_volume * price) if daily_volume and price > 0 else 0
 
@@ -771,24 +771,24 @@ class TradingSimulationEngine:
             daily_volume_usd=daily_volume_usd,
         )
         risk_result = self.risk_calculator.calculate(risk_inputs)
-        
+
         # Now adjust position size based on risk score (INVERSE relationship)
         # Higher risk = smaller position
         # risk_result is a Dict with keys: risk_score, components, weights
         risk_score = risk_result["risk_score"]
         max_position_pct = self.config.get("position_constraints", {}).get("max_position_size_pct", 10.0)
-        
+
         # Risk-adjusted position sizing: reduce position as risk increases
         # Formula: baseline * (1 - risk_score) with floor at 20% of baseline
         risk_adjustment_factor = max(0.2, 1.0 - risk_score)
         position_size_pct = baseline_position_size_pct * risk_adjustment_factor
-        
+
         # Cap at max_position_pct
         position_size_pct = min(position_size_pct, max_position_pct)
-        
+
         # Calculate actual position value based on adjusted size
         position_value = (assumed_portfolio_value * position_size_pct) / 100
-        
+
         # Convert numeric values to Python native types for PostgreSQL
         risk_score = to_python_type(risk_result["risk_score"])
         position_size_pct = to_python_type(position_size_pct)
@@ -881,7 +881,7 @@ class TradingSimulationEngine:
             existing.risk_reward_ratio = to_python_type(exit_strategy.get("risk_reward_ratio"))
             existing.exit_strategy = clean_numpy_types(exit_strategy)
             existing.simulation_metadata = clean_numpy_types(simulation_payload)
-            existing.created_at = datetime.now(timezone.utc)
+            existing.created_at = datetime.now(UTC)
             return existing
 
         simulation = TradingSimulation(
@@ -912,14 +912,14 @@ class TradingSimulationEngine:
             risk_reward_ratio=to_python_type(exit_strategy.get("risk_reward_ratio")),
             exit_strategy=clean_numpy_types(exit_strategy),
             simulation_metadata=clean_numpy_types(simulation_payload),
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(simulation)
         return simulation
 
-    def process_batch(self, limit: int = 50, lookback_days: int = 7) -> Dict:
+    def process_batch(self, limit: int = 50, lookback_days: int = 7) -> dict:
         """Simulate trades for recent predictions."""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
         stats = {
             "processed": 0,
             "created": 0,
@@ -965,7 +965,7 @@ class TradingSimulationEngine:
 
         return stats
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get simulation statistics."""
         with get_scoped_session() as db:
             total = db.query(TradingSimulation).count()
@@ -1034,12 +1034,12 @@ class TradingSimulationEngine:
 
     def create_simulations_from_predictions(
         self,
-        prediction_ids: Optional[List[str]] = None,
-        entity_filter: Optional[List[str]] = None,
-        horizon_filter: Optional[str] = None,
-        date_range: Optional[Tuple[datetime, datetime]] = None,
+        prediction_ids: list[str] | None = None,
+        entity_filter: list[str] | None = None,
+        horizon_filter: str | None = None,
+        date_range: tuple[datetime, datetime] | None = None,
         limit: int = 100,
-    ) -> Dict:
+    ) -> dict:
         """Create simulations from specific predictions or filters."""
         stats = {
             "processed": 0,
@@ -1070,7 +1070,7 @@ class TradingSimulationEngine:
                     logger.info(f"Filtering by date range: {start} to {end}")
 
             predictions = query.order_by(Prediction.created_at.desc()).limit(limit).all()
-            
+
             logger.info(f"Found {len(predictions)} predictions matching filters (limit: {limit})")
 
             if not predictions:

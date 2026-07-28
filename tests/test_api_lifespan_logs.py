@@ -1,8 +1,10 @@
-import logging
 import asyncio
+import logging
+
 from fastapi import FastAPI
-from src.config.settings import settings
+
 from src.api.main import lifespan
+from src.config.settings import settings
 
 
 def test_lifespan_logs_do_not_contain_db_url(monkeypatch, caplog):

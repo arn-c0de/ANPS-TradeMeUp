@@ -10,43 +10,45 @@ Performance & Hardening Features:
 - Connection pooling
 - Performance metrics
 """
+import logging
+import signal
 import sys
 import time
-import signal
-import logging
-import psutil
-from pathlib import Path
-from datetime import datetime, timezone
-from typing import Optional
 from collections import deque
+from datetime import UTC, datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+import psutil
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models.database import SessionLocal
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
-from src.models.system_logs import SystemLog
-from src.agents.ingestion_agent import IngestionAgent
-from src.agents.data_quality_agent import DataQualityAgent
+from src.agents.ab_testing_agent import ABTestingAgent
+from src.agents.confidence_calibration_agent import ConfidenceCalibrationAgent
 from src.agents.content_understanding_agent import ContentUnderstandingAgent
+from src.agents.correlation_analysis_agent import CorrelationAnalysisAgent
+from src.agents.data_quality_agent import DataQualityAgent
 from src.agents.entity_mapping_agent import EntityMappingAgent
-from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
-from src.agents.regime_detection_agent import RegimeDetectionAgent
-from src.agents.impact_scoring_agent import ImpactScoringAgent
-from src.agents.prediction_agent import PredictionAgent
-from src.agents.trading_simulation_agent import TradingSimulationAgent
+
 # NEW AGENTS from Phase 2
 from src.agents.fact_verification_agent import FactVerificationAgent
-from src.agents.signal_decay_agent import SignalDecayAgent
-from src.agents.correlation_analysis_agent import CorrelationAnalysisAgent
-from src.agents.confidence_calibration_agent import ConfidenceCalibrationAgent
+from src.agents.impact_scoring_agent import ImpactScoringAgent
+from src.agents.ingestion_agent import IngestionAgent
 from src.agents.meta_strategy_agent import MetaStrategyAgent
-from src.agents.scenario_generation_agent import ScenarioGenerationAgent
 from src.agents.model_performance_monitor import ModelPerformanceMonitor
-from src.agents.ab_testing_agent import ABTestingAgent
+from src.agents.prediction_agent import PredictionAgent
+from src.agents.regime_detection_agent import RegimeDetectionAgent
+from src.agents.scenario_generation_agent import ScenarioGenerationAgent
+from src.agents.signal_decay_agent import SignalDecayAgent
+from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
+from src.agents.trading_simulation_agent import TradingSimulationAgent
 from src.config.settings import settings
+from src.models.database import SessionLocal
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
+from src.models.system_logs import SystemLog
 from src.utils.activity_logger import activity_logger
 
 logging.basicConfig(
@@ -65,7 +67,7 @@ except Exception:
 
 class ContinuousPipeline:
     """Continuously running pipeline for production mode with performance optimization"""
-    
+
     def __init__(self, check_interval: int = 300, max_memory_mb: int = 2048):
         """
         Initialize continuous pipeline
@@ -77,15 +79,15 @@ class ContinuousPipeline:
         self.check_interval = check_interval
         self.max_memory_mb = max_memory_mb
         self.running = False
-        self.db: Optional[object] = None
-        self.started_at_utc: Optional[datetime] = None
-        
+        self.db: object | None = None
+        self.started_at_utc: datetime | None = None
+
         # Performance metrics
         self.iteration_times = deque(maxlen=20)  # Last 20 iteration times
         self.error_count = 0
         self.consecutive_errors = 0
         self.backoff_time = 5  # Initial backoff time in seconds
-        
+
         # Dynamic batch sizes (will be adjusted based on performance)
         self.batch_sizes = {
             'quality': 50,
@@ -101,73 +103,73 @@ class ContinuousPipeline:
             'calibration': 20,
             'meta_strategy': 10  # Creates ensemble predictions
         }
-        
+
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-        
+
         # Display pipeline phase configuration
         self._display_phase_configuration()
-        
+
         logger.info(f"Pipeline initialized with max_memory={max_memory_mb}MB, check_interval={check_interval}s")
-    
+
     def _display_phase_configuration(self):
         """Display which pipeline phases are enabled/disabled"""
         logger.info("=" * 80)
         logger.info("Pipeline Phase Configuration")
         logger.info("=" * 80)
-        
+
         phases = [
             ("Phase 12: Scenario Generation", settings.enable_scenarios),
             ("Phase 13: Fact Verification", settings.enable_fact_checking),
             ("Phase 14: Confidence Calibration", settings.enable_calibration),
             ("Phase 15: Meta-Strategy Ensemble", settings.enable_meta_strategy),
         ]
-        
+
         enabled_phases = []
         disabled_phases = []
-        
+
         for phase_name, is_enabled in phases:
             if is_enabled:
                 enabled_phases.append(phase_name)
             else:
                 disabled_phases.append(phase_name)
-        
+
         if enabled_phases:
             logger.info("✅ ENABLED Phases:")
             for phase in enabled_phases:
                 logger.info(f"   • {phase}")
-        
+
         if disabled_phases:
             logger.info("❌ DISABLED Phases (skipped to save tokens/resources):")
             for phase in disabled_phases:
                 logger.info(f"   • {phase}")
-        
+
         if not enabled_phases and not disabled_phases:
             logger.info("⚠️  No phase configuration found")
-        
+
         logger.info("=" * 80)
-    
+
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully"""
         logger.info(f"Received signal {signum}, initiating graceful shutdown...")
         activity_logger.log_activity(f"Shutdown signal received: {signum}", "WARNING")
         self.stop()
-    
+
     def _check_memory(self) -> float:
         """Check current memory usage and trigger GC if needed"""
         process = psutil.Process()
         memory_mb = process.memory_info().rss / 1024 / 1024
-        
+
         if memory_mb > self.max_memory_mb:
             logger.warning(f"Memory usage {memory_mb:.1f}MB exceeds limit {self.max_memory_mb}MB, forcing GC")
             import gc
             gc.collect()
             memory_mb = process.memory_info().rss / 1024 / 1024
             logger.info(f"Post-GC memory: {memory_mb:.1f}MB")
-        
+
         return memory_mb
-    
+
     def _adjust_batch_sizes(self, duration: float):
         """Dynamically adjust batch sizes based on iteration performance"""
         # If iteration took too long (>5 min), reduce batch sizes
@@ -193,7 +195,7 @@ class ContinuousPipeline:
                 }
                 self.batch_sizes[key] = min(max_size.get(key, 50), int(self.batch_sizes[key] * 1.2))
             logger.info(f"Increased batch sizes due to good performance: {self.batch_sizes}")
-    
+
     def _get_avg_iteration_time(self) -> float:
         """Calculate average iteration time from recent history"""
         if not self.iteration_times:
@@ -241,32 +243,32 @@ class ContinuousPipeline:
             time.sleep(chunk)
             remaining -= chunk
         self._check_for_external_stop()
-        
+
     def run(self):
         """Run the pipeline continuously with performance monitoring"""
         self.running = True
-        self.started_at_utc = datetime.now(timezone.utc)
+        self.started_at_utc = datetime.now(UTC)
         activity_logger.log_activity("Continuous Pipeline Mode STARTED", "SUCCESS")
         logger.info(f"Starting continuous pipeline (check every {self.check_interval}s)")
-        
+
         iteration = 0
-        
+
         while self.running:
             try:
                 self._check_for_external_stop()
                 iteration += 1
                 start_time = datetime.now()
-                
+
                 # Check memory before iteration
                 memory_before = self._check_memory()
-                
+
                 logger.info("=" * 60)
                 logger.info(f"Pipeline Iteration #{iteration} - {start_time}")
                 logger.info(f"Memory: {memory_before:.1f}MB | Avg Time: {self._get_avg_iteration_time():.1f}s | Batch Sizes: {self.batch_sizes}")
                 logger.info("=" * 60)
-                
+
                 activity_logger.log_activity(f"Starting Pipeline Iteration #{iteration}", "INFO")
-                
+
                 # Create fresh database session with retry logic
                 max_retries = 3
                 for attempt in range(max_retries):
@@ -288,7 +290,7 @@ class ContinuousPipeline:
                 # Run all pipeline phases
                 new_articles = self._run_pipeline_iteration()
                 self._check_for_external_stop()
-                
+
                 # Close database session safely
                 if self.db:
                     try:
@@ -297,58 +299,59 @@ class ContinuousPipeline:
                         logger.error(f"Error closing DB session: {e}")
                     finally:
                         self.db = None
-                
+
                 # Track performance metrics
                 duration = (datetime.now() - start_time).total_seconds()
                 self.iteration_times.append(duration)
                 self.consecutive_errors = 0  # Reset error counter on success
                 self.backoff_time = 5  # Reset backoff time
-                
+
                 # Check memory after iteration
                 memory_after = self._check_memory()
                 memory_delta = memory_after - memory_before
-                
+
                 logger.info(f"Iteration #{iteration} completed in {duration:.1f}s (avg: {self._get_avg_iteration_time():.1f}s)")
                 logger.info(f"Memory delta: {memory_delta:+.1f}MB (now: {memory_after:.1f}MB)")
                 activity_logger.log_activity(f"Iteration #{iteration} completed in {duration:.1f}s", "SUCCESS")
-                
+
                 # Adjust batch sizes based on performance
                 self._adjust_batch_sizes(duration)
-                
+
                 # Check if there's any unprocessed work in the pipeline
                 check_db = SessionLocal()
                 try:
-                    from src.models.analysis import SurpriseScore, ImpactScore
-                    from src.models.predictions import Prediction
-                    from src.models.entities import NewsEntityMapping
                     from sqlalchemy import and_
-                    
+
+                    from src.models.analysis import ImpactScore, SurpriseScore
+                    from src.models.entities import NewsEntityMapping
+                    from src.models.predictions import Prediction
+
                     # Count articles at different pipeline stages that need processing
                     # 1. RawNews without quality_score (use == None for SQLAlchemy)
-                    unassessed = check_db.query(RawNews).filter(RawNews.quality_score == None).count()
-                    
+                    unassessed = check_db.query(RawNews).filter(RawNews.quality_score.is_(None)).count()
+
                     # 2. Quality-checked RawNews without ProcessedNews
                     unanalyzed = check_db.query(RawNews).filter(
-                        RawNews.quality_score != None
+                        RawNews.quality_score.is_not(None)
                     ).outerjoin(
                         ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-                    ).filter(ProcessedNews.news_id == None).count()
-                    
+                    ).filter(ProcessedNews.news_id.is_(None)).count()
+
                     # 3. ProcessedNews without entity mapping
                     unmapped = check_db.query(ProcessedNews).outerjoin(
                         NewsEntityMapping, ProcessedNews.news_id == NewsEntityMapping.news_id
-                    ).filter(NewsEntityMapping.news_id == None).count()
-                    
+                    ).filter(NewsEntityMapping.news_id.is_(None)).count()
+
                     # 4. ProcessedNews without surprise score
                     unsurprised = check_db.query(ProcessedNews).outerjoin(
                         SurpriseScore, ProcessedNews.news_id == SurpriseScore.news_id
-                    ).filter(SurpriseScore.news_id == None).count()
-                    
+                    ).filter(SurpriseScore.news_id.is_(None)).count()
+
                     # 5. ProcessedNews without impact score
                     unscored = check_db.query(ProcessedNews).outerjoin(
                         ImpactScore, ProcessedNews.news_id == ImpactScore.news_id
-                    ).filter(ImpactScore.news_id == None).count()
-                    
+                    ).filter(ImpactScore.news_id.is_(None)).count()
+
                     # 6. ImpactScores >= 0.4 without predictions (simplified check)
                     # Note: Predictions use related_news_ids JSON array, so we check ImpactScores instead
                     high_impact_scores = check_db.query(ImpactScore).filter(
@@ -367,7 +370,7 @@ class ContinuousPipeline:
                     total_pending = 0  # Continue anyway if check fails
                 finally:
                     check_db.close()
-                
+
                 # If there's any unprocessed data, continue immediately
                 # Otherwise wait for new data
                 if total_pending > 0:
@@ -377,7 +380,7 @@ class ContinuousPipeline:
                 else:
                     logger.info(f"All articles fully processed, waiting {self.check_interval}s for new data...")
                     self._sleep_with_stop_check(self.check_interval)
-                
+
             except KeyboardInterrupt:
                 logger.info("Stopping continuous pipeline (keyboard interrupt)")
                 self.running = False
@@ -385,39 +388,39 @@ class ContinuousPipeline:
             except Exception as e:
                 self.error_count += 1
                 self.consecutive_errors += 1
-                
+
                 logger.error(f"Error in pipeline iteration #{iteration} (consecutive: {self.consecutive_errors}): {e}", exc_info=True)
                 activity_logger.log_activity(f"Pipeline error: {str(e)}", "ERROR")
-                
+
                 # Close DB session if still open
                 if self.db:
                     try:
                         self.db.close()
-                    except:
+                    except Exception:
                         pass
                     finally:
                         self.db = None
-                
+
                 # Exponential backoff with max 5 minutes
                 backoff_time = min(self.backoff_time * (2 ** (self.consecutive_errors - 1)), 300)
                 logger.warning(f"Backing off for {backoff_time}s before retry (consecutive errors: {self.consecutive_errors})")
-                
+
                 # If too many consecutive errors, increase check interval temporarily
                 if self.consecutive_errors >= 5:
                     logger.error(f"Too many consecutive errors ({self.consecutive_errors}), increasing backoff significantly")
                     backoff_time = 600  # 10 minutes
-                
+
                 self._sleep_with_stop_check(backoff_time)
             finally:
                 # Ensure DB session is always closed
                 if self.db:
                     try:
                         self.db.close()
-                    except:
+                    except Exception:
                         pass
                     finally:
                         self.db = None
-    
+
     def _run_pipeline_iteration(self):
         """Run one complete pipeline iteration with dynamic batch sizes
 
@@ -450,7 +453,7 @@ class ContinuousPipeline:
             content = ContentUnderstandingAgent()  # ✅ No db parameter!
             content_results = content.process_batch(limit=self.batch_sizes['content'])
             logger.info(f"NLP Analysis: {content_results}")
-            
+
             # Phase 4: Entity Mapping - ✅ OPTIMIZED with scoped sessions
             self._check_for_external_stop()
             activity_logger.log_phase(4, "Entity Mapping")
@@ -496,7 +499,7 @@ class ContinuousPipeline:
             correlation = CorrelationAnalysisAgent()  # ✅ No db parameter!
             corr_stats = correlation.get_statistics()
             logger.info(f"Correlation: {corr_stats}")
-            
+
             # Phase 10: Predictions - ✅ OPTIMIZED with scoped sessions
             self._check_for_external_stop()
             activity_logger.log_phase(10, "Predictions")
@@ -512,7 +515,7 @@ class ContinuousPipeline:
                 # Process predictions from last iteration (check_interval + buffer)
                 lookback_minutes = int(self.check_interval / 60) + 10
                 auto_stats = auto_processor.process_new_predictions(self.db, lookback_minutes=lookback_minutes)
-                
+
                 if auto_stats['total_found'] > 0:
                     logger.info(f"Auto-processed {auto_stats['total_found']} predictions: "
                               f"{auto_stats['outcomes_created']} outcomes, "
@@ -595,17 +598,17 @@ class ContinuousPipeline:
             logger.info(f"A/B Testing: {ab_stats}")
 
             return new_articles
-            
+
         except Exception as e:
             logger.error(f"Error in pipeline iteration: {e}", exc_info=True)
             raise
-    
+
     def stop(self):
         """Stop the continuous pipeline gracefully"""
         logger.info("Stopping continuous pipeline...")
         activity_logger.log_activity("Continuous Pipeline STOPPED", "INFO")
         self.running = False
-        
+
         # Close DB connection if still open
         if self.db:
             try:
@@ -615,7 +618,7 @@ class ContinuousPipeline:
                 logger.error(f"Error closing DB on shutdown: {e}")
             finally:
                 self.db = None
-        
+
         # Log final statistics
         logger.info("Pipeline Statistics:")
         logger.info(f"  - Total Errors: {self.error_count}")
@@ -628,7 +631,7 @@ class ContinuousPipeline:
 def main():
     """Main entry point"""
     import argparse
-    
+
     parser = argparse.ArgumentParser(
         description='Run TradeMeUp pipeline continuously with performance optimization',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -656,14 +659,14 @@ Examples:
         default=2048,
         help='Maximum memory usage in MB before forcing GC (default: 2048)'
     )
-    
+
     args = parser.parse_args()
-    
+
     pipeline = ContinuousPipeline(
         check_interval=args.interval,
         max_memory_mb=args.max_memory
     )
-    
+
     try:
         pipeline.run()
     except KeyboardInterrupt:

@@ -4,15 +4,17 @@ Agent Control Tab - Start, Stop and Monitor Agents
 
 import logging
 import os
+import platform
+import re
+import shlex
 import subprocess
 import sys
-import platform
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import dcc, html, Input, Output, State
+from dash import Input, Output, State, dcc, html
 
 from src.models.database import SessionLocal
 from src.models.system_logs import SystemLog
@@ -56,7 +58,7 @@ def _find_continuous_pipeline_pid():
 
 def _has_recent_pipeline_activity(window_seconds: int = _PIPELINE_ACTIVITY_WINDOW_SECONDS) -> bool:
     """Infer pipeline activity from the shared DB log stream."""
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+    cutoff = datetime.now(UTC) - timedelta(seconds=window_seconds)
     activity_signals = (
         "Continuous Pipeline Mode STARTED",
         "Starting Pipeline Iteration #",
@@ -97,7 +99,7 @@ def _has_recent_pipeline_activity(window_seconds: int = _PIPELINE_ACTIVITY_WINDO
         if not log_path.exists():
             continue
         try:
-            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            with open(log_path, encoding="utf-8", errors="ignore") as f:
                 lines = f.readlines()[-120:]
         except OSError:
             continue
@@ -137,19 +139,53 @@ def _request_continuous_pipeline_stop():
         "WARNING",
         source="control",
         component="continuous_pipeline",
-        details={"requested_at": datetime.now(timezone.utc).isoformat()},
+        details={"requested_at": datetime.now(UTC).isoformat()},
     )
 
-def open_terminal_with_command(script_path, args="", title="TradeMeUp"):
-    """Open a new terminal window and run a command (cross-platform)."""
+# Wrapper arguments are built from GUI state, and GUI state is attacker-controlled:
+# Dash callbacks are plain HTTP endpoints, so a client can put anything in a
+# State value. Every argument must therefore survive this allowlist before it
+# reaches a terminal emulator, several of which need a shell string.
+_SAFE_ARG_RE = re.compile(r"^[A-Za-z0-9_.:=/@+-]+$")
+
+
+def _coerce_batch_size(value, default: int = 50, minimum: int = 1, maximum: int = 10000) -> int:
+    """Clamp a GUI-supplied batch size to a sane integer, falling back to a default."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(parsed, maximum))
+
+
+def _validate_args(args):
+    """Return args as a list, rejecting anything with shell-significant characters."""
+    validated = []
+    for arg in args or []:
+        arg = str(arg)
+        if not _SAFE_ARG_RE.match(arg):
+            raise ValueError(f"Refusing to pass unsafe command argument: {arg!r}")
+        validated.append(arg)
+    return validated
+
+
+def open_terminal_with_command(script_path, args=None, title="TradeMeUp"):
+    """Open a new terminal window and run a command (cross-platform).
+
+    ``args`` is a list of argument strings. It is validated against an allowlist
+    and quoted for the target shell; never interpolate raw user input here.
+    """
     script_path = Path(script_path).absolute()
-    
+    args = _validate_args(args)
+
     if IS_WINDOWS:
-        # Windows: use 'start' with cmd
-        cmd = f'start "{title}" /D "{Path.cwd()}" "{script_path}" {args}'
+        # cmd.exe 'start' takes a command line, not an argv list. Arguments are
+        # allowlisted above, so no cmd metacharacters can survive to this point.
+        joined = subprocess.list2cmdline(args)
+        cmd = f'start "{title}" /D "{Path.cwd()}" "{script_path}" {joined}'
         proc = subprocess.Popen(cmd, shell=True, cwd=str(Path.cwd()))
         return proc
-    
+
     elif IS_LINUX:
         # Linux: try different terminal emulators
         terminals = [
@@ -158,10 +194,11 @@ def open_terminal_with_command(script_path, args="", title="TradeMeUp"):
             ['konsole', '--hold', '-e'],
             ['xfce4-terminal', '--hold', '-e'],
         ]
-        
-        # Properly quote script path for paths with spaces
-        command = f'"{script_path}" {args}; exec bash'
-        
+
+        # shlex.quote every component; the emulators below need a shell string.
+        command = " ".join(shlex.quote(part) for part in [str(script_path), *args])
+        command = f"{command}; exec bash"
+
         for term in terminals:
             try:
                 if subprocess.run(['which', term[0]], capture_output=True).returncode == 0:
@@ -169,21 +206,21 @@ def open_terminal_with_command(script_path, args="", title="TradeMeUp"):
                     return proc
             except (FileNotFoundError, subprocess.SubprocessError):
                 continue
-        
+
         # Fallback: run in background without terminal
         logger.warning("No terminal emulator found, running in background")
-        proc = subprocess.Popen([str(script_path)] + args.split(), cwd=str(Path.cwd()))
+        proc = subprocess.Popen([str(script_path), *args], cwd=str(Path.cwd()))
         return proc
-    
+
     elif IS_MAC:
-        # macOS: use Terminal.app (properly quoted for paths with spaces)
-        command = f'cd "{Path.cwd()}" && "{script_path}" {args}'
-        proc = subprocess.Popen(
-            ['osascript', '-e', f'tell application "Terminal" to do script "{command}"'],
-            cwd=str(Path.cwd())
-        )
+        # macOS: use Terminal.app. The inner command is a shell string embedded in
+        # an AppleScript string literal, so quote for both layers.
+        inner = " ".join(shlex.quote(part) for part in [str(script_path), *args])
+        command = f"cd {shlex.quote(str(Path.cwd()))} && {inner}"
+        script = f'tell application "Terminal" to do script "{command}"'
+        proc = subprocess.Popen(['osascript', '-e', script], cwd=str(Path.cwd()))
         return proc
-    
+
     else:
         raise OSError(f"Unsupported platform: {platform.system()}")
 
@@ -214,7 +251,7 @@ def create_layout():
                                     ])
                                 ], className="h-100")
                             ], width=4),
-                            
+
                             # Quick Test
                             dbc.Col([
                                 dbc.Card([
@@ -231,7 +268,7 @@ def create_layout():
                                     ])
                                 ], className="h-100")
                             ], width=4),
-                            
+
                             # Single Agent
                             dbc.Col([
                                 dbc.Card([
@@ -276,7 +313,7 @@ def create_layout():
                 ])
             ], width=12)
         ], className="mb-3"),
-        
+
         # Backfill Operations Section
         dbc.Row([
             dbc.Col([
@@ -301,7 +338,7 @@ def create_layout():
                                     ])
                                 ], className="h-100")
                             ], width=3),
-                            
+
                             # Selective Backfill
                             dbc.Col([
                                 dbc.Card([
@@ -332,7 +369,7 @@ def create_layout():
                                     ])
                                 ], className="h-100")
                             ], width=5),
-                            
+
                             # Backfill Options
                             dbc.Col([
                                 dbc.Card([
@@ -363,7 +400,7 @@ def create_layout():
                 ])
             ], width=12)
         ], className="mb-3"),
-        
+
         # Pipeline Options
         dbc.Row([
             dbc.Col([
@@ -404,7 +441,7 @@ def create_layout():
                 ])
             ], width=12)
         ], className="mb-3"),
-        
+
         # Status Display
         dbc.Row([
             dbc.Col([
@@ -434,7 +471,7 @@ def create_layout():
                 ])
             ], width=6)
         ], className="mb-3"),
-        
+
         # Recent Executions
         dbc.Row([
             dbc.Col([
@@ -446,12 +483,12 @@ def create_layout():
                 ])
             ], width=12)
         ]),
-        
+
         # Hidden stores for state management
         dcc.Store(id="store-pipeline-state", data={"running": False, "process_id": None}),
         dcc.Store(id="store-execution-history", data=[]),
         dcc.Interval(id="interval-pipeline-monitor", interval=2000, disabled=True)  # 2 seconds when active
-        
+
     ], fluid=True)
 
 
@@ -471,7 +508,7 @@ def format_pipeline_status(status):
             html.P("No pipeline running.", className="text-muted"),
             html.Small("Use the control panel above to start a pipeline.", className="text-muted")
         ])
-    
+
     return html.Div([
         dbc.Progress(value=status.get("progress", 0), className="mb-2"),
         html.P([
@@ -498,10 +535,10 @@ def run_pipeline_command(command_type, options=None):
         options: dict with limit, force, verbose flags, backfill phases, batch_size
     """
     options = options or {}
-    
+
     # Get Python executable path
     python_exe = os.path.join(PROJECT_ROOT, "venv", "Scripts", "python.exe")
-    
+
     # Build command based on type
     if command_type == "full":
         script = os.path.join(PROJECT_ROOT, "scripts", "run_mvp_pipeline.py")
@@ -519,14 +556,14 @@ def run_pipeline_command(command_type, options=None):
         # Selective backfill - skip phases not selected
         script = os.path.join(PROJECT_ROOT, "scripts", "backfill_all_agents.py")
         cmd = [python_exe, script]
-        
+
         # Add skip flags for unselected phases
         all_phases = ["quality", "content", "entities", "facts", "surprises", "impact", "predictions"]
         selected_phases = options.get("phases", [])
         for phase in all_phases:
             if phase not in selected_phases:
                 cmd.append(f"--skip-{phase}")
-        
+
         if options.get("batch_size"):
             cmd.extend(["--batch-size", str(options["batch_size"])])
     elif command_type == "ingestion":
@@ -535,7 +572,7 @@ def run_pipeline_command(command_type, options=None):
     else:
         # For other agents, we'd need individual scripts or parameters
         return None, "Agent-specific scripts not yet implemented"
-    
+
     # Add options
     if options.get("limit"):
         cmd.extend(["--limit", str(options["limit"])])
@@ -543,7 +580,7 @@ def run_pipeline_command(command_type, options=None):
         cmd.append("--force")
     if options.get("verbose"):
         cmd.append("--verbose")
-    
+
     try:
         # Start process (non-blocking)
         process = subprocess.Popen(
@@ -562,7 +599,7 @@ def get_process_output(process):
     """Get output from running process"""
     if not process:
         return ""
-    
+
     try:
         # Non-blocking read
         output = []
@@ -596,20 +633,20 @@ def register_callbacks(app):
         button_id = ctx.triggered[0]["prop_id"].split(".")[0]
         if button_id == "btn-start-continuous":
             logger.info("Starting continuous pipeline with Python: %s", sys.executable)
-            
+
             # Use platform-specific wrapper
             if IS_WINDOWS:
                 wrapper_script = Path("scripts/run_continuous_pipeline_wrapper.bat").absolute()
             else:
                 wrapper_script = Path("scripts/run_continuous_pipeline_wrapper.sh").absolute()
-            
+
             if not wrapper_script.exists():
                 error_msg = f"Wrapper script not found: {wrapper_script}"
                 activity_logger.log_activity(error_msg, "ERROR")
                 logger.error(error_msg)
                 return dash.no_update
             try:
-                process = open_terminal_with_command(wrapper_script, "--interval 300", "ANPS-TradeMeUp Pipeline")
+                process = open_terminal_with_command(wrapper_script, ["--interval", "300"], "ANPS-TradeMeUp Pipeline")
                 logger.info("Started pipeline with PID: %s", process.pid)
                 activity_logger.log_activity(
                     "Continuous Pipeline console opened - Check the new terminal window",
@@ -670,14 +707,14 @@ def register_callbacks(app):
                 wrapper_script = Path("scripts/run_rss_fetch_wrapper.bat").absolute()
             else:
                 wrapper_script = Path("scripts/run_rss_fetch_wrapper.sh").absolute()
-            
+
             if not wrapper_script.exists():
                 error_msg = f"RSS fetch script not found: {wrapper_script}"
                 activity_logger.log_activity(error_msg, "ERROR")
                 logger.error(error_msg)
                 return {"status": "error", "message": str(error_msg)}
-            
-            process = open_terminal_with_command(wrapper_script, "", "ANPS-TradeMeUp RSS Fetch")
+
+            process = open_terminal_with_command(wrapper_script, [], "ANPS-TradeMeUp RSS Fetch")
             logger.info("RSS fetch terminal opened with PID: %s", process.pid)
             activity_logger.log_activity(
                 "RSS Feed Fetch: Terminal window opened - Check the new window",
@@ -729,7 +766,7 @@ def register_callbacks(app):
         try:
             output_file = Path("logs") / "pipeline_output.log"
             if output_file.exists():
-                with open(output_file, "r", encoding="utf-8", errors="ignore") as f:
+                with open(output_file, encoding="utf-8", errors="ignore") as f:
                     lines = f.readlines()
                     recent = "".join(lines[-100:])
                 if "PIPELINE COMPLETE" in recent or "COMPLETED SUCCESSFULLY" in recent:
@@ -739,7 +776,7 @@ def register_callbacks(app):
                 return recent, "RUNNING", "warning"
             log_file = Path("logs") / "pipeline_activity.log"
             if log_file.exists():
-                with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+                with open(log_file, encoding="utf-8", errors="ignore") as f:
                     recent = "".join(f.readlines()[-50:])
                 return recent, "RUNNING", "warning"
         except Exception:
@@ -762,19 +799,19 @@ def register_callbacks(app):
             return dash.no_update
         activity_logger.log_activity("User initiated Full MVP Pipeline from GUI", "INFO")
         activity_logger.log_pipeline_start("ANPS-TradeMeUp MVP Pipeline (GUI)")
-        
+
         # Use platform-specific wrapper
         if IS_WINDOWS:
             wrapper = Path("scripts/run_mvp_pipeline_wrapper.bat").absolute()
         else:
             wrapper = Path("scripts/run_mvp_pipeline_wrapper.sh").absolute()
-        
+
         if not wrapper.exists():
             msg = f"Wrapper script not found: {wrapper}"
             activity_logger.log_activity(msg, "ERROR")
             return {"running": False}, msg, "ERROR", "danger"
         try:
-            proc = open_terminal_with_command(wrapper, "", "ANPS-TradeMeUp MVP Pipeline")
+            proc = open_terminal_with_command(wrapper, [], "ANPS-TradeMeUp MVP Pipeline")
         except Exception as e:
             activity_logger.log_agent_error("Full Pipeline (GUI)", str(e))
             return {"running": False}, str(e), "ERROR", "danger"
@@ -797,20 +834,20 @@ def register_callbacks(app):
         if not n_clicks:
             return dash.no_update
         activity_logger.log_activity("User initiated Quick Test from GUI", "INFO")
-        
+
         # Use platform-specific wrapper
         if IS_WINDOWS:
             wrapper = Path("scripts/run_mvp_pipeline_wrapper.bat").absolute()
         else:
             wrapper = Path("scripts/run_mvp_pipeline_wrapper.sh").absolute()
-        
+
         if not wrapper.exists():
             msg = f"Wrapper script not found: {wrapper}"
             activity_logger.log_activity(msg, "ERROR")
             return {"running": False}, msg, "ERROR", "danger"
-        
+
         try:
-            proc = open_terminal_with_command(wrapper, "--quick", "ANPS-TradeMeUp Quick Test")
+            proc = open_terminal_with_command(wrapper, ["--quick"], "ANPS-TradeMeUp Quick Test")
         except Exception as e:
             activity_logger.log_agent_error("Quick Test (GUI)", str(e))
             return {"running": False}, str(e), "ERROR", "danger"
@@ -834,19 +871,19 @@ def register_callbacks(app):
         if not n_clicks:
             return dash.no_update
         activity_logger.log_activity("User initiated Full Backfill from GUI", "INFO")
-        
+
         # Use platform-specific wrapper
         if IS_WINDOWS:
             wrapper = Path("scripts/run_backfill_wrapper.bat").absolute()
         else:
             wrapper = Path("scripts/run_backfill_wrapper.sh").absolute()
-        
+
         if not wrapper.exists():
             msg = f"Wrapper script not found: {wrapper}"
             activity_logger.log_activity(msg, "ERROR")
             return {"running": False}, msg, "ERROR", "danger"
         try:
-            proc = open_terminal_with_command(wrapper, f"--batch-size {batch_size}", "ANPS-TradeMeUp Backfill")
+            proc = open_terminal_with_command(wrapper, ["--batch-size", str(_coerce_batch_size(batch_size))], "ANPS-TradeMeUp Backfill")
         except Exception as e:
             activity_logger.log_agent_error("Backfill (GUI)", str(e))
             return {"running": False}, str(e), "ERROR", "danger"
@@ -870,24 +907,24 @@ def register_callbacks(app):
         if not n_clicks or not selected_phases:
             return dash.no_update
         activity_logger.log_activity("User initiated Selective Backfill from GUI", "INFO")
-        
+
         # Use platform-specific wrapper
         if IS_WINDOWS:
             wrapper = Path("scripts/run_backfill_wrapper.bat").absolute()
         else:
             wrapper = Path("scripts/run_backfill_wrapper.sh").absolute()
-        
+
         if not wrapper.exists():
             msg = f"Wrapper script not found: {wrapper}"
             activity_logger.log_activity(msg, "ERROR")
             return {"running": False}, msg, "ERROR", "danger"
         all_phases = ["quality", "content", "entities", "facts", "surprises", "impact", "predictions"]
-        args = ["--batch-size", str(batch_size)]
+        args = ["--batch-size", str(_coerce_batch_size(batch_size))]
         for p in all_phases:
             if p not in selected_phases:
                 args.append(f"--skip-{p}")
         try:
-            proc = open_terminal_with_command(wrapper, " ".join(args), "ANPS-TradeMeUp Backfill")
+            proc = open_terminal_with_command(wrapper, args, "ANPS-TradeMeUp Backfill")
         except Exception as e:
             activity_logger.log_agent_error("Backfill (GUI)", str(e))
             return {"running": False}, str(e), "ERROR", "danger"

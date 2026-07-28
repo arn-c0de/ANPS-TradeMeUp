@@ -6,8 +6,9 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models.database import Base, engine
 from src.models.chart_overlays import ChartOverlay
+from src.models.database import Base, engine
+
 
 def create_table():
     """Create the chart_overlays table."""

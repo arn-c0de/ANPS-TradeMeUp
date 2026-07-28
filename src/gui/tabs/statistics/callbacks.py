@@ -13,25 +13,25 @@ from dash import ALL, Input, Output, State, html
 from dash.exceptions import PreventUpdate
 from sqlalchemy.orm import Session
 
+from src.gui.utils.callbacks import safe_callback
 from src.models.database import engine as _engine
 from src.models.predictions import Prediction
-from src.gui.utils.callbacks import safe_callback
 
 from .data import (
-    get_statistics_metrics,
+    get_entity_details_table,
+    get_entity_full_details,
+    get_entity_sentiment_chart,
     get_event_distribution_chart,
+    get_impact_distribution_chart,
+    get_index_trends,
+    get_news_volume_chart,
     get_quality_distribution_chart,
     get_sentiment_distribution_chart,
-    get_impact_distribution_chart,
-    get_top_entities_list,
-    get_entity_sentiment_chart,
-    get_top_positive_entities,
-    get_top_negative_entities,
-    get_entity_details_table,
-    get_news_volume_chart,
-    get_entity_full_details,
-    get_index_trends,
+    get_statistics_metrics,
     get_stock_predictions_detail,
+    get_top_entities_list,
+    get_top_negative_entities,
+    get_top_positive_entities,
 )
 from .utils import _resolve_stats_date_range
 

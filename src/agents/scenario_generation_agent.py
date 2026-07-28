@@ -1,7 +1,8 @@
 """Agent 7.5: Scenario Generation Agent - Generate market scenarios and stress tests."""
 import logging
+from datetime import UTC, datetime, timezone
 from typing import Dict, List
-from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from src.models.analysis import MarketRegime
@@ -63,7 +64,7 @@ class ScenarioGenerationAgent:
         """Initialize scenario generation agent."""
         self.db = db
 
-    def generate_scenario(self, scenario_type: str) -> Dict:
+    def generate_scenario(self, scenario_type: str) -> dict:
         """
         Generate a specific market scenario.
 
@@ -77,8 +78,8 @@ class ScenarioGenerationAgent:
             raise ValueError(f"Unknown scenario type: {scenario_type}")
 
         scenario = self.SCENARIOS[scenario_type].copy()
-        scenario['generated_at'] = datetime.now(timezone.utc).isoformat()
-        scenario['scenario_id'] = f"{scenario_type}_{datetime.now(timezone.utc).timestamp()}"
+        scenario['generated_at'] = datetime.now(UTC).isoformat()
+        scenario['scenario_id'] = f"{scenario_type}_{datetime.now(UTC).timestamp()}"
 
         logger.info(f"Generated scenario: {scenario['name']}")
 
@@ -89,7 +90,7 @@ class ScenarioGenerationAgent:
         base_prediction: float,
         scenario_type: str,
         entity_type: str = 'company'
-    ) -> Dict:
+    ) -> dict:
         """
         Stress test a prediction under a scenario.
 
@@ -125,7 +126,7 @@ class ScenarioGenerationAgent:
         self,
         base_prediction: float,
         n_simulations: int = 1000
-    ) -> Dict:
+    ) -> dict:
         """
         Run Monte Carlo simulations for prediction uncertainty.
 
@@ -166,7 +167,7 @@ class ScenarioGenerationAgent:
             'n_simulations': n_simulations
         }
 
-    def generate_regime_scenarios(self) -> List[Dict]:
+    def generate_regime_scenarios(self) -> list[dict]:
         """
         Generate scenarios for different market regimes.
 
@@ -191,7 +192,7 @@ class ScenarioGenerationAgent:
 
         return regime_scenarios
 
-    def process_batch(self, limit: int = 5) -> Dict:
+    def process_batch(self, limit: int = 5) -> dict:
         """
         Generate scenarios for analysis.
 
@@ -220,7 +221,7 @@ class ScenarioGenerationAgent:
         logger.info(f"Scenario generation complete. Stats: {stats}")
         return stats
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get scenario generation statistics."""
         return {
             'available_scenarios': len(self.SCENARIOS),

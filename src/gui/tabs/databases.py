@@ -1,10 +1,10 @@
 """Databases Tab - Database management, export/import, and history."""
 
-import json
 import base64
+import json
 import re
 import socket
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
@@ -12,21 +12,25 @@ from uuid import UUID
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, dcc, html
-from sqlalchemy import text, func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from src.config.settings import VERSION
-from src.models.database import engine as _engine
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
-from src.models.predictions import Prediction, PredictionOutcome, BacktestResult, MarketData
-from src.models.entities import Entity, NewsEntityMapping, EntityRelationship
 from src.models.analysis import (
-    ImpactScore, SurpriseScore, FactVerification, SignalDecayModel, MarketRegime
+    FactVerification,
+    ImpactScore,
+    MarketRegime,
+    SignalDecayModel,
+    SurpriseScore,
 )
-from src.models.data_quality import DataQualityScore
-from src.models.trading_simulation import TradingSimulation
 from src.models.chart_overlays import ChartOverlay
+from src.models.data_quality import DataQualityScore
+from src.models.database import engine as _engine
+from src.models.entities import Entity, EntityRelationship, NewsEntityMapping
+from src.models.predictions import BacktestResult, MarketData, Prediction, PredictionOutcome
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
+from src.models.trading_simulation import TradingSimulation
 
 # ── constants ────────────────────────────────────────────────────────────────
 HISTORY_FILE = Path(__file__).resolve().parents[3] / "data" / "db_history.json"
@@ -121,7 +125,7 @@ def _record_event(event_type: str, stats: dict, notes: str = "", source_file: st
     events = _load_history()
     events.append({
         "event_type": event_type,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "hostname": socket.gethostname(),
         "stats": stats,
         "notes": notes,
@@ -329,17 +333,17 @@ _DATE_COLS = {
 }
 
 
-def _cutoff_from_range(timerange: str, custom_start: Optional[str], custom_end: Optional[str]):
+def _cutoff_from_range(timerange: str, custom_start: str | None, custom_end: str | None):
     """Return (start_dt, end_dt) or (None, None) for all-time."""
     from datetime import timedelta
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     _map = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
     if timerange in _map:
         return now - timedelta(days=_map[timerange]), now
     if timerange == "custom" and custom_start:
         try:
-            start = datetime.fromisoformat(custom_start).replace(tzinfo=timezone.utc)
-            end = datetime.fromisoformat(custom_end).replace(tzinfo=timezone.utc) if custom_end else now
+            start = datetime.fromisoformat(custom_start).replace(tzinfo=UTC)
+            end = datetime.fromisoformat(custom_end).replace(tzinfo=UTC) if custom_end else now
             if start > end:
                 start, end = end, start
             return start, end
@@ -350,8 +354,8 @@ def _cutoff_from_range(timerange: str, custom_start: Optional[str], custom_end: 
 
 def _export_db(selected_tables: list,
                timerange: str = "all",
-               custom_start: Optional[str] = None,
-               custom_end: Optional[str] = None) -> str:
+               custom_start: str | None = None,
+               custom_end: str | None = None) -> str:
     data: dict[str, list] = {}
     stats: dict[str, int] = {}
     start_dt, end_dt = _cutoff_from_range(timerange, custom_start, custom_end)
@@ -377,7 +381,7 @@ def _export_db(selected_tables: list,
         "format": EXPORT_FORMAT,
         "format_version": EXPORT_FORMAT_VERSION,
         "app_version": VERSION,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "hostname": socket.gethostname(),
         "export_stats": stats,
         "import_history": history,
@@ -387,7 +391,7 @@ def _export_db(selected_tables: list,
     return json.dumps(export_obj, indent=2, cls=_DBEncoder)
 
 
-def _parse_import_file(content_b64: str) -> tuple[Optional[dict], Optional[str]]:
+def _parse_import_file(content_b64: str) -> tuple[dict | None, str | None]:
     """Returns (parsed_obj, error_message). Exactly one is None."""
     try:
         if "," in content_b64:
@@ -454,7 +458,7 @@ def _coerce_row(row_dict: dict, tbl: str) -> dict:
     - only columns that belong to the model (prevents mass-assignment)
     - values type-coerced to match column types
     """
-    from sqlalchemy import String, Text, Float, Integer, Boolean, DateTime
+    from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
     from sqlalchemy.dialects.postgresql import JSONB
 
     model = _MODEL_MAP[tbl]
@@ -480,7 +484,7 @@ def _coerce_row(row_dict: dict, tbl: str) -> dict:
             elif col_type in (DateTime,):
                 if isinstance(val, str):
                     dt = datetime.fromisoformat(val)
-                    result[key] = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                    result[key] = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
                 else:
                     result[key] = val
             elif col_type is JSONB:
@@ -498,8 +502,8 @@ def _coerce_row(row_dict: dict, tbl: str) -> dict:
 
 def _execute_import(obj: dict, mode: str,
                     timerange: str = "all",
-                    custom_start: Optional[str] = None,
-                    custom_end: Optional[str] = None) -> dict:
+                    custom_start: str | None = None,
+                    custom_end: str | None = None) -> dict:
     """mode: 'merge' or 'replace'. Returns result stats dict."""
     data = obj.get("data", {})
     if not isinstance(data, dict):
@@ -520,7 +524,7 @@ def _execute_import(obj: dict, mode: str,
             if isinstance(val, str):
                 dt = datetime.fromisoformat(val)
                 if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
+                    dt = dt.replace(tzinfo=UTC)
             else:
                 dt = val
             return start_dt <= dt <= end_dt

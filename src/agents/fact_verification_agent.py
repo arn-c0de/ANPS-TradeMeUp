@@ -1,12 +1,13 @@
 """Agent 2.5: Fact Verification Agent - Verify claims and cross-check facts."""
 import logging
+from datetime import UTC, datetime, timezone
 from typing import Dict, List, Optional
-from datetime import datetime, timezone
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 
-from src.models.processed_news import ProcessedNews
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from src.models.analysis import FactVerification
+from src.models.processed_news import ProcessedNews
 from src.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ class FactVerificationAgent:
             FactVerification object (not yet committed)
         """
         from sqlalchemy.orm import joinedload
-        
+
         # Fetch processed article with news relationship loaded
         article = db.query(ProcessedNews).options(
             joinedload(ProcessedNews.news)
@@ -78,7 +79,7 @@ class FactVerificationAgent:
                 contradiction_details=contradictions,
                 credibility_score=credibility_score,
                 verification_method='llm_cross_check',
-                verified_at=datetime.now(timezone.utc),
+                verified_at=datetime.now(UTC),
                 verification_notes=verification_notes
             )
 
@@ -99,7 +100,7 @@ class FactVerificationAgent:
                 contradiction_details=[],
                 credibility_score=0.7,  # Neutral default
                 verification_method='fallback',
-                verified_at=datetime.now(timezone.utc),
+                verified_at=datetime.now(UTC),
                 verification_notes=f"Verification failed: {str(e)}"
             )
             return verification
@@ -117,7 +118,7 @@ class FactVerificationAgent:
             FactVerification object
         """
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             verification = self._verify_article_no_commit(db, news_id)
             db.add(verification)
@@ -129,7 +130,7 @@ class FactVerificationAgent:
             f"- {f.get('fact', '') if isinstance(f, dict) else str(f)}"
             for f in (article.key_facts or [])[:10]
         ])
-        
+
         # Get title from news relationship (correct name in model)
         article_title = 'N/A'
         if hasattr(article, 'news') and article.news:
@@ -177,7 +178,7 @@ Respond ONLY with JSON."""
 
         return prompt
 
-    def process_batch(self, limit: int = 10) -> Dict:
+    def process_batch(self, limit: int = 10) -> dict:
         """
         Process batch of articles for fact verification with optimized single transaction.
 
@@ -188,7 +189,7 @@ Respond ONLY with JSON."""
             Statistics dictionary
         """
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             # Find processed articles without verification
             articles = db.query(ProcessedNews).outerjoin(
@@ -242,10 +243,10 @@ Respond ONLY with JSON."""
             logger.info(f"Fact verification complete. Stats: {stats}")
             return stats
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get fact verification statistics."""
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             total_verified = db.query(FactVerification).count()
 
@@ -264,7 +265,7 @@ Respond ONLY with JSON."""
 
             # Contradictions count
             contradictions = db.query(FactVerification).filter(
-                FactVerification.contradictions_found == True
+                FactVerification.contradictions_found.is_(True)
             ).count()
 
             # High credibility percentage
@@ -280,7 +281,7 @@ Respond ONLY with JSON."""
                 'by_method': self._get_method_breakdown(db)
             }
 
-    def _get_method_breakdown(self, db: Session) -> Dict:
+    def _get_method_breakdown(self, db: Session) -> dict:
         """Get breakdown by verification method."""
         methods = db.query(
             FactVerification.verification_method,

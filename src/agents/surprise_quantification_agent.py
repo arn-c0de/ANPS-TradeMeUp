@@ -1,16 +1,17 @@
 """Agent 4.5: Surprise Quantification Agent."""
 import logging
 import re
-from typing import Dict, Optional, List
-from datetime import datetime, timezone
 import uuid
-from sqlalchemy.orm import Session
-import numpy as np
+from datetime import UTC, datetime, timezone
+from typing import Dict, List, Optional
 
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
-from src.models.entities import NewsEntityMapping
+import numpy as np
+from sqlalchemy.orm import Session
+
 from src.models.analysis import SurpriseScore
+from src.models.entities import NewsEntityMapping
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class SurpriseQuantificationAgent:
         """
         pass
 
-    def _extract_metric(self, text: str, metric_name: str) -> Optional[float]:
+    def _extract_metric(self, text: str, metric_name: str) -> float | None:
         """
         Extract financial metric from text using regex.
 
@@ -96,7 +97,7 @@ class SurpriseQuantificationAgent:
         entity_id: str,
         metric: str,
         as_of_date: datetime
-    ) -> Optional[float]:
+    ) -> float | None:
         """
         Get consensus estimate for entity/metric.
 
@@ -195,7 +196,7 @@ class SurpriseQuantificationAgent:
         actual: float,
         expected: float,
         metric_name: str = 'eps'
-    ) -> Dict:
+    ) -> dict:
         """
         Calculate surprise score.
 
@@ -213,14 +214,14 @@ class SurpriseQuantificationAgent:
                 'surprise_normalized': 0,
                 'magnitude': 'none'
             }
-        
+
         surprise_raw = actual - expected
         surprise_pct = (surprise_raw / abs(expected)) * 100
-        
+
         # Normalize by historical std
         std = self.HISTORICAL_STD.get(metric_name, 0.1)
         surprise_normalized = surprise_raw / std if std > 0 else 0
-        
+
         # Determine magnitude
         abs_norm = abs(surprise_normalized)
         if abs_norm > 2.0:
@@ -231,7 +232,7 @@ class SurpriseQuantificationAgent:
             magnitude = 'moderate'
         else:
             magnitude = 'small'
-        
+
         return {
             'surprise_raw': surprise_raw,
             'surprise_pct': surprise_pct,
@@ -240,7 +241,7 @@ class SurpriseQuantificationAgent:
             'expected_reaction': self._determine_expected_reaction(surprise_normalized)
         }
 
-    def analyze_article(self, db: Session, news_id: str) -> List[Dict]:
+    def analyze_article(self, db: Session, news_id: str) -> list[dict]:
         """
         Analyze article for surprises.
 
@@ -354,7 +355,7 @@ class SurpriseQuantificationAgent:
 
         return surprises
 
-    def _process_article_no_commit(self, db: Session, news_id: str) -> List[SurpriseScore]:
+    def _process_article_no_commit(self, db: Session, news_id: str) -> list[SurpriseScore]:
         """
         Process article without committing (for batch operations).
 
@@ -382,13 +383,13 @@ class SurpriseQuantificationAgent:
                 market_priced_in=surprise['market_priced_in'],
                 true_surprise=surprise['true_surprise'],
                 expected_reaction=surprise['expected_reaction'],
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(UTC)
             )
             surprise_scores.append(score)
 
         return surprise_scores
 
-    def process_article(self, news_id: str) -> List[SurpriseScore]:
+    def process_article(self, news_id: str) -> list[SurpriseScore]:
         """
         Process article and save surprise scores.
         
@@ -401,11 +402,11 @@ class SurpriseQuantificationAgent:
             List of SurpriseScore objects
         """
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             try:
                 surprise_scores = self._process_article_no_commit(db, news_id)
-                
+
                 if surprise_scores:
                     db.add_all(surprise_scores)
                     logger.info(f"Created {len(surprise_scores)} surprise scores for news {news_id}")
@@ -416,7 +417,7 @@ class SurpriseQuantificationAgent:
                 logger.error(f"Error processing surprises for {news_id}: {e}")
                 raise
 
-    def process_batch(self, limit: int = 20) -> Dict:
+    def process_batch(self, limit: int = 20) -> dict:
         """
         Process batch of earnings news for surprises with optimized single transaction.
 
@@ -427,7 +428,7 @@ class SurpriseQuantificationAgent:
             Statistics dictionary
         """
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             # Find earnings news without surprise scores
             articles = db.query(RawNews.news_id).join(
@@ -466,7 +467,7 @@ class SurpriseQuantificationAgent:
                             stats['with_consensus'] += 1
                         else:
                             stats['without_consensus'] += 1
-                    
+
                     all_surprise_scores.extend(surprise_scores)
 
                 except Exception as e:
@@ -481,11 +482,12 @@ class SurpriseQuantificationAgent:
             logger.info(f"Surprise quantification complete. Stats: {stats}")
             return stats
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get surprise statistics."""
         from sqlalchemy import func
+
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             total_surprises = db.query(SurpriseScore).count()
 

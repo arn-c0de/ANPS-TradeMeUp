@@ -1,13 +1,15 @@
 """Agent 5: Market Regime Detection Agent."""
 import logging
-from typing import Dict, Optional
-from datetime import datetime, timedelta, timezone
 import uuid
-from sqlalchemy.orm import Session
 import warnings
+from datetime import UTC, datetime, timedelta, timezone
+from typing import Dict, Optional
+
+from sqlalchemy.orm import Session
+
 warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
-import yfinance as yf
 import numpy as np
+import yfinance as yf
 
 from src.models.analysis import MarketRegime
 from src.utils.json_helpers import clean_numpy_types
@@ -49,7 +51,7 @@ class RegimeDetectionAgent:
         """
         self.db = db
 
-    def _get_default_indicators(self) -> Dict:
+    def _get_default_indicators(self) -> dict:
         """
         Return default market indicators when data fetch fails
         
@@ -66,7 +68,7 @@ class RegimeDetectionAgent:
             'lookback_days': 0
         }
 
-    def _fetch_market_data(self, lookback_days: int = 252) -> Dict:
+    def _fetch_market_data(self, lookback_days: int = 252) -> dict:
         """
         Fetch market data for regime detection.
 
@@ -197,7 +199,7 @@ class RegimeDetectionAgent:
         else:
             return 'normal'
 
-    def detect_regime(self) -> Dict:
+    def detect_regime(self) -> dict:
         """
         Detect current market regime.
 
@@ -290,11 +292,11 @@ class RegimeDetectionAgent:
             # Create regime record (convert numpy types for PostgreSQL compatibility)
             regime = MarketRegime(
                 regime_id=uuid.uuid4(),
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 regime=clean_numpy_types(result['regime']),
                 regime_probabilities=clean_numpy_types(result['regime_probabilities']),
                 regime_metadata=clean_numpy_types(result['regime_metadata']),
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(UTC)
             )
 
             # Save to database
@@ -316,13 +318,13 @@ class RegimeDetectionAgent:
             logger.error(f"Error updating regime: {e}")
             raise
 
-    def get_current_regime(self) -> Optional[MarketRegime]:
+    def get_current_regime(self) -> MarketRegime | None:
         """Get most recent regime from database."""
         return self.db.query(MarketRegime).order_by(
             MarketRegime.timestamp.desc()
         ).first()
 
-    def process_batch(self, limit: int = 1) -> Dict:
+    def process_batch(self, limit: int = 1) -> dict:
         """Process market regime detection."""
         try:
             result = self.detect_regime()
@@ -339,7 +341,7 @@ class RegimeDetectionAgent:
                 'regimes_updated': 0
             }
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get regime statistics."""
         from sqlalchemy import func
 
@@ -349,7 +351,7 @@ class RegimeDetectionAgent:
         current = self.get_current_regime()
 
         # Regime distribution (last 30 days)
-        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        thirty_days_ago = datetime.now(UTC) - timedelta(days=30)
         recent_regimes = self.db.query(MarketRegime).filter(
             MarketRegime.timestamp >= thirty_days_ago
         ).all()

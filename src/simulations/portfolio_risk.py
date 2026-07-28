@@ -1,13 +1,14 @@
 """Portfolio-level risk aggregation and analysis."""
-from dataclasses import dataclass
-from typing import Dict, List, Optional
 import logging
-import numpy as np
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Dict, List, Optional
 
+import numpy as np
 from sqlalchemy.orm import Session
-from src.models.trading_simulation import TradingSimulation
+
 from src.models.entities import Entity
+from src.models.trading_simulation import TradingSimulation
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +32,10 @@ class PortfolioRiskMetrics:
     portfolio_var_95: float  # Simplified VaR - see class docstring
     portfolio_cvar_95: float  # Simplified CVaR - see class docstring
     total_leverage: float
-    sector_concentrations: Dict[str, float]
+    sector_concentrations: dict[str, float]
     position_size_violations: int
     liquidity_violations: int
-    high_risk_positions: List[str]
+    high_risk_positions: list[str]
 
 
 class PortfolioRiskCalculator:
@@ -54,7 +55,7 @@ class PortfolioRiskCalculator:
         db: Session,
         active_only: bool = True,
         min_confidence: float = 0.0,
-        horizon_filter: Optional[str] = None
+        horizon_filter: str | None = None
     ) -> PortfolioRiskMetrics:
         """
         Calculate comprehensive portfolio risk metrics.
@@ -153,7 +154,7 @@ class PortfolioRiskCalculator:
 
     def _calculate_var_cvar(
         self,
-        returns: List[float],
+        returns: list[float],
         confidence_level: float = 0.95
     ) -> tuple[float, float]:
         """
@@ -193,7 +194,7 @@ class PortfolioRiskCalculator:
 
         return float(var), float(cvar)
 
-    def _calculate_total_exposure(self, simulations: List[TradingSimulation]) -> float:
+    def _calculate_total_exposure(self, simulations: list[TradingSimulation]) -> float:
         """
         Calculate total portfolio exposure in USD.
 
@@ -224,8 +225,8 @@ class PortfolioRiskCalculator:
     def _calculate_sector_concentrations(
         self,
         db: Session,
-        simulations: List[TradingSimulation]
-    ) -> Dict[str, float]:
+        simulations: list[TradingSimulation]
+    ) -> dict[str, float]:
         """
         Calculate sector concentration as percentage of total exposure.
 
@@ -234,7 +235,7 @@ class PortfolioRiskCalculator:
 
         Returns dict mapping sector -> percentage of total exposure
         """
-        sector_exposure: Dict[str, float] = {}
+        sector_exposure: dict[str, float] = {}
         total_exposure = 0.0
 
         for sim in simulations:
@@ -269,7 +270,7 @@ class PortfolioRiskCalculator:
             }
         return {}
 
-    def _count_position_violations(self, simulations: List[TradingSimulation]) -> int:
+    def _count_position_violations(self, simulations: list[TradingSimulation]) -> int:
         """Count simulations that violate position size constraints."""
         violations = 0
 
@@ -282,7 +283,7 @@ class PortfolioRiskCalculator:
 
         return violations
 
-    def _count_liquidity_violations(self, simulations: List[TradingSimulation]) -> int:
+    def _count_liquidity_violations(self, simulations: list[TradingSimulation]) -> int:
         """Count simulations that violate liquidity constraints."""
         violations = 0
 

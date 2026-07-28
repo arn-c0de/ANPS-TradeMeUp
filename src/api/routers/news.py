@@ -1,14 +1,15 @@
 """API endpoints for news."""
-from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from typing import List, Optional
 
-from src.models.database import get_db
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy.orm import Session
+
 from src.models.data_quality import DataQualityScore
+from src.models.database import get_db
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
 
 router = APIRouter(prefix="/news", tags=["news"])
 
@@ -20,21 +21,20 @@ class NewsResponse(BaseModel):
     title: str
     published_at: datetime
     url: str
-    quality_score: Optional[float] = None
-    event_type: Optional[str] = None
-    sentiment: Optional[dict] = None
+    quality_score: float | None = None
+    event_type: str | None = None
+    sentiment: dict | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
-@router.get("/", response_model=List[NewsResponse])
+@router.get("/", response_model=list[NewsResponse])
 def list_news(
-    source: Optional[str] = Query(None, description="Filter by source"),
-    event_type: Optional[str] = Query(None, description="Filter by event type"),
+    source: str | None = Query(None, description="Filter by source"),
+    event_type: str | None = Query(None, description="Filter by event type"),
     min_quality: float = Query(0.6, ge=0.0, le=1.0, description="Minimum quality score"),
-    start_date: Optional[datetime] = Query(None, description="Start date"),
-    end_date: Optional[datetime] = Query(None, description="End date"),
+    start_date: datetime | None = Query(None, description="Start date"),
+    end_date: datetime | None = Query(None, description="End date"),
     limit: int = Query(50, le=200, description="Maximum results"),
     db: Session = Depends(get_db)
 ):

@@ -1,16 +1,17 @@
 """Feature engineering for prediction models."""
 import logging
-from typing import Dict, List
 from datetime import datetime, timedelta
-import pandas as pd
+from typing import Dict, List
+
 import numpy as np
+import pandas as pd
 from sqlalchemy.orm import Session
 
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
+from src.models.analysis import ImpactScore, MarketRegime, SurpriseScore
 from src.models.entities import NewsEntityMapping
-from src.models.analysis import ImpactScore, SurpriseScore, MarketRegime
 from src.models.predictions import MarketData
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class FeatureEngineer:
         entity_id: str,
         news_id: str,
         as_of_date: datetime
-    ) -> Dict:
+    ) -> dict:
         """
         Extract features for a single prediction.
 
@@ -145,7 +146,7 @@ class FeatureEngineer:
             # Return default features
             return self._get_default_features()
 
-    def _get_default_features(self) -> Dict:
+    def _get_default_features(self) -> dict:
         """Get default feature values."""
         return {
             'impact_score': 0.5,
@@ -231,7 +232,7 @@ class FeatureEngineer:
 
         return df
 
-    def get_feature_names(self) -> List[str]:
+    def get_feature_names(self) -> list[str]:
         """Get list of feature names for models."""
         return [
             'impact_score',

@@ -8,21 +8,22 @@ OPTIMIZED VERSION:
 - ✅ No session state leaks between batches
 """
 import logging
-from typing import Dict, List, Optional
-from datetime import datetime, timezone
-import uuid
-from pathlib import Path
 import pickle
-import numpy as np
-from sqlalchemy.orm import Session
-import xgboost as xgb
+import uuid
+from datetime import UTC, datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
 
+import numpy as np
+import xgboost as xgb
+from sqlalchemy.orm import Session
+
+from src.config.settings import settings
+from src.ml.feature_engineering import FeatureEngineer
+from src.models.analysis import ImpactScore
 from src.models.database import get_scoped_session
 from src.models.entities import Entity
-from src.models.analysis import ImpactScore
 from src.models.predictions import Prediction
-from src.ml.feature_engineering import FeatureEngineer
-from src.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class PredictionAgent:
         # Define horizons
         self.horizons = ['1d', '5d', '20d']
 
-    def _load_model(self) -> Optional[xgb.XGBClassifier]:
+    def _load_model(self) -> xgb.XGBClassifier | None:
         """
         Load trained model from disk.
 
@@ -83,7 +84,7 @@ class PredictionAgent:
             logger.warning(f"Model not found at {model_path}, predictions will use heuristics")
             return None
 
-    def _predict_with_model(self, features: Dict, feature_engineer: FeatureEngineer) -> Dict:
+    def _predict_with_model(self, features: dict, feature_engineer: FeatureEngineer) -> dict:
         """
         Generate prediction using trained model.
 
@@ -148,7 +149,7 @@ class PredictionAgent:
             logger.error(f"Error in model prediction: {e}")
             return self._predict_with_heuristics(features)
 
-    def _predict_with_heuristics(self, features: Dict) -> Dict:
+    def _predict_with_heuristics(self, features: dict) -> dict:
         """
         Generate prediction using simple heuristics (when no model).
 
@@ -219,7 +220,7 @@ class PredictionAgent:
         entity_id: str,
         news_id: str,
         horizon: str = '5d'
-    ) -> Optional[Prediction]:
+    ) -> Prediction | None:
         """
         Generate a single prediction for an entity based on a news article.
         
@@ -241,14 +242,14 @@ class PredictionAgent:
                     ImpactScore.news_id == news_id,
                     ImpactScore.entity_id == entity_id
                 ).first()
-                
+
                 if not impact:
                     logger.warning(f"No impact score found for {entity_id}/{news_id}")
                     return None
-                
+
                 # Create feature engineer
                 feature_engineer = FeatureEngineer(db)
-                
+
                 # Generate prediction
                 prediction = self._generate_prediction_no_commit(
                     db=db,
@@ -258,7 +259,7 @@ class PredictionAgent:
                     horizon=horizon,
                     impact=impact
                 )
-                
+
                 if prediction:
                     db.add(prediction)
                     db.commit()
@@ -266,13 +267,13 @@ class PredictionAgent:
                     return prediction
                 else:
                     return None
-                    
+
             except Exception as e:
                 logger.error(f"Error generating prediction: {e}")
                 db.rollback()
                 return None
 
-    def process_batch(self, limit: int = 20) -> Dict:
+    def process_batch(self, limit: int = 20) -> dict:
         """
         Generate predictions for high-impact news.
 
@@ -318,13 +319,13 @@ class PredictionAgent:
             for impact in impact_scores:
                 try:
                     news_id_str = str(impact.news_id)
-                    
+
                     # Check which horizons already have predictions
                     # Note: related_news_ids is JSON array, need to check in Python
                     all_entity_predictions = db.query(Prediction).filter(
                         Prediction.entity_id == impact.entity_id
                     ).all()
-                    
+
                     existing_horizons = set()
                     for pred in all_entity_predictions:
                         if pred.related_news_ids and news_id_str in pred.related_news_ids:
@@ -372,7 +373,7 @@ class PredictionAgent:
         self,
         db: Session,
         limit: int
-    ) -> List[ImpactScore]:
+    ) -> list[ImpactScore]:
         """
         Find high-impact scores without predictions.
 
@@ -384,20 +385,20 @@ class PredictionAgent:
             List of ImpactScore objects
         """
         # Get high-impact scores that are recent (last 7 days)
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
         # Use UTC to match impact score timestamps
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=7)
-        
+        cutoff_date = datetime.now(UTC) - timedelta(days=7)
+
         # Use configurable threshold (default 0.4, can be lowered to 0.3 for more predictions)
         min_impact_threshold = settings.min_prediction_impact_threshold
-        
+
         impact_scores = db.query(ImpactScore).filter(
             ImpactScore.impact_score >= min_impact_threshold,  # Only significant impact
             ImpactScore.created_at >= cutoff_date  # Recent only
         ).order_by(
             ImpactScore.created_at.desc()  # Newest first
         ).limit(limit * 5).all()  # Get more candidates for filtering
-        
+
         if not impact_scores:
             logger.info(f"No high-impact scores found (impact >= {min_impact_threshold})")
             return []
@@ -406,14 +407,14 @@ class PredictionAgent:
 
         # Filter out those that already have predictions for ALL horizons
         to_predict = []
-        
+
         for impact in impact_scores:
             news_id_str = str(impact.news_id)
-            
+
             # Count existing predictions for this entity+news combination
             # Check each horizon separately
             existing_horizons = set()
-            
+
             for horizon in self.horizons:
                 # Query predictions with this entity, horizon, and news_id in related_news_ids
                 # SQLite/PostgreSQL JSON handling
@@ -421,7 +422,7 @@ class PredictionAgent:
                     Prediction.entity_id == impact.entity_id,
                     Prediction.horizon == horizon
                 ).all()
-                
+
                 # Check if any prediction includes this news_id
                 for pred in existing:
                     if pred.related_news_ids:
@@ -430,7 +431,7 @@ class PredictionAgent:
                         if news_id_str in news_ids or str(news_id_str) in [str(x) for x in news_ids]:
                             existing_horizons.add(horizon)
                             break
-            
+
             # If not all horizons are covered, add to list
             missing_horizons = set(self.horizons) - existing_horizons
             if missing_horizons:
@@ -438,7 +439,7 @@ class PredictionAgent:
                 to_predict.append(impact)
                 if len(to_predict) >= limit:
                     break
-        
+
         logger.info(f"Found {len(to_predict)} impact scores needing predictions")
         return to_predict
 
@@ -450,7 +451,7 @@ class PredictionAgent:
         news_id: str,
         horizon: str,
         impact: ImpactScore
-    ) -> Optional[Prediction]:
+    ) -> Prediction | None:
         """
         Generate prediction for entity WITHOUT committing.
 
@@ -504,7 +505,7 @@ class PredictionAgent:
                 key_drivers=result['key_drivers'],
                 model_version=self.model_version,
                 related_news_ids=[news_id],
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(UTC)
             )
 
             logger.debug(
@@ -519,7 +520,7 @@ class PredictionAgent:
             logger.error(f"Error generating prediction for {entity_id}/{news_id}: {e}", exc_info=True)
             return None
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """
         Get prediction statistics.
 

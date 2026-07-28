@@ -1,6 +1,7 @@
 """Check article quality - how many are real financial news?"""
 
 from sqlalchemy import create_engine, text
+
 from src.config.settings import settings
 
 engine = create_engine(settings.database_url)
@@ -21,40 +22,40 @@ with engine.connect() as conn:
         ORDER BY rn.published_at DESC
         LIMIT 50
     """))
-    
+
     articles = result.fetchall()
-    
+
     print("="*80)
     print(f"📰 SAMPLE OF {len(articles)} ARTICLES WITHOUT ENTITY MAPPINGS")
     print("="*80)
-    
+
     non_financial = []
-    
+
     for i, (title, source, event_type, sentiment) in enumerate(articles, 1):
         # Check if it's financial news
         crossword = 'crossword' in title.lower()
         podcast = 'podcast' in title.lower()
         ft_live = 'ft live' in title.lower()
-        
+
         if crossword or podcast or ft_live:
             non_financial.append(title)
             marker = "❌ NON-FINANCIAL"
         else:
             marker = "✅ FINANCIAL"
-        
+
         print(f"\n{i}. {marker}")
         print(f"   Title: {title[:80]}")
         print(f"   Source: {source}")
         print(f"   Event: {event_type}, Sentiment: {sentiment}")
-    
+
     print("\n" + "="*80)
-    print(f"📊 SUMMARY")
+    print("📊 SUMMARY")
     print("="*80)
     print(f"Total Sample: {len(articles)}")
     print(f"Non-Financial (Crosswords/Podcasts): {len(non_financial)}")
     print(f"Likely Financial: {len(articles) - len(non_financial)}")
     print(f"Percentage Financial: {(len(articles) - len(non_financial)) / len(articles) * 100:.1f}%")
-    
+
     if non_financial:
         print(f"\n⚠️ NON-FINANCIAL ARTICLES ({len(non_financial)}):")
         for title in non_financial[:10]:

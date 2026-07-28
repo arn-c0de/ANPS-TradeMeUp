@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import logging
+
 logging.basicConfig(level=logging.INFO)
 
 print("=" * 80)
@@ -27,7 +28,7 @@ stats = engine.process_batch(limit=50, lookback_days=7)
 print("\n" + "=" * 80)
 print("SIMULATION CREATION COMPLETE")
 print("=" * 80)
-print(f"\nStatistics:")
+print("\nStatistics:")
 print(f"  Total Processed: {stats['processed']}")
 print(f"  Created: {stats['created']}")
 print(f"  Updated: {stats['updated']}")
@@ -35,18 +36,18 @@ print(f"  Errors: {stats['errors']}")
 
 if stats['created'] > 0 or stats['updated'] > 0:
     print(f"\n✅ SUCCESS: Created/updated {stats['created'] + stats['updated']} simulations")
-    print(f"   These simulations now include:")
-    print(f"   - Position size %")
-    print(f"   - Position value in USD")
-    print(f"   - Overnight financing costs")
-    print(f"   - Borrow costs")
-    print(f"   - Complete risk breakdown (10 components)")
-    print(f"   - Detailed cost breakdown (7 components)")
+    print("   These simulations now include:")
+    print("   - Position size %")
+    print("   - Position value in USD")
+    print("   - Overnight financing costs")
+    print("   - Borrow costs")
+    print("   - Complete risk breakdown (10 components)")
+    print("   - Detailed cost breakdown (7 components)")
 else:
-    print(f"\n⚠️  No simulations were created. This may mean:")
-    print(f"   - No predictions found in the specified date range")
-    print(f"   - All predictions already have up-to-date simulations")
+    print("\n⚠️  No simulations were created. This may mean:")
+    print("   - No predictions found in the specified date range")
+    print("   - All predictions already have up-to-date simulations")
 
-print(f"\n" + "=" * 80)
+print("\n" + "=" * 80)
 print("You can now refresh the GUI to see the new simulations with portfolio recommendations!")
 print("=" * 80)

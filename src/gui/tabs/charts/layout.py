@@ -2,8 +2,8 @@
 Charts Tab - Layout Definition
 """
 
-from dash import dcc, html
 import dash_bootstrap_components as dbc
+from dash import dcc, html
 
 
 def create_layout():
@@ -30,57 +30,57 @@ def create_layout():
         dcc.Store(id='chart-overlays-store', storage_type='memory', data={
             'tabs': {}
         }),
-        
+
         # Store for chart interaction modes (zoom/pan) per chart
         dcc.Store(id='chart-interaction-modes', storage_type='memory', data={
             'tabs': {}  # {tab_id: {'dragmode': 'zoom'|'pan', 'auto_scroll': True|False}}
         }),
-        
+
         # Store for chart zoom/pan state (persisted in browser localStorage)
         dcc.Store(id='chart-view-state', storage_type='local', data={
             'tabs': {}  # {tab_id: {'xaxis_range': [min, max], 'yaxis_range': [min, max], ...}}
         }),
-        
+
         # Store for loaded chart data metadata (for infinite scroll)
         dcc.Store(id='chart-loaded-data-store', storage_type='memory', data={
             'tabs': {}  # {tab_id: {'symbol': str, 'timeframe': str, 'earliest_date': str, 'latest_date': str, 'data_points': int}}
         }),
-        
+
         # Store for scroll state (prevents race conditions)
         dcc.Store(id='chart-scroll-state-store', storage_type='memory', data={
             'tabs': {}  # {tab_id: {'loading': bool, 'last_load_time': float, 'last_threshold_check': float}}
         }),
-        
+
         # Hidden inputs for scroll triggers (one per chart, created dynamically in JS)
         # These will be created by JavaScript and referenced in callbacks
-        
+
         # Store for panel-based chart configuration (for multi-panel layouts)
         dcc.Store(id='chart-panels-config', storage_type='session', data={
             'layout': 'single',
             'panels': {}
         }),
-        
+
         # Store for quad mode selection
         dcc.Store(id='quad-mode-store', storage_type='session', data={
             'enabled': False,
             'selected_tabs': ['tab-1', 'tab-2', 'tab-3', 'tab-1']  # 4 tabs for quad panels
         }),
-        
+
         # Store for fullscreen state
         dcc.Store(id='chart-fullscreen-state', storage_type='memory', data={'fullscreen': False}),
-        
+
         # Store for panel sizes (for resizable layouts)
         dcc.Store(id='panel-sizes-store', storage_type='session', data={'sizes': [50, 50]}),  # percentage widths
 
         # Track which chart opened the overlay modal
         dcc.Store(id='overlay-modal-tab-id', storage_type='session', data=None),
-        
+
         # ESC key listener for fullscreen
         dcc.Input(id='esc-key-listener', type='text', style={'display': 'none'}),
-        
+
         # Hidden button for ESC key triggering (clicked programmatically)
         html.Button(id='esc-trigger-btn', style={'display': 'none'}),
-        
+
         # Browser-style Tab Bar
         dbc.Row([
             dbc.Col([
@@ -101,7 +101,7 @@ def create_layout():
                 ], className="mb-2")
             ], width=12)
         ]),
-        
+
         # Layout Control Bar with Chart Options
         dbc.Row([
             dbc.Col([
@@ -155,13 +155,13 @@ def create_layout():
                 ], className="mb-2")
             ], width=12)
         ]),
-        
+
         # Chart Display Area with fullscreen support
         html.Div(id='chart-display-area', className='chart-container-normal'),
-        
+
         # Multi-panel chart area (for panel-based layouts)
         html.Div(id='multi-panel-chart-area', className='chart-container-normal', style={'display': 'none'}),
-        
+
         # Add New Tab Modal
         dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle("➕ Add New Chart")),
@@ -175,7 +175,7 @@ def create_layout():
                     clearable=True,
                     className="mb-3"
                 ),
-                
+
                 dbc.Label("Timeframe:", className="fw-bold"),
                 dcc.Dropdown(
                     id="new-tab-timeframe-selector",
@@ -193,7 +193,7 @@ def create_layout():
                     clearable=False,
                     className="mb-3"
                 ),
-                
+
                 dbc.Label("Chart Type:", className="fw-bold"),
                 dcc.Dropdown(
                     id="new-tab-chart-type-selector",
@@ -211,13 +211,13 @@ def create_layout():
                 dbc.Button("Add Chart", id="new-tab-add-btn", color="primary")
             ])
         ], id="new-tab-modal", size="md", is_open=False),
-        
+
         # Panel Settings Modal (for individual chart settings)
         dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle("⚙️ Panel Settings")),
             dbc.ModalBody([
                 dcc.Store(id="panel-settings-tab-id", data=None),
-                
+
                 dbc.Label("Timeframe:", className="fw-bold"),
                 dcc.Dropdown(
                     id="panel-settings-timeframe",
@@ -234,7 +234,7 @@ def create_layout():
                     clearable=False,
                     className="mb-3"
                 ),
-                
+
                 dbc.Label("Chart Type:", className="fw-bold"),
                 dcc.Dropdown(
                     id="panel-settings-chart-type",
@@ -245,7 +245,7 @@ def create_layout():
                     clearable=False,
                     className="mb-3"
                 ),
-                
+
                 dbc.Label("Options:", className="fw-bold"),
                 dbc.Checklist(
                     id="panel-settings-options",
@@ -264,13 +264,13 @@ def create_layout():
                 dbc.Button("Apply", id="panel-settings-apply-btn", color="primary")
             ])
         ], id="panel-settings-modal", size="md", is_open=False, className="panel-settings-modal"),
-        
+
         # Config Panel Modal (for panel-based chart configuration)
         dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle("⚙️ Chart Configuration")),
             dbc.ModalBody([
                 dcc.Store(id="current-config-panel", data=None),
-                
+
                 dbc.Label("Stock Symbol:", className="fw-bold"),
                 dcc.Dropdown(
                     id="config-symbol-input",
@@ -280,7 +280,7 @@ def create_layout():
                     clearable=True,
                     className="mb-3"
                 ),
-                
+
                 dbc.Label("Timeframe:", className="fw-bold"),
                 dcc.Dropdown(
                     id="config-timeframe-selector",
@@ -298,7 +298,7 @@ def create_layout():
                     clearable=False,
                     className="mb-3"
                 ),
-                
+
                 dbc.Label("Chart Type:", className="fw-bold"),
                 dcc.Dropdown(
                     id="config-chart-type-selector",
@@ -310,7 +310,7 @@ def create_layout():
                     clearable=False,
                     className="mb-3"
                 ),
-                
+
                 dbc.Checklist(
                     id="config-favorite-checkbox",
                     options=[{"label": " Mark as Favorite", "value": "favorite"}],
@@ -323,7 +323,7 @@ def create_layout():
                 dbc.Button("Apply", id="config-apply-btn", color="primary")
             ])
         ], id="config-panel-modal", size="md", is_open=False),
-        
+
         # Trading Overlay Modal (Brackets / Breaks)
         dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle("📌 Trading Overlays")),
@@ -341,7 +341,7 @@ def create_layout():
                 dbc.Button("Close", id="overlay-modal-close-btn", color="secondary")
             ])
         ], id="trading-overlay-modal", size="lg", is_open=False, className="overlay-modal"),
-        
+
         # Quad Mode Selection Modal
         dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle("⊞ Select Charts for Quad View")),

@@ -2,6 +2,7 @@
 Settings Tab - System Configuration and Database Management
 """
 
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -11,13 +12,13 @@ from dash import Input, Output, State, dcc, html
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings as _settings
-from src.models.database import engine as _engine
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
-from src.models.predictions import Prediction
-from src.models.entities import Entity, NewsEntityMapping
 from src.models.analysis import ImpactScore
 from src.models.data_quality import DataQualityScore
+from src.models.database import engine as _engine
+from src.models.entities import Entity, NewsEntityMapping
+from src.models.predictions import Prediction
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
 from src.utils.activity_logger import activity_logger
 
 LLM_MODELS = {
@@ -278,6 +279,33 @@ def _env_local_path():
     return Path(__file__).resolve().parents[3] / ".env.local"
 
 
+# Values written into .env.local come from Dash State, which a client controls
+# freely. A newline would let a caller append arbitrary variables (DATABASE_URL,
+# API keys) to the file the app reads on startup, so validate before writing.
+_MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9._:/-]{1,100}$")
+
+
+def _validate_provider(provider):
+    """Return provider if it is one of the known LLM providers, else raise."""
+    if provider not in LLM_MODELS:
+        raise ValueError(f"Unknown LLM provider: {provider!r}")
+    return provider
+
+
+def _validate_model_name(model):
+    """Return model if it is a plausible model identifier, else raise."""
+    if not isinstance(model, str) or not _MODEL_NAME_RE.match(model):
+        raise ValueError(f"Invalid model name: {model!r}")
+    return model
+
+
+def _env_bool(value) -> str:
+    """Coerce any GUI value to the literal 'true'/'false' written into .env.local."""
+    if isinstance(value, str):
+        return "true" if value.strip().lower() in {"1", "true", "yes", "on"} else "false"
+    return "true" if bool(value) else "false"
+
+
 def register_callbacks(app):
     """Register settings tab callbacks."""
 
@@ -362,6 +390,11 @@ def register_callbacks(app):
     def _save_llm_settings(n_clicks, provider, model):
         if not n_clicks:
             return ""
+        try:
+            provider = _validate_provider(provider)
+            model = _validate_model_name(model)
+        except ValueError as e:
+            return dbc.Alert(str(e), color="danger", dismissable=True)
         env_path = _env_local_path()
         try:
             lines = env_path.read_text().splitlines(keepends=True) if env_path.exists() else []
@@ -443,27 +476,27 @@ def register_callbacks(app):
             updated = {"ENABLE_FACT_CHECKING": False, "ENABLE_CALIBRATION": False, "ENABLE_META_STRATEGY": False, "ENABLE_SCENARIOS": False}
             for line in lines:
                 if line.startswith("ENABLE_FACT_CHECKING="):
-                    new_lines.append(f"ENABLE_FACT_CHECKING={str(enable_fact_checking).lower()}\n")
+                    new_lines.append(f"ENABLE_FACT_CHECKING={_env_bool(enable_fact_checking)}\n")
                     updated["ENABLE_FACT_CHECKING"] = True
                 elif line.startswith("ENABLE_CALIBRATION="):
-                    new_lines.append(f"ENABLE_CALIBRATION={str(enable_calibration).lower()}\n")
+                    new_lines.append(f"ENABLE_CALIBRATION={_env_bool(enable_calibration)}\n")
                     updated["ENABLE_CALIBRATION"] = True
                 elif line.startswith("ENABLE_META_STRATEGY="):
-                    new_lines.append(f"ENABLE_META_STRATEGY={str(enable_meta_strategy).lower()}\n")
+                    new_lines.append(f"ENABLE_META_STRATEGY={_env_bool(enable_meta_strategy)}\n")
                     updated["ENABLE_META_STRATEGY"] = True
                 elif line.startswith("ENABLE_SCENARIOS="):
-                    new_lines.append(f"ENABLE_SCENARIOS={str(enable_scenarios).lower()}\n")
+                    new_lines.append(f"ENABLE_SCENARIOS={_env_bool(enable_scenarios)}\n")
                     updated["ENABLE_SCENARIOS"] = True
                 else:
                     new_lines.append(line)
             if not updated["ENABLE_FACT_CHECKING"]:
-                new_lines.append(f"ENABLE_FACT_CHECKING={str(enable_fact_checking).lower()}\n")
+                new_lines.append(f"ENABLE_FACT_CHECKING={_env_bool(enable_fact_checking)}\n")
             if not updated["ENABLE_CALIBRATION"]:
-                new_lines.append(f"ENABLE_CALIBRATION={str(enable_calibration).lower()}\n")
+                new_lines.append(f"ENABLE_CALIBRATION={_env_bool(enable_calibration)}\n")
             if not updated["ENABLE_META_STRATEGY"]:
-                new_lines.append(f"ENABLE_META_STRATEGY={str(enable_meta_strategy).lower()}\n")
+                new_lines.append(f"ENABLE_META_STRATEGY={_env_bool(enable_meta_strategy)}\n")
             if not updated["ENABLE_SCENARIOS"]:
-                new_lines.append(f"ENABLE_SCENARIOS={str(enable_scenarios).lower()}\n")
+                new_lines.append(f"ENABLE_SCENARIOS={_env_bool(enable_scenarios)}\n")
             env_path.write_text("".join(new_lines))
             return dbc.Alert([html.Strong("Settings saved!"), html.Br(), html.Small("Restart pipeline for changes.")], color="success", dismissable=True)
         except Exception as e:

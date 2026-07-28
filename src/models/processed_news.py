@@ -1,7 +1,7 @@
 """Database model for processed news with NLP analysis."""
-from sqlalchemy import Column, String, Text, Float, DateTime, ForeignKey
+from sqlalchemy import Column, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship, deferred
+from sqlalchemy.orm import deferred, relationship
 
 from src.models.database import Base, utc_now
 from src.models.types import GUID

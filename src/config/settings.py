@@ -1,8 +1,9 @@
 """Application configuration using Pydantic Settings."""
+from pathlib import Path
 from typing import List, Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pathlib import Path
 
 # Application Version
 VERSION = "1.0.4"
@@ -24,7 +25,7 @@ class Settings(BaseSettings):
 
     # API
     api_v1_prefix: str = Field(default="/api/v1", alias="API_V1_PREFIX")
-    cors_origins: List[str] = Field(
+    cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://localhost:8050", "http://localhost:8000"],
         alias="CORS_ORIGINS"
     )
@@ -32,7 +33,7 @@ class Settings(BaseSettings):
     # Database - PostgreSQL required
     # Use docker-compose up -d to start PostgreSQL with pgvector
     database_url: str = Field(
-        default="postgresql://trademeup_user:trademeup_pass@localhost:5432/trademeup", 
+        default="postgresql://trademeup_user:trademeup_pass@localhost:5432/trademeup",
         alias="DATABASE_URL"
     )
 
@@ -66,13 +67,13 @@ class Settings(BaseSettings):
     model_path: str = Field(default="./models", alias="MODEL_PATH")
     default_temperature: float = Field(default=0.1, alias="DEFAULT_TEMPERATURE")
     max_tokens: int = Field(default=4096, alias="MAX_TOKENS")
-    
+
     # Pipeline Phase Settings (enable/disable phases to optimize token usage)
     enable_fact_checking: bool = Field(default=True, alias="ENABLE_FACT_CHECKING")
     enable_calibration: bool = Field(default=True, alias="ENABLE_CALIBRATION")
     enable_meta_strategy: bool = Field(default=True, alias="ENABLE_META_STRATEGY")
     enable_scenarios: bool = Field(default=True, alias="ENABLE_SCENARIOS")
-    
+
     # Prediction Settings
     min_prediction_impact_threshold: float = Field(default=0.4, alias="MIN_PREDICTION_IMPACT_THRESHOLD")
 

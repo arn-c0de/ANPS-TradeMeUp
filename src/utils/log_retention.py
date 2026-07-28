@@ -1,7 +1,6 @@
 """Shared retention helpers for the system_logs table."""
 
-from datetime import datetime, timedelta, timezone
-
+from datetime import UTC, datetime, timedelta, timezone
 
 MAX_SYSTEM_LOG_ROWS = 20_000
 LOG_RETENTION_HOURS = 24
@@ -15,7 +14,7 @@ def prune_system_logs() -> None:
         from src.models.database import SessionLocal
         from src.models.system_logs import SystemLog
 
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=LOG_RETENTION_HOURS)
+        cutoff = datetime.now(UTC) - timedelta(hours=LOG_RETENTION_HOURS)
 
         with SessionLocal() as db:
             db.query(SystemLog).filter(SystemLog.timestamp < cutoff).delete(

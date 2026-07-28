@@ -2,8 +2,11 @@
 Services Package
 """
 
-from .prediction_performance_service import PredictionPerformanceService, prediction_performance_service
 from .market_data import MarketDataProvider, market_data
+from .prediction_performance_service import (
+    PredictionPerformanceService,
+    prediction_performance_service,
+)
 
 __all__ = [
     'PredictionPerformanceService',

@@ -1,6 +1,6 @@
 """Python logging.Handler that writes records to the system_logs DB table."""
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 from src.utils.log_retention import prune_system_logs
 
@@ -58,7 +58,7 @@ class DBLogHandler(logging.Handler):
                 }
 
             entry = SystemLog(
-                timestamp = datetime.fromtimestamp(record.created, tz=timezone.utc),
+                timestamp = datetime.fromtimestamp(record.created, tz=UTC),
                 level     = app_level,
                 source    = self.source,
                 component = record.name[:100],

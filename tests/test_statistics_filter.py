@@ -19,7 +19,7 @@ def test_statistics_filter():
     logger.info("="*80)
 
     try:
-        from src.gui.tabs.statistics import get_statistics_metrics, create_layout
+        from src.gui.tabs.statistics import create_layout, get_statistics_metrics
         from src.models.database import engine
 
         # Test 1: Load layout

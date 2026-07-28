@@ -1,22 +1,23 @@
 """Agent 1: Feed & Data Ingestion Agent - Fetches news from RSS feeds and APIs."""
 import hashlib
-import logging
 import json
-from pathlib import Path
-from datetime import datetime, timezone
-from typing import List, Dict, Optional
+import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timezone
+from pathlib import Path
+from time import sleep
+from typing import Dict, List, Optional
+
 import feedparser
 import requests
 from bs4 import BeautifulSoup
-from time import sleep
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from src.models.raw_news import RawNews
-from src.models.database import utc_now
-from src.utils.activity_logger import activity_logger
 from src.config.settings import VERSION
+from src.models.database import utc_now
+from src.models.raw_news import RawNews
+from src.utils.activity_logger import activity_logger
 
 logger = logging.getLogger(__name__)
 PLACEHOLDER_API_KEYS = {
@@ -34,9 +35,9 @@ class NewsArticle:
     full_text: str
     url: str
     published_at: datetime
-    author: Optional[str] = None
+    author: str | None = None
     language: str = "en"
-    metadata: Optional[Dict] = None
+    metadata: dict | None = None
 
 
 class IngestionAgent:
@@ -65,11 +66,11 @@ class IngestionAgent:
         self.session.headers.update({
             'User-Agent': f'ANPS-TradeMeUp/{VERSION} (Educational Research)'
         })
-        
+
         # Load RSS feeds from JSON config
         self.RSS_FEEDS = self._load_rss_feeds(feeds_config)
 
-    def _load_rss_feeds(self, config_path: str = None) -> List[Dict]:
+    def _load_rss_feeds(self, config_path: str = None) -> list[dict]:
         """Load RSS feeds from JSON configuration file."""
         if config_path is None:
             # Default path
@@ -77,10 +78,10 @@ class IngestionAgent:
             config_path = project_root / "config" / "rss_feeds.json"
         else:
             config_path = Path(config_path)
-        
+
         try:
             if config_path.exists():
-                with open(config_path, 'r', encoding='utf-8') as f:
+                with open(config_path, encoding='utf-8') as f:
                     config = json.load(f)
                     # Filter only enabled feeds
                     feeds = [feed for feed in config.get('feeds', []) if feed.get('enabled', True)]
@@ -92,8 +93,8 @@ class IngestionAgent:
         except Exception as e:
             logger.error(f"Error loading RSS feeds config: {e}, using defaults")
             return self._get_default_feeds()
-    
-    def _get_default_feeds(self) -> List[Dict]:
+
+    def _get_default_feeds(self) -> list[dict]:
         """Get default RSS feeds if config file is not available."""
         return [
             {
@@ -114,7 +115,7 @@ class IngestionAgent:
         """Calculate SHA-256 hash of content for duplicate detection."""
         return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
-    def _parse_rss_feed(self, feed_url: str, source_name: str) -> List[NewsArticle]:
+    def _parse_rss_feed(self, feed_url: str, source_name: str) -> list[NewsArticle]:
         """
         Parse RSS feed and extract articles.
 
@@ -146,7 +147,7 @@ class IngestionAgent:
                     # Extract published date
                     published_at = None
                     if hasattr(entry, 'published_parsed'):
-                        published_at = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                        published_at = datetime(*entry.published_parsed[:6], tzinfo=UTC)
                     else:
                         published_at = utc_now()
 
@@ -188,7 +189,7 @@ class IngestionAgent:
 
         return articles
 
-    def _save_article(self, article: NewsArticle) -> Optional[str]:
+    def _save_article(self, article: NewsArticle) -> str | None:
         """
         Save article to database.
 
@@ -236,7 +237,7 @@ class IngestionAgent:
             logger.error(f"Error saving article: {e}")
             return None
 
-    def fetch_all_rss_feeds(self) -> Dict[str, int]:
+    def fetch_all_rss_feeds(self) -> dict[str, int]:
         """
         Fetch news from all configured RSS feeds.
 
@@ -329,10 +330,10 @@ class IngestionAgent:
             logger.error(f"Error fetching from News API: {e}")
             return 0
 
-    def process_batch(self, limit: int = 50) -> Dict:
+    def process_batch(self, limit: int = 50) -> dict:
         """Process batch of RSS feeds and save articles."""
         total_saved = 0
-        
+
         for feed_config in self.RSS_FEEDS:
             try:
                 articles = self._parse_rss_feed(
@@ -341,23 +342,23 @@ class IngestionAgent:
                 )
                 saved = self._save_articles(articles)
                 total_saved += saved
-                
+
                 if total_saved >= limit:
                     break
-                    
+
                 sleep(self.rate_limit_delay)
-                
+
             except Exception as e:
                 logger.error(f"Error processing feed {feed_config['name']}: {e}")
                 continue
-        
+
         return {
             'success': True,
             'articles_saved': total_saved,
             'feeds_processed': len(self.RSS_FEEDS)
         }
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get ingestion statistics."""
         total_articles = self.db.query(RawNews).count()
 

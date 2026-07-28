@@ -1,12 +1,13 @@
 """Main FastAPI application."""
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.config.settings import settings, VERSION
+from src.api.routers import entities, news, predictions
+from src.config.settings import VERSION, settings
 from src.utils.redact import redact_url
-from src.api.routers import predictions, news, entities
 
 # Configure logging
 logging.basicConfig(

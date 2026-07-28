@@ -19,8 +19,8 @@ def test_imports():
 
     try:
         from src.gui.tabs import predictions, simulations
-        from src.models.trading_simulation import TradingSimulation
         from src.models.predictions import Prediction
+        from src.models.trading_simulation import TradingSimulation
         logger.info("✓ All imports successful")
         return True
     except Exception as e:
@@ -59,7 +59,7 @@ def test_prediction_details_with_simulation():
             # Test loading details without performance (fast)
             title, body, _ = get_prediction_details(engine, prediction.prediction_id, load_performance=False)
 
-            logger.info(f"✓ Prediction details loaded successfully")
+            logger.info("✓ Prediction details loaded successfully")
             logger.info(f"  Title type: {type(title)}")
             logger.info(f"  Body type: {type(body)}")
 
@@ -83,7 +83,7 @@ def test_simulation_table_with_details_button():
         # Get simulation table
         table = get_simulation_table(engine)
 
-        logger.info(f"✓ Simulation table generated successfully")
+        logger.info("✓ Simulation table generated successfully")
         logger.info(f"  Table type: {type(table)}")
 
         # Check if table contains the details button

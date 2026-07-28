@@ -3,8 +3,10 @@ Charts Tab - Utility Functions
 """
 
 from typing import Optional, Tuple
-import pandas as pd
+
 import dash_bootstrap_components as dbc
+import pandas as pd
+import plotly.graph_objects as go
 from dash import html
 
 from src.gui.tabs.charts.live_charts import create_candlestick_chart, create_line_chart
@@ -85,10 +87,10 @@ def _build_chart_figure(
     chart_type: str,
     show_volume: bool,
     show_ma: bool,
-    overlays: Optional[dict],
+    overlays: dict | None,
     dragmode: str,
     auto_scroll: bool,
-    view_state: Optional[dict]
+    view_state: dict | None
 ) -> 'go.Figure':
     """
     Build Plotly figure from DataFrame.
@@ -115,39 +117,39 @@ def _build_chart_figure(
     overlay_shapes = _build_overlay_shapes(overlays)
     if overlay_shapes:
         fig.update_layout(shapes=overlay_shapes)
-    
+
     # Set dragmode (zoom or pan)
     # Note: 'pan' mode allows easier horizontal scrolling with mouse wheel
     fig.update_layout(dragmode=dragmode)
-    
+
     # Enable horizontal scrolling: ensure x-axis is not fixed
     if show_volume:
         fig.update_xaxes(fixedrange=False, row=1)
         fig.update_xaxes(fixedrange=False, row=2)  # Volume subplot
     else:
         fig.update_xaxes(fixedrange=False)
-    
+
     # Apply saved view state (zoom/pan position) if available
     # Only apply if auto_scroll is False (user wants to keep their view)
     if view_state and not auto_scroll:
         # Apply x-axis range if saved
         if 'xaxis_range' in view_state and view_state['xaxis_range']:
             fig.update_xaxes(range=view_state['xaxis_range'], row=1 if show_volume else None)
-        
+
         # Apply y-axis range if saved (for price chart)
         if 'yaxis_range' in view_state and view_state['yaxis_range']:
             fig.update_yaxes(range=view_state['yaxis_range'], row=1 if show_volume else None)
-        
+
         # Apply y-axis2 range if saved (for volume chart)
         if show_volume and 'yaxis2_range' in view_state and view_state['yaxis2_range']:
             fig.update_yaxes(range=view_state['yaxis2_range'], row=2)
-    
+
     # Auto-scroll: Set x-axis range to show latest candles, with newest candle visible on the right
     elif auto_scroll and len(df) > 0:
         # Show last 50-100 candles (adjust based on data density)
         visible_candles = min(80, len(df))
         start_idx = max(0, len(df) - visible_candles)
-        
+
         # For category type axes, we need to use the index positions
         # Since we're using category type, we'll set the range using index values
         if hasattr(df.index, '__len__'):
@@ -158,11 +160,11 @@ def _build_chart_figure(
                 # For category axes, range is set using the category values
                 start_val = indices[start_idx] if start_idx < len(indices) else indices[0]
                 end_val = indices[-1] if len(indices) > 0 else None
-                
+
                 if end_val is not None:
                     # Update xaxis range - for category type, use the actual index values
                     fig.update_xaxes(range=[start_val, end_val], row=1 if show_volume else None)
-    
+
     return fig
 
 
@@ -170,9 +172,9 @@ def update_chart_with_prepended_data(
     existing_fig: 'go.Figure',
     new_df: pd.DataFrame,
     old_df: pd.DataFrame,
-    old_range: Optional[list],
+    old_range: list | None,
     show_volume: bool
-) -> Tuple['go.Figure', list]:
+) -> tuple['go.Figure', list]:
     """
     Update chart figure with prepended data while maintaining view position.
     
@@ -187,10 +189,10 @@ def update_chart_with_prepended_data(
         Tuple of (updated_figure, new_range)
     """
     from plotly.graph_objects import Figure
-    
+
     # Calculate offset (how many new data points were added)
     offset = len(new_df)
-    
+
     # If we have old range, calculate new range
     new_range = old_range
     if old_range and len(old_df) > 0:
@@ -199,16 +201,16 @@ def update_chart_with_prepended_data(
         try:
             left_idx = old_indices.index(old_range[0]) if old_range[0] in old_indices else 0
             right_idx = old_indices.index(old_range[1]) if old_range[1] in old_indices else len(old_indices) - 1
-            
+
             # Calculate new indices with offset
             new_left_idx = left_idx + offset
             new_right_idx = right_idx + offset
-            
+
             # Get new DataFrame with prepended data
             combined_df = pd.concat([new_df, old_df])
             combined_df = combined_df[~combined_df.index.duplicated(keep='last')]
             combined_df = combined_df.sort_index()
-            
+
             # Get new range values
             new_indices = list(combined_df.index)
             if new_left_idx < len(new_indices) and new_right_idx < len(new_indices):
@@ -216,7 +218,7 @@ def update_chart_with_prepended_data(
         except (ValueError, IndexError):
             # Fallback: use original range if calculation fails
             pass
-    
+
     # Update figure with new data (this will be done by recreating traces)
     # For now, return the existing figure - actual update happens in callback
     return existing_fig, new_range or []

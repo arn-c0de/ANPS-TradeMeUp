@@ -1,9 +1,10 @@
 """Database model for data quality scores."""
+import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Float, Boolean, DateTime, ForeignKey, Index
+
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
-import uuid
 
 from src.models.database import Base, utc_now
 from src.models.types import GUID

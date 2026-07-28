@@ -1,12 +1,13 @@
 """Agent 1.5: Data Quality Agent - Validates and scores news quality."""
 import logging
-from typing import Dict, Optional, List
-from datetime import datetime, timezone
-from sqlalchemy.orm import Session
-from langdetect import detect, LangDetectException
+from datetime import UTC, datetime, timezone
+from typing import Dict, List, Optional
 
-from src.models.raw_news import RawNews
+from langdetect import LangDetectException, detect
+from sqlalchemy.orm import Session
+
 from src.models.data_quality import DataQualityScore
+from src.models.raw_news import RawNews
 from src.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,7 @@ class DataQualityAgent:
             logger.warning("Language detection failed, assuming English")
             return "en", 0.5
 
-    def _check_duplicate_by_hash(self, db: Session, content_hash: str, news_id: str) -> Optional[str]:
+    def _check_duplicate_by_hash(self, db: Session, content_hash: str, news_id: str) -> str | None:
         """
         Check if article is duplicate by content hash.
 
@@ -116,7 +117,7 @@ class DataQualityAgent:
 
         return None
 
-    def _check_duplicate_by_url(self, db: Session, url: str, news_id: str) -> Optional[str]:
+    def _check_duplicate_by_url(self, db: Session, url: str, news_id: str) -> str | None:
         """
         Check if article is duplicate by URL.
 
@@ -142,40 +143,40 @@ class DataQualityAgent:
     def calculate_quality_score(self, article: RawNews) -> float:
         """Calculate quality score for an article."""
         score = 0.0
-        
+
         # Source reliability (0-35 points)
         source_reliability = self._get_source_reliability(article.source)
         score += source_reliability * 35
-        
+
         # Content length (0-25 points)
         word_count = self._count_words(article.full_text)
         if word_count >= self.MIN_WORD_COUNT:
             length_score = min(word_count / 500, 1.0) * 25
             score += length_score
-        
+
         # Has title (0-10 points)
         if article.title and len(article.title) > 10:
             score += 10
-        
+
         # Has URL (0-10 points)
         if article.url and article.url.startswith('http'):
             score += 10
-        
+
         # Published date (0-10 points)
         if article.published_at:
             score += 10
-        
+
         # Language detection (0-10 points)
         try:
             detected_lang, confidence = self._detect_language(article.full_text)
             if detected_lang == 'en' and confidence > 0.8:
                 score += 10
-        except:
+        except Exception:
             pass
-        
+
         return min(score / 100, 1.0)  # Normalize to 0-1
 
-    def validate_article(self, db: Session, news_id: str) -> Dict:
+    def validate_article(self, db: Session, news_id: str) -> dict:
         """
         Validate a single article and calculate quality score.
 
@@ -298,7 +299,7 @@ class DataQualityAgent:
             existing.validation_flags = result['validation_flags']
             existing.quality_issues = result['quality_issues']
             existing.source_reliability_score = result['source_reliability_score']
-            existing.created_at = datetime.now(timezone.utc)
+            existing.created_at = datetime.now(UTC)
             return existing
         else:
             # Create new
@@ -309,7 +310,7 @@ class DataQualityAgent:
                 validation_flags=result['validation_flags'],
                 quality_issues=result['quality_issues'],
                 source_reliability_score=result['source_reliability_score'],
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(UTC)
             )
             return quality_score
 
@@ -326,11 +327,11 @@ class DataQualityAgent:
             DataQualityScore object
         """
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             try:
                 quality_score = self._process_article_no_commit(db, news_id)
-                
+
                 if quality_score not in db:
                     db.add(quality_score)
 
@@ -346,7 +347,7 @@ class DataQualityAgent:
                 logger.error(f"Error processing article {news_id}: {e}")
                 raise
 
-    def process_batch(self, limit: int = 100) -> Dict:
+    def process_batch(self, limit: int = 100) -> dict:
         """
         Process batch of unprocessed articles with optimized single transaction.
 
@@ -357,7 +358,7 @@ class DataQualityAgent:
             Statistics dictionary
         """
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             # Find articles without quality scores (newest first)
             articles = db.query(RawNews).outerjoin(
@@ -406,10 +407,10 @@ class DataQualityAgent:
             logger.info(f"Quality assessment complete. Stats: {stats}")
             return stats
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get quality statistics."""
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             total_assessed = db.query(DataQualityScore).count()
 

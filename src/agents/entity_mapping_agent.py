@@ -9,17 +9,19 @@ OPTIMIZED VERSION:
 """
 import logging
 import re
-from typing import Dict, List, Optional
-from datetime import datetime, timezone
-from pathlib import Path
-from sqlalchemy.orm import Session
 import warnings
+from datetime import UTC, datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
 warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
 import yfinance as yf
 
 from src.models.database import get_scoped_session
-from src.models.raw_news import RawNews
 from src.models.entities import Entity, NewsEntityMapping
+from src.models.raw_news import RawNews
 from src.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
@@ -45,7 +47,7 @@ class EntityMappingAgent:
     # These are often mentioned in news as the source/analyst, not as the subject
     ANALYST_FIRMS = {
         'Oppenheimer', 'oppenheimer', 'Oppenheimer & Co',
-        'Wells Fargo Securities', 'wells fargo securities', 
+        'Wells Fargo Securities', 'wells fargo securities',
         'RBC Capital', 'RBC Capital Markets', 'rbc capital',
         'TD Cowen', 'td cowen', 'Cowen',
         'Scotiabank', 'scotiabank', 'Scotia Capital',
@@ -75,7 +77,7 @@ class EntityMappingAgent:
         'Mizuho Securities', 'mizuho securities',
         'Loop Capital', 'loop capital',
     }
-    
+
     # Non-tradeable entities to exclude (government agencies, crypto, etc.)
     EXCLUDE_ENTITIES = {
         # Government/Regulatory
@@ -119,7 +121,7 @@ class EntityMappingAgent:
         'nasdaq': [('QQQ', 'Nasdaq-100 ETF')],
         'dow jones': [('DIA', 'Dow Jones ETF')],
         'russell': [('IWM', 'Russell 2000 ETF')],
-        
+
         # Sectors
         'technology': [('XLK', 'Technology Sector ETF'), ('QQQ', 'Tech-heavy Nasdaq')],
         'tech sector': [('XLK', 'Technology Sector ETF')],
@@ -128,39 +130,39 @@ class EntityMappingAgent:
         'chip': [('SMH', 'Semiconductor ETF')],
         'ai': [('BOTZ', 'AI & Robotics ETF'), ('XLK', 'Technology ETF')],
         'artificial intelligence': [('BOTZ', 'AI & Robotics ETF')],
-        
+
         'financial': [('XLF', 'Financial Sector ETF')],
         'bank': [('XLF', 'Financial Sector ETF'), ('KBE', 'Bank ETF')],
         'insurance': [('KIE', 'Insurance ETF')],
-        
+
         'healthcare': [('XLV', 'Healthcare Sector ETF')],
         'biotech': [('XBI', 'Biotech ETF'), ('IBB', 'Biotech ETF')],
         'pharmaceutical': [('XPH', 'Pharmaceutical ETF')],
-        
+
         'energy': [('XLE', 'Energy Sector ETF')],
         'oil': [('XLE', 'Energy ETF'), ('USO', 'Oil Fund')],
         'natural gas': [('UNG', 'Natural Gas Fund')],
         'clean energy': [('ICLN', 'Clean Energy ETF')],
         'solar': [('TAN', 'Solar ETF')],
-        
+
         'consumer': [('XLP', 'Consumer Staples ETF'), ('XLY', 'Consumer Discretionary ETF')],
         'retail': [('XRT', 'Retail ETF')],
-        
+
         'industrial': [('XLI', 'Industrial Sector ETF')],
         'aerospace': [('ITA', 'Aerospace ETF')],
         'defense': [('ITA', 'Aerospace & Defense ETF')],
-        
+
         'real estate': [('VNQ', 'Real Estate ETF'), ('XLRE', 'Real Estate ETF')],
         'reit': [('VNQ', 'REIT ETF')],
-        
+
         'materials': [('XLB', 'Materials Sector ETF')],
         'gold': [('GLD', 'Gold ETF')],
         'silver': [('SLV', 'Silver ETF')],
         'commodity': [('DBC', 'Commodity ETF')],
-        
+
         'utility': [('XLU', 'Utilities Sector ETF')],
         'utilities': [('XLU', 'Utilities Sector ETF')],
-        
+
         # International/Currency
         'china': [('FXI', 'China Large-Cap ETF'), ('MCHI', 'China ETF')],
         'japan': [('EWJ', 'Japan ETF')],
@@ -169,13 +171,13 @@ class EntityMappingAgent:
         'europe': [('VGK', 'European ETF')],
         'emerging market': [('EEM', 'Emerging Markets ETF')],
         'dollar': [('UUP', 'US Dollar ETF')],
-        
+
         # Bonds/Fixed Income
         'bond': [('AGG', 'Bond Aggregate ETF'), ('TLT', 'Long-term Treasury ETF')],
         'treasury': [('TLT', '20+ Year Treasury ETF')],
         'corporate bond': [('LQD', 'Corporate Bond ETF')],
         'high yield': [('HYG', 'High Yield Bond ETF')],
-        
+
         # Volatility
         'volatility': [('VXX', 'VIX Short-term Futures ETF')],
         'vix': [('VXX', 'VIX Futures ETF')],
@@ -193,7 +195,7 @@ class EntityMappingAgent:
         # Load prompt template
         prompt_path = Path("config/prompts/entity_extraction.txt")
         if prompt_path.exists():
-            with open(prompt_path, 'r', encoding='utf-8') as f:
+            with open(prompt_path, encoding='utf-8') as f:
                 self.prompt_template = f.read()
         else:
             self.prompt_template = self._get_fallback_prompt()
@@ -226,13 +228,13 @@ Types: company, sector, person, location
 Exposure: direct, indirect, supply_chain
 Respond ONLY with JSON."""
 
-    def _extract_theme_mappings(self, article: RawNews) -> List[Dict]:
+    def _extract_theme_mappings(self, article: RawNews) -> list[dict]:
         """Extract theme/sector-based ETF mappings from article."""
         theme_entities = []
-        
+
         # Combine title and text for theme detection
         content = f"{article.title} {article.full_text}".lower()
-        
+
         # Check for each theme (use word boundaries for short terms)
         for theme, etfs in self.THEME_TO_ETF.items():
             # Use word boundaries for short keywords to avoid false matches
@@ -245,7 +247,7 @@ Respond ONLY with JSON."""
                 if theme not in content:
                     continue
                 match_count = content.count(theme)
-            
+
             for ticker, name in etfs:
                 theme_entities.append({
                     'text': name,
@@ -255,7 +257,7 @@ Respond ONLY with JSON."""
                     'exposure_type': 'indirect',
                     'mention_count': match_count
                 })
-        
+
         # Deduplicate by ticker (keep first occurrence)
         seen_tickers = set()
         unique_entities = []
@@ -263,10 +265,10 @@ Respond ONLY with JSON."""
             if entity['ticker'] not in seen_tickers:
                 seen_tickers.add(entity['ticker'])
                 unique_entities.append(entity)
-        
+
         return unique_entities
 
-    def _find_ticker_by_company_name(self, company_name: str) -> Optional[str]:
+    def _find_ticker_by_company_name(self, company_name: str) -> str | None:
         """
         Try to find ticker symbol by searching with company name.
         
@@ -279,12 +281,12 @@ Respond ONLY with JSON."""
         # Check cache first
         if company_name in self._ticker_cache:
             return self._ticker_cache[company_name]
-        
+
         try:
             # Try searching with company name directly
             ticker_obj = yf.Ticker(company_name)
             info = ticker_obj.info
-            
+
             if info and 'symbol' in info:
                 symbol = info['symbol']
                 self._ticker_cache[company_name] = symbol
@@ -292,7 +294,7 @@ Respond ONLY with JSON."""
                 return symbol
         except Exception:
             pass
-        
+
         # Try with cleaned name
         try:
             clean_name = company_name.replace(' Inc.', '').replace(' Corp.', '').replace(' LLC', '').replace(',', '').strip()
@@ -306,10 +308,10 @@ Respond ONLY with JSON."""
                     return symbol
         except Exception:
             pass
-        
+
         return None
 
-    def _normalize_ticker(self, company_name: str, suggested_ticker: Optional[str] = None) -> Optional[str]:
+    def _normalize_ticker(self, company_name: str, suggested_ticker: str | None = None) -> str | None:
         """
         Normalize and validate ticker symbol.
 
@@ -354,7 +356,7 @@ Respond ONLY with JSON."""
         logger.debug(f"Could not validate ticker for: {company_name}")
         return None
 
-    def process_batch(self, limit: int = 20, offset: int = 0) -> Dict:
+    def process_batch(self, limit: int = 20, offset: int = 0) -> dict:
         """
         Process batch of articles without entity mappings.
 
@@ -401,7 +403,7 @@ Respond ONLY with JSON."""
             for idx, article in enumerate(articles, 1):
                 try:
                     logger.info(f"Processing article {idx}/{len(articles)}: {article.news_id}")
-                    
+
                     # Extract entities and create mappings (without commit)
                     entities, mappings = self._process_article_no_commit(db, article)
 
@@ -417,7 +419,7 @@ Respond ONLY with JSON."""
                                 stats['companies_found'] += 1
                             elif entity.entity_type == 'sector':
                                 stats['sectors_found'] += 1
-                        
+
                         logger.info(f"  ✅ Found {len(entities)} entities, {len(mappings)} mappings")
                     else:
                         logger.warning(f"  ⚠️ No entities/mappings extracted for article {article.news_id}")
@@ -437,7 +439,7 @@ Respond ONLY with JSON."""
                     if entity.entity_id not in seen_ids:
                         seen_ids.add(entity.entity_id)
                         unique_entities.append(entity)
-                
+
                 db.bulk_save_objects(unique_entities)
                 logger.info(f"Bulk saved {len(unique_entities)} unique entities (from {len(all_entities)} total)")
 
@@ -451,7 +453,7 @@ Respond ONLY with JSON."""
             logger.info(f"Entity mapping complete. Stats: {stats}")
             return stats
 
-    def _find_articles_without_mappings(self, db: Session, limit: int, offset: int = 0) -> List[RawNews]:
+    def _find_articles_without_mappings(self, db: Session, limit: int, offset: int = 0) -> list[RawNews]:
         """
         Find processed articles without entity mappings.
 
@@ -483,7 +485,7 @@ Respond ONLY with JSON."""
         self,
         db: Session,
         article: RawNews
-    ) -> tuple[List[Entity], List[NewsEntityMapping]]:
+    ) -> tuple[list[Entity], list[NewsEntityMapping]]:
         """
         Process article and extract entities WITHOUT committing.
 
@@ -524,12 +526,12 @@ Respond ONLY with JSON."""
                     if entity_text in self.ANALYST_FIRMS or entity_text.lower() in self.ANALYST_FIRMS:
                         logger.debug(f"Skipping analyst/financial service firm: {entity_text}")
                         continue
-                    
+
                     # FILTER OUT NON-TRADEABLE ENTITIES
                     if entity_text in self.EXCLUDE_ENTITIES or entity_text.upper() in self.EXCLUDE_ENTITIES:
                         logger.debug(f"Skipping non-tradeable entity: {entity_text}")
                         continue
-                    
+
                     # Validate ticker
                     ticker = self._normalize_ticker(entity_text, suggested_ticker)
 
@@ -537,7 +539,7 @@ Respond ONLY with JSON."""
                     if not ticker:
                         logger.debug(f"Ticker validation failed for '{entity_text}' (suggested: '{suggested_ticker}'). Trying company name lookup...")
                         ticker = self._find_ticker_by_company_name(entity_text)
-                    
+
                     # If still no ticker, SKIP this entity instead of creating a fallback
                     # This prevents creating entities we can't get market data for
                     if not ticker:
@@ -569,7 +571,7 @@ Respond ONLY with JSON."""
                                 exposure_type=exposure_type,
                                 confidence=confidence,
                                 mention_count=mention_count,
-                                created_at=datetime.now(timezone.utc)
+                                created_at=datetime.now(UTC)
                             )
                             mappings.append(mapping)
 
@@ -596,14 +598,14 @@ Respond ONLY with JSON."""
                             exposure_type='indirect',
                             confidence=confidence,
                             mention_count=mention_count,
-                            created_at=datetime.now(timezone.utc)
+                            created_at=datetime.now(UTC)
                         )
                         mappings.append(mapping)
 
                 # ✨ NEW: Handle sector ETFs (theme-based mappings)
                 elif entity_type == 'sector_etf':
                     ticker = suggested_ticker or ent.get('ticker')
-                    
+
                     if ticker:
                         # Create ETF entity
                         entity = self._get_or_create_entity_no_commit(
@@ -624,7 +626,7 @@ Respond ONLY with JSON."""
                                 exposure_type='indirect',
                                 confidence=confidence,
                                 mention_count=mention_count,
-                                created_at=datetime.now(timezone.utc)
+                                created_at=datetime.now(UTC)
                             )
                             mappings.append(mapping)
 
@@ -647,8 +649,8 @@ Respond ONLY with JSON."""
         entity_id: str,
         entity_type: str,
         entity_name: str,
-        metadata: Optional[Dict] = None
-    ) -> Optional[Entity]:
+        metadata: dict | None = None
+    ) -> Entity | None:
         """
         Get existing entity or create new one WITHOUT committing.
 
@@ -677,12 +679,12 @@ Respond ONLY with JSON."""
                 entity_type=entity_type,
                 entity_name=entity_name,
                 metadata=metadata or {},
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(UTC)
             )
             logger.debug(f"Preparing new entity: {entity_id} ({entity_name})")
             return entity
 
-    def _extract_entities(self, db: Session, article: RawNews) -> Dict:
+    def _extract_entities(self, db: Session, article: RawNews) -> dict:
         """
         Extract entities from article using LLM.
 
@@ -725,11 +727,11 @@ Respond ONLY with JSON."""
 
             # Validate structure
             if not isinstance(result, dict):
-                logger.warning(f"LLM returned non-dict result, using empty entities")
+                logger.warning("LLM returned non-dict result, using empty entities")
                 return {'entities': []}
 
             if 'entities' not in result or not isinstance(result.get('entities'), list):
-                logger.warning(f"LLM result missing or invalid 'entities' field")
+                logger.warning("LLM result missing or invalid 'entities' field")
                 return {'entities': []}
 
             return result
@@ -742,7 +744,7 @@ Respond ONLY with JSON."""
             logger.error(f"Error extracting entities from {article.news_id}: {e}")
             raise
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """
         Get entity mapping statistics.
 

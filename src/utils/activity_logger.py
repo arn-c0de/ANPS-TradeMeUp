@@ -1,7 +1,7 @@
 """Activity Logger — real-time agent activity tracking and central DB log store."""
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -39,8 +39,8 @@ class ActivityLogger:
         message:   str,
         level:     str = "INFO",
         source:    str = "pipeline",
-        component: Optional[str] = None,
-        details:   Optional[Any] = None,
+        component: str | None = None,
+        details:   Any | None = None,
     ):
         """Log a message to the flat files and to the system_logs DB table."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -67,7 +67,7 @@ class ActivityLogger:
 
     # ── convenience wrappers (backward-compatible) ────────────────────────────
 
-    def log_agent_start(self, agent_name: str, phase: Optional[str] = None):
+    def log_agent_start(self, agent_name: str, phase: str | None = None):
         phase_text = f" — Phase {phase}" if phase else ""
         self.log_activity(
             f"STARTING {agent_name}{phase_text}", "STARTING",
@@ -80,7 +80,7 @@ class ActivityLogger:
             source="agent", component=agent_name,
         )
 
-    def log_agent_success(self, agent_name: str, count: int, duration: Optional[float] = None):
+    def log_agent_success(self, agent_name: str, count: int, duration: float | None = None):
         duration_text = f" in {duration:.2f}s" if duration else ""
         self.log_activity(
             f"SUCCESS {agent_name}: Processed {count} items{duration_text}", "SUCCESS",
@@ -102,7 +102,7 @@ class ActivityLogger:
         self.log_activity("=" * 60, "INFO", source="pipeline")
 
     def log_pipeline_complete(self, pipeline_name: str = "MVP Pipeline",
-                              duration: Optional[float] = None):
+                              duration: float | None = None):
         duration_text = f" in {duration:.2f}s" if duration else ""
         self.log_activity(
             f">> {pipeline_name} COMPLETED{duration_text}", "SUCCESS",
@@ -129,9 +129,9 @@ class ActivityLogger:
         self,
         level:     str,
         source:    str,
-        component: Optional[str],
+        component: str | None,
         message:   str,
-        details:   Optional[Any],
+        details:   Any | None,
     ):
         """Insert one row into system_logs. Never raises."""
         try:
@@ -140,7 +140,7 @@ class ActivityLogger:
 
             norm_level = _LEVEL_MAP.get(level.upper(), "INFO")
             entry = SystemLog(
-                timestamp = datetime.now(timezone.utc),
+                timestamp = datetime.now(UTC),
                 level     = norm_level,
                 source    = source[:50],
                 component = (component or "")[:100] or None,

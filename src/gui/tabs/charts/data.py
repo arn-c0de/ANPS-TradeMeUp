@@ -2,17 +2,18 @@
 Charts Tab - Data Retrieval Functions
 """
 
-from typing import Optional, Dict
+from typing import Dict, Optional
+
 import pandas as pd
 
-from src.services.market_data import MarketDataProvider
 from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager
+from src.services.market_data import MarketDataProvider
 
 # Initialize market data provider
 market_data = MarketDataProvider()
 
 
-def _fetch_chart_data(symbol: str, timeframe: str, loaded_data: Optional[pd.DataFrame] = None) -> Optional[pd.DataFrame]:
+def _fetch_chart_data(symbol: str, timeframe: str, loaded_data: pd.DataFrame | None = None) -> pd.DataFrame | None:
     """
     Fetch chart data, using loaded_data if provided (for infinite scroll).
     
@@ -26,11 +27,11 @@ def _fetch_chart_data(symbol: str, timeframe: str, loaded_data: Optional[pd.Data
     """
     if loaded_data is not None and not loaded_data.empty:
         return loaded_data
-    
+
     # Use ChartDataManager for initial load
     data_manager = get_chart_data_manager()
     df = data_manager.get_initial_data(symbol, timeframe)
-    
+
     if df is None or df.empty:
         # Fallback to direct market_data call
         if timeframe == '1d_1m':
@@ -39,11 +40,11 @@ def _fetch_chart_data(symbol: str, timeframe: str, loaded_data: Optional[pd.Data
             df = market_data.get_historical_data(symbol, period='5d', interval='5m')
         else:
             df = market_data.get_historical_data(symbol, period=timeframe)
-    
+
     return df
 
 
-def _calculate_stats(df: pd.DataFrame, symbol: str) -> Optional[Dict]:
+def _calculate_stats(df: pd.DataFrame, symbol: str) -> dict | None:
     """
     Calculate statistics from DataFrame.
     
@@ -56,7 +57,7 @@ def _calculate_stats(df: pd.DataFrame, symbol: str) -> Optional[Dict]:
     """
     if df is None or df.empty:
         return None
-    
+
     try:
         current_price = df['Close'].iloc[-1]
         first_price = df['Close'].iloc[0]

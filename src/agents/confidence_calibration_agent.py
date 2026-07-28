@@ -1,13 +1,14 @@
 """Agent 6.5: Confidence Calibration Agent - Calibrate prediction confidence scores."""
 import logging
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Dict, List
-from datetime import datetime, timedelta, timezone
-from sqlalchemy.orm import Session
-from sqlalchemy import func
-import numpy as np
 
-from src.models.predictions import Prediction, PredictionOutcome
+import numpy as np
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from src.models.database import SessionLocal
+from src.models.predictions import Prediction, PredictionOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class ConfidenceCalibrationAgent:
         """
         pass
 
-    def calculate_calibration_error(self, lookback_days: int = 30) -> Dict:
+    def calculate_calibration_error(self, lookback_days: int = 30) -> dict:
         """
         Calculate expected calibration error (ECE).
 
@@ -43,7 +44,7 @@ class ConfidenceCalibrationAgent:
         """
         db = SessionLocal()
         try:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+            cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
             # Fetch predictions with outcomes
             predictions = db.query(Prediction).join(
@@ -160,7 +161,7 @@ class ConfidenceCalibrationAgent:
         # Fallback: return raw confidence
         return raw_confidence
 
-    def process_batch(self, limit: int = 100) -> Dict:
+    def process_batch(self, limit: int = 100) -> dict:
         """
         Recalibrate recent predictions.
 
@@ -220,6 +221,6 @@ class ConfidenceCalibrationAgent:
         finally:
             db.close()
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get calibration statistics."""
         return self.calculate_calibration_error(lookback_days=90)

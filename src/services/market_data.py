@@ -2,8 +2,9 @@
 Live Market Data Provider
 Fetches real-time stock market data from various sources
 """
-import warnings
 import os
+import warnings
+
 warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
 warnings.filterwarnings('ignore', category=DeprecationWarning, module='yfinance')
 warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
@@ -14,16 +15,18 @@ except ImportError:
     pass
 # Suppress yfinance's own logging
 import logging as yf_logging
+
 yf_logging.getLogger('yfinance').setLevel(yf_logging.ERROR)
 
-import yfinance as yf
-import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 import logging
 import time
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from datetime import datetime, timedelta
 from functools import lru_cache
+from typing import Dict, List, Optional
+
+import pandas as pd
+import yfinance as yf
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +49,13 @@ class MarketDataProvider:
         self.cache = {}
         self.cache_timeout = 60  # seconds
         self.cache_max_age = 3600  # 1 hour max for fallback
-        
+
         # Rate limiting to avoid yfinance "Too Many Requests" errors
         self._last_request_time = {}
         self._min_request_interval = 0.1  # 100ms between requests per ticker
         self._global_last_request = time.time()
         self._global_min_interval = 0.05  # 50ms between any requests
-        
+
         # Suppress yfinance logging
         yf_logging.getLogger('yfinance').setLevel(yf_logging.CRITICAL)
 
@@ -79,7 +82,7 @@ class MarketDataProvider:
             # Indices
             '^GSPC': 'S&P 500', '^DJI': 'Dow Jones', '^IXIC': 'NASDAQ', '^RUT': 'Russell 2000'
         }
-    
+
     def _rate_limit(self, symbol: str = None):
         """Apply rate limiting to avoid yfinance throttling
         
@@ -87,13 +90,13 @@ class MarketDataProvider:
             symbol: Optional ticker symbol for per-ticker rate limiting
         """
         current_time = time.time()
-        
+
         # Global rate limit (all requests)
         time_since_last_global = current_time - self._global_last_request
         if time_since_last_global < self._global_min_interval:
             time.sleep(self._global_min_interval - time_since_last_global)
         self._global_last_request = time.time()
-        
+
         # Per-ticker rate limit (if symbol provided)
         if symbol:
             if symbol in self._last_request_time:
@@ -101,8 +104,8 @@ class MarketDataProvider:
                 if time_since_last < self._min_request_interval:
                     time.sleep(self._min_request_interval - time_since_last)
             self._last_request_time[symbol] = time.time()
-    
-    def _get_cached_data(self, symbol: str) -> Optional[Dict]:
+
+    def _get_cached_data(self, symbol: str) -> dict | None:
         """
         Get cached data if available and not too old
         
@@ -119,8 +122,8 @@ class MarketDataProvider:
                 logger.info(f"Returning cached data for {symbol} (age: {age}s)")
                 return cached_data
         return None
-    
-    def get_live_price(self, symbol: str) -> Optional[Dict]:
+
+    def get_live_price(self, symbol: str) -> dict | None:
         """
         Get current live price for a symbol
         
@@ -133,23 +136,23 @@ class MarketDataProvider:
         # Skip obviously invalid tickers
         if not symbol or len(symbol) > 10 or symbol.startswith('$'):
             return None
-        
+
         # Check cache first to avoid unnecessary API calls
         cached = self._get_cached_data(symbol)
         if cached:
             return cached
-        
+
         # Apply rate limiting before making API call
         self._rate_limit(symbol)
-        
+
         try:
             ticker = yf.Ticker(symbol)
             info = ticker.info
-            
+
             # Check if info is valid (not empty dict or None)
             if not info or not isinstance(info, dict):
                 return self._get_cached_data(symbol)
-            
+
             data = {
                 'symbol': symbol,
                 'price': info.get('currentPrice', info.get('regularMarketPrice', 0)),
@@ -176,14 +179,14 @@ class MarketDataProvider:
             if "404" not in str(e) and "Not Found" not in str(e):
                 logger.debug(f"Error fetching price for {symbol}: {e}")
             return self._get_cached_data(symbol)
-    
+
     @lru_cache(maxsize=32)
     def get_historical_data(
-        self, 
-        symbol: str, 
+        self,
+        symbol: str,
         period: str = "1mo",
         interval: str = "1d"
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame | None:
         """
         Get historical OHLCV data
         
@@ -198,18 +201,18 @@ class MarketDataProvider:
         # Skip obviously invalid tickers
         if not symbol or len(symbol) > 10 or symbol.startswith('$'):
             return None
-        
+
         # Apply rate limiting before making API call
         self._rate_limit(symbol)
-            
+
         try:
             ticker = yf.Ticker(symbol)
             df = ticker.history(period=period, interval=interval)
-            
+
             # Check if DataFrame is valid and not empty
             if df is None or df.empty:
                 return None
-                
+
             return df
         except Exception as e:
             # Check for rate limiting error
@@ -220,9 +223,9 @@ class MarketDataProvider:
             if "404" not in str(e) and "Not Found" not in str(e) and "delisted" not in str(e):
                 logger.debug(f"Error fetching historical data for {symbol}: {e}")
             return None
-    
+
     @lru_cache(maxsize=32)
-    def get_intraday_data(self, symbol: str, days: int = 1) -> Optional[pd.DataFrame]:
+    def get_intraday_data(self, symbol: str, days: int = 1) -> pd.DataFrame | None:
         """
         Get intraday data with 1-minute intervals
 
@@ -241,7 +244,7 @@ class MarketDataProvider:
             logger.error(f"Error fetching intraday data for {symbol}: {e}")
             return None
 
-    def search_symbols(self, query: str, limit: int = 10) -> List[Dict]:
+    def search_symbols(self, query: str, limit: int = 10) -> list[dict]:
         """
         Search for stock symbols matching query
 
@@ -287,7 +290,7 @@ class MarketDataProvider:
 
         return results
 
-    def get_multiple_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
+    def get_multiple_quotes(self, symbols: list[str]) -> dict[str, dict]:
         """
         Get quotes for multiple symbols at once
         
@@ -303,8 +306,8 @@ class MarketDataProvider:
             if quote:
                 quotes[symbol] = quote
         return quotes
-    
-    def get_market_indices(self) -> Dict[str, Dict]:
+
+    def get_market_indices(self) -> dict[str, dict]:
         """
         Get major market indices
         
@@ -318,16 +321,16 @@ class MarketDataProvider:
             'Russell 2000': '^RUT',
             'VIX': '^VIX'
         }
-        
+
         index_data = {}
         for name, symbol in indices.items():
             data = self.get_live_price(symbol)
             if data:
                 index_data[name] = data
-        
+
         return index_data
-    
-    def search_symbol(self, query: str) -> List[Dict]:
+
+    def search_symbol(self, query: str) -> list[dict]:
         """
         Search for stock symbols
         
@@ -342,7 +345,7 @@ class MarketDataProvider:
             # For production, use a proper symbol search API
             ticker = yf.Ticker(query.upper())
             info = ticker.info
-            
+
             return [{
                 'symbol': query.upper(),
                 'name': info.get('longName', query),

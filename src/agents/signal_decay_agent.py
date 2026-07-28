@@ -1,10 +1,11 @@
 """Agent 5.5: Signal Decay Modeling Agent - Model how news impact decays over time."""
 import logging
 import math
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Dict, Optional
-from datetime import datetime, timedelta, timezone
-from sqlalchemy.orm import Session
+
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from src.models.analysis import ImpactScore, SignalDecayModel
 from src.models.raw_news import RawNews
@@ -122,7 +123,7 @@ class SignalDecayAgent:
             half_life_days=half_life_days,
             effective_window_days=effective_window_days,
             model_type='exponential',
-            created_at=datetime.now(timezone.utc)
+            created_at=datetime.now(UTC)
         )
 
         logger.info(
@@ -146,13 +147,13 @@ class SignalDecayAgent:
             SignalDecayModel object
         """
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             decay_model = self._model_decay_no_commit(db, news_id, impact_score)
             db.merge(decay_model)  # Use merge for upsert
             return decay_model
 
-    def get_current_impact(self, news_id: str) -> Optional[float]:
+    def get_current_impact(self, news_id: str) -> float | None:
         """
         Get current (time-adjusted) impact of a news article.
 
@@ -163,7 +164,7 @@ class SignalDecayAgent:
             Current impact score or None
         """
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             # Fetch decay model
             decay_model = db.query(SignalDecayModel).filter(
@@ -183,7 +184,7 @@ class SignalDecayAgent:
                 return None
 
             # Calculate time elapsed
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             time_elapsed = now - article.published_at
             hours_elapsed = time_elapsed.total_seconds() / 3600
 
@@ -196,7 +197,7 @@ class SignalDecayAgent:
 
             return current_impact
 
-    def process_batch(self, limit: int = 50) -> Dict:
+    def process_batch(self, limit: int = 50) -> dict:
         """
         Process batch of impact scores and create decay models with optimized single transaction.
 
@@ -207,7 +208,7 @@ class SignalDecayAgent:
             Statistics dictionary
         """
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             # Find impact scores without decay models
             impact_scores = db.query(ImpactScore).outerjoin(
@@ -261,10 +262,10 @@ class SignalDecayAgent:
             logger.info(f"Signal decay modeling complete. Stats: {stats}")
             return stats
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get signal decay statistics."""
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
             total_models = db.query(SignalDecayModel).count()
 
@@ -304,9 +305,9 @@ class SignalDecayAgent:
             Number of records removed
         """
         from src.models.database import get_scoped_session
-        
+
         with get_scoped_session() as db:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=threshold_days)
+            cutoff = datetime.now(UTC) - timedelta(days=threshold_days)
 
             deleted = db.query(SignalDecayModel).filter(
                 SignalDecayModel.created_at < cutoff

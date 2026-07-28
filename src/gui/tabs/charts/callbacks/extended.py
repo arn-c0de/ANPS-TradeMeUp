@@ -18,19 +18,23 @@ from dash import ALL, MATCH, Input, Output, State, callback_context, html
 from dash.exceptions import PreventUpdate
 from sqlalchemy.orm import Session
 
-from src.models.database import engine as _engine
+from src.gui.tabs.charts.chart_data_manager import ChartDataManager, get_chart_data_manager
+from src.gui.tabs.charts.chart_utils import find_index_binary
 from src.gui.tabs.charts.components import (
+    create_overlay_list,
+    create_trading_overlay,
     get_stock_chart_components,
     get_stock_chart_with_stats,
-    create_trading_overlay,
     render_multi_panel_layout,
-    create_overlay_list
 )
+from src.gui.tabs.charts.fullscreen_manager import get_container_classname, get_fullscreen_state
+from src.gui.tabs.charts.overlay_utils import (
+    ensure_overlay_tab,
+    normalize_overlay_store,
+    save_overlays_to_db,
+)
+from src.models.database import engine as _engine
 from src.services.market_data import MarketDataProvider
-from src.gui.tabs.charts.fullscreen_manager import get_fullscreen_state, get_container_classname
-from src.gui.tabs.charts.overlay_utils import normalize_overlay_store, save_overlays_to_db, ensure_overlay_tab
-from src.gui.tabs.charts.chart_utils import find_index_binary
-from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager, ChartDataManager
 
 # Initialize market data provider
 market_data = MarketDataProvider()
@@ -59,7 +63,7 @@ def register_charts_extended(app):
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def _get_triggered_relayout(relayout_data_list: list, graph_ids: list) -> Tuple[Optional[str], Optional[dict]]:
+def _get_triggered_relayout(relayout_data_list: list, graph_ids: list) -> tuple[str | None, dict | None]:
     """Resolve which chart graph triggered a relayoutData callback.
 
     Returns (tab_id, relayout_data) or (None, None) if the trigger cannot be
@@ -100,7 +104,7 @@ def _isoformat_or_str(value: Any) -> str:
         return str(value)
 
 
-def _search_entity_symbols(search_value: str) -> List[Dict[str, str]]:
+def _search_entity_symbols(search_value: str) -> list[dict[str, str]]:
     """Search the Entity table by ticker or company name; return dropdown options."""
     from src.models.entities import Entity
 
@@ -762,7 +766,7 @@ def _register_overlay_modal_callbacks(app):
 # View state persistence + infinite scroll
 # ---------------------------------------------------------------------------
 
-def _parse_visible_range(relayout_data: dict) -> Optional[list]:
+def _parse_visible_range(relayout_data: dict) -> list | None:
     """Extract the visible [left, right] x-axis range from relayout data, or None."""
     if 'xaxis.range' in relayout_data:
         visible_range = relayout_data['xaxis.range']
@@ -776,7 +780,7 @@ def _parse_visible_range(relayout_data: dict) -> Optional[list]:
     return visible_range
 
 
-def _to_axis_value(value: Any) -> Optional[Any]:
+def _to_axis_value(value: Any) -> Any | None:
     """Convert a Plotly axis bound to a comparable value.
 
     Numbers (category-type x-axis indices) pass through unchanged; ISO strings
@@ -794,7 +798,7 @@ def _to_axis_value(value: Any) -> Optional[Any]:
 
 
 def _resolve_visible_indices(indices: list, left_value: Any, right_value: Any,
-                             total_points: int) -> Tuple[int, int]:
+                             total_points: int) -> tuple[int, int]:
     """Map visible range bounds to (left_index, right_index) within the loaded data."""
     # With type='category' x-axis, Plotly sends numeric indices (0, 1, 2...) not timestamps
     if isinstance(left_value, (int, float)) and isinstance(right_value, (int, float)):
@@ -819,7 +823,7 @@ def _resolve_visible_indices(indices: list, left_value: Any, right_value: Any,
 
 def _load_adjacent_data(data_manager: ChartDataManager, symbol: str, timeframe: str,
                         cached_df: pd.DataFrame, should_load_left: bool,
-                        should_load_right: bool) -> Tuple[pd.DataFrame, bool, int]:
+                        should_load_right: bool) -> tuple[pd.DataFrame, bool, int]:
     """Load historical (left) and/or future (right) data around the cached range.
 
     Returns (combined_df, data_loaded, index_offset) where index_offset is the
@@ -1304,7 +1308,7 @@ def _register_tab_management_callbacks(app):
 # ---------------------------------------------------------------------------
 
 def _get_loaded_data_with_offset(tab: dict, tab_loaded: dict,
-                                 view_state: Optional[dict]) -> Optional[pd.DataFrame]:
+                                 view_state: dict | None) -> pd.DataFrame | None:
     """Fetch cached infinite-scroll data for a tab and shift the saved view range if needed.
 
     If new data was recently prepended (fresh index_offset), the saved x-axis

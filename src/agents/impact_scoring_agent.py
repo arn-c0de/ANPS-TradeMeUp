@@ -9,17 +9,18 @@ OPTIMIZED VERSION:
 """
 import logging
 import math
-from typing import Dict, Optional, List
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime, timezone
+from typing import Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
-from src.models.database import get_scoped_session
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
-from src.models.entities import NewsEntityMapping, Entity
-from src.models.analysis import ImpactScore, SurpriseScore, MarketRegime
+from src.models.analysis import ImpactScore, MarketRegime, SurpriseScore
 from src.models.data_quality import DataQualityScore
+from src.models.database import get_scoped_session
+from src.models.entities import Entity, NewsEntityMapping
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ class ImpactScoringAgent:
 
         return min(1.0, max(0.0, importance))
 
-    def _get_current_regime(self, db: Session) -> Dict:
+    def _get_current_regime(self, db: Session) -> dict:
         """Get current market regime."""
         # Get most recent regime
         regime = db.query(MarketRegime).order_by(
@@ -163,7 +164,7 @@ class ImpactScoringAgent:
             'risk_appetite': 'neutral'
         }
 
-    def _calculate_regime_sensitivity(self, current_regime: Dict) -> float:
+    def _calculate_regime_sensitivity(self, current_regime: dict) -> float:
         """
         Calculate regime sensitivity multiplier (0-2).
 
@@ -252,11 +253,11 @@ class ImpactScoringAgent:
         News becomes less relevant over time.
         """
         # Use timezone-aware datetime for PostgreSQL compatibility
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Ensure published_at is timezone-aware
         if published_at.tzinfo is None:
-            published_at = published_at.replace(tzinfo=timezone.utc)
-        
+            published_at = published_at.replace(tzinfo=UTC)
+
         hours_old = (now - published_at).total_seconds() / 3600
 
         # Exponential decay: exp(-λ * hours)
@@ -266,7 +267,7 @@ class ImpactScoringAgent:
 
         return max(0.1, decay)  # Minimum 0.1 to avoid complete decay
 
-    def process_batch(self, limit: int = 30) -> Dict:
+    def process_batch(self, limit: int = 30) -> dict:
         """
         Process batch of articles without impact scores.
 
@@ -346,7 +347,7 @@ class ImpactScoringAgent:
             logger.info(f"Impact scoring complete. Stats: {stats}")
             return stats
 
-    def _find_articles_without_impact(self, db: Session, limit: int) -> List:
+    def _find_articles_without_impact(self, db: Session, limit: int) -> list:
         """
         Find articles with entity mappings but no impact scores.
 
@@ -375,7 +376,7 @@ class ImpactScoringAgent:
         self,
         db: Session,
         news_id: str
-    ) -> List[ImpactScore]:
+    ) -> list[ImpactScore]:
         """
         Process article and calculate impact scores WITHOUT committing.
 
@@ -416,7 +417,7 @@ class ImpactScoringAgent:
                             confidence=result['confidence'],
                             time_horizon=result['time_horizon'],
                             expected_volatility_impact=result['expected_volatility_impact'],
-                            created_at=datetime.now(timezone.utc)
+                            created_at=datetime.now(UTC)
                         )
 
                         impact_scores.append(impact_score)
@@ -444,7 +445,7 @@ class ImpactScoringAgent:
         db: Session,
         news_id: str,
         entity_id: str
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Calculate impact score for a news-entity pair.
 
@@ -559,7 +560,7 @@ class ImpactScoringAgent:
             logger.error(f"Error calculating impact for {news_id}/{entity_id}: {e}")
             return None
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """
         Get impact scoring statistics.
 

@@ -44,6 +44,7 @@ def flatten_overlay_items(tab_overlays: dict):
 def load_overlays_from_db():
     """Load all chart overlays from database."""
     from sqlalchemy.orm import Session
+
     from src.models.chart_overlays import ChartOverlay
 
     try:
@@ -78,6 +79,7 @@ def load_overlays_from_db():
 def save_overlays_to_db(overlays_data, tabs_data):
     """Save chart overlays to database."""
     from sqlalchemy.orm import Session
+
     from src.models.chart_overlays import ChartOverlay
 
     try:

@@ -1,13 +1,14 @@
 """API endpoints for predictions."""
+from datetime import UTC, datetime, timedelta, timezone
 from typing import List, Optional
-from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, Query, HTTPException
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
 
 from src.models.database import get_db
-from src.models.predictions import Prediction
 from src.models.entities import Entity
+from src.models.predictions import Prediction
 from src.utils.json_helpers import ensure_dict
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
@@ -17,7 +18,7 @@ class PredictionResponse(BaseModel):
     """Response model for predictions."""
     prediction_id: str
     entity_id: str
-    entity_name: Optional[str] = None
+    entity_name: str | None = None
     timestamp: datetime
     horizon: str
     direction_probabilities: dict
@@ -25,17 +26,16 @@ class PredictionResponse(BaseModel):
     confidence: float
     model_version: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
-@router.get("/", response_model=List[PredictionResponse])
+@router.get("/", response_model=list[PredictionResponse])
 def list_predictions(
-    entity_id: Optional[str] = Query(None, description="Filter by entity"),
+    entity_id: str | None = Query(None, description="Filter by entity"),
     min_confidence: float = Query(0.0, ge=0.0, le=1.0, description="Minimum confidence"),
-    horizon: Optional[str] = Query(None, description="Filter by horizon (1d, 5d, 20d)"),
-    start_date: Optional[datetime] = Query(None, description="Start date"),
-    end_date: Optional[datetime] = Query(None, description="End date"),
+    horizon: str | None = Query(None, description="Filter by horizon (1d, 5d, 20d)"),
+    start_date: datetime | None = Query(None, description="Start date"),
+    end_date: datetime | None = Query(None, description="End date"),
     limit: int = Query(50, le=200, description="Maximum results"),
     db: Session = Depends(get_db)
 ):
@@ -136,7 +136,7 @@ def get_statistics(db: Session = Depends(get_db)):
     avg_confidence = db.query(func.avg(Prediction.confidence)).scalar()
 
     # Recent predictions (last 24h)
-    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    yesterday = datetime.now(UTC) - timedelta(days=1)
     recent = db.query(Prediction).filter(Prediction.timestamp >= yesterday).count()
 
     return {

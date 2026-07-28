@@ -1,7 +1,8 @@
 """Database models for chart overlays (brackets and breaks)."""
-from datetime import datetime
-from sqlalchemy import Column, String, Float, Boolean, DateTime, Index
 import uuid
+from datetime import datetime
+
+from sqlalchemy import Boolean, Column, DateTime, Float, Index, String
 
 from src.models.database import Base, utc_now
 from src.models.types import GUID

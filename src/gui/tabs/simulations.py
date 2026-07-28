@@ -4,19 +4,20 @@ Simulations Tab - View trading simulation outcomes
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import dash
+import dash_bootstrap_components as dbc
 from dash import ALL, MATCH, Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
-import dash_bootstrap_components as dbc
 from sqlalchemy import delete, desc, func
 from sqlalchemy.orm import Session, joinedload
 
-from src.models.trading_simulation import TradingSimulation
+from src.models.database import engine as _engine
+from src.models.database import get_scoped_session
 from src.models.entities import Entity
 from src.models.predictions import Prediction
-from src.models.database import engine as _engine, get_scoped_session
+from src.models.trading_simulation import TradingSimulation
 from src.utils.activity_logger import activity_logger
 from src.utils.json_helpers import ensure_dict as _ensure_dict
 
@@ -28,9 +29,9 @@ def create_layout():
     return html.Div([
         dcc.Store(id="sim-delete-status"),
         dcc.Store(id="sim-filter-sync-store", data={"entities": None, "horizon": None}),
-        
+
         # Note: Shared stores are now in main app.py layout
-        
+
         dbc.Container([
             # Portfolio Settings Section (collapsible)
             dbc.Row([
@@ -325,10 +326,10 @@ def create_layout():
                     ])
                 ], width=12)
             ]),
-            
+
             # Status alerts
             html.Div(id="resimulate-status"),
-            
+
             # Clear All Simulations Confirmation Modal
             dbc.Modal([
                 dbc.ModalHeader(dbc.ModalTitle("⚠️ Confirm Delete All Simulations")),
@@ -341,7 +342,7 @@ def create_layout():
                     dbc.Button("Delete All", id="btn-confirm-clear-simulations", color="danger")
                 ])
             ], id="modal-clear-all-simulations", is_open=False),
-            
+
             # Resimulate All Confirmation Modal
             dbc.Modal([
                 dbc.ModalHeader(dbc.ModalTitle("🔄 Confirm Resimulate All")),
@@ -356,7 +357,7 @@ def create_layout():
                 ])
             ], id="modal-resimulate-all-simulations", is_open=False)
         ], fluid=True),
-        
+
         # Toast for refresh feedback (simulations-specific)
         dbc.Toast(
             id="simulations-refresh-toast",
@@ -401,12 +402,12 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                 if start:
                     if isinstance(start, str):
                         start = datetime.fromisoformat(start).date()
-                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=UTC)
                     query = query.filter(TradingSimulation.created_at >= start_dt)
                 if end:
                     if isinstance(end, str):
                         end = datetime.fromisoformat(end).date()
-                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=UTC)
                     query = query.filter(TradingSimulation.created_at <= end_dt)
 
             simulations = query.limit(200).all()
@@ -504,14 +505,14 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                 stop_loss_pct = sim.stop_loss_pct
                 take_profit_pct = sim.take_profit_pct
                 risk_reward_ratio = sim.risk_reward_ratio
-                
+
                 # Format stop loss tooltip
                 sl_tooltip = None
                 if sim.stop_loss_price:
                     sl_tooltip = f"Stop Loss Price: ${sim.stop_loss_price:.4f}" if sim.stop_loss_price < 1 else f"Stop Loss Price: ${sim.stop_loss_price:,.2f}"
                     if sim.stop_loss_type:
                         sl_tooltip += f"\nMethod: {sim.stop_loss_type.replace('_', ' ').title()}"
-                
+
                 # Format take profit tooltip
                 tp_tooltip = None
                 if sim.take_profit_price:
@@ -665,13 +666,13 @@ def get_prediction_entity_options(engine, date_range=None):
                 start, end = date_range
                 start = _normalize_date(start)
                 end = _normalize_date(end)
-                
+
                 # Filter predictions by date range
                 if start:
-                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=UTC)
                     query = query.filter(Prediction.created_at >= start_dt)
                 if end:
-                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=UTC)
                     query = query.filter(Prediction.created_at <= end_dt)
 
             # Group by entity to get counts
@@ -721,22 +722,22 @@ def get_entity_options(engine, date_range=None):
                 start, end = date_range
                 start = _normalize_date(start)
                 end = _normalize_date(end)
-                
+
                 # Filter simulations by date range
                 if start:
-                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=UTC)
                     query = query.filter(TradingSimulation.created_at >= start_dt)
                 if end:
-                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=UTC)
                     query = query.filter(TradingSimulation.created_at <= end_dt)
 
             # Group by entity to get counts
             query = query.group_by(Entity.entity_id, Entity.entity_name)
-            
+
             # If no date filter, only show entities that have simulations
             if not (date_range and len(date_range) == 2 and (date_range[0] or date_range[1])):
                 query = query.having(func.count(TradingSimulation.simulation_id) > 0)
-            
+
             query = query.order_by(Entity.entity_name)
 
             results = query.all()
@@ -858,25 +859,25 @@ def register_callbacks(app):
                     if start_date:
                         start = datetime.fromisoformat(start_date) if isinstance(start_date, str) else start_date
                         if hasattr(start, "date") and not isinstance(start, datetime):
-                            start = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+                            start = datetime.combine(start, datetime.min.time()).replace(tzinfo=UTC)
                         elif isinstance(start, datetime) and start.tzinfo is None:
-                            start = start.replace(tzinfo=timezone.utc)
+                            start = start.replace(tzinfo=UTC)
                     else:
-                        start = datetime(2020, 1, 1, tzinfo=timezone.utc)  # Default far past
-                    
+                        start = datetime(2020, 1, 1, tzinfo=UTC)  # Default far past
+
                     if end_date:
                         end = datetime.fromisoformat(end_date) if isinstance(end_date, str) else end_date
                         if hasattr(end, "date") and not isinstance(end, datetime):
-                            end = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+                            end = datetime.combine(end, datetime.max.time()).replace(tzinfo=UTC)
                         elif isinstance(end, datetime) and end.tzinfo is None:
-                            end = end.replace(tzinfo=timezone.utc)
+                            end = end.replace(tzinfo=UTC)
                     else:
-                        end = datetime.now(timezone.utc)  # Default to now
-                    
+                        end = datetime.now(UTC)  # Default to now
+
                     # Validate date range
                     if start > end:
                         return dbc.Alert("Start date must be before end date", color="danger", dismissable=True, duration=5000), dash.no_update
-                    
+
                     date_range = (start, end)
                     logger.info(f"Creating simulations for date range: {start.date()} to {end.date()}")
                 except Exception as e:
@@ -891,7 +892,7 @@ def register_callbacks(app):
             filter_sync_data = {
                 "entities": entities if entities and len(entities) > 0 else None,
                 "horizon": horizon if horizon != "all" else None,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
             return dbc.Alert(
                 f"Created {stats['created']} simulations, updated {stats['updated']}, skipped {stats['skipped']}, errors {stats['errors']}",
@@ -951,7 +952,7 @@ def register_callbacks(app):
                     "count": count,
                     "remaining": remaining,
                     "deleted": True,
-                    "ts": datetime.now(timezone.utc).isoformat()
+                    "ts": datetime.now(UTC).isoformat()
                 }
             except Exception as e:
                 logger.error(f"Error clearing all simulations: {e}")
@@ -961,7 +962,7 @@ def register_callbacks(app):
                     "action": "clear_all",
                     "error": str(e),
                     "deleted": False,
-                    "ts": datetime.now(timezone.utc).isoformat()
+                    "ts": datetime.now(UTC).isoformat()
                 }
         if not n_clicks or not any(n_clicks):
             raise PreventUpdate
@@ -986,7 +987,7 @@ def register_callbacks(app):
             if success:
                 disabled_states = [False] * len(button_ids)
                 disabled_states[target_index] = True
-                return disabled_states, {"simulation_id": simulation_id, "deleted": True, "ts": datetime.now(timezone.utc).isoformat()}
+                return disabled_states, {"simulation_id": simulation_id, "deleted": True, "ts": datetime.now(UTC).isoformat()}
             return [False] * len(button_ids), dash.no_update
         except Exception as e:
             logger.error(f"Error deleting simulation: {e}")
@@ -1060,12 +1061,12 @@ def register_callbacks(app):
             return "", dash.no_update, dash.no_update
         try:
             from src.simulations.trading_simulator import TradingSimulationEngine
-            
+
             with get_scoped_session() as db:
                 # Get all existing simulations
                 simulations = db.query(TradingSimulation).all()
                 total = len(simulations)
-                
+
                 if total == 0:
                     return dbc.Alert(
                         "No simulations found to resimulate.",
@@ -1073,11 +1074,11 @@ def register_callbacks(app):
                         dismissable=True,
                         duration=4000
                     ), dash.no_update, dash.no_update
-                
+
                 engine = TradingSimulationEngine()
                 updated_count = 0
                 error_count = 0
-                
+
                 # Resimulate each one
                 for sim in simulations:
                     try:
@@ -1085,11 +1086,11 @@ def register_callbacks(app):
                         prediction = db.query(Prediction).filter(
                             Prediction.prediction_id == sim.prediction_id
                         ).first()
-                        
+
                         entity = db.query(Entity).filter(
                             Entity.entity_id == sim.entity_id
                         ).first()
-                        
+
                         if prediction and entity:
                             # Resimulate with fresh data
                             updated_sim = engine.simulate_prediction(db, prediction, entity)
@@ -1103,30 +1104,30 @@ def register_callbacks(app):
                     except Exception as e:
                         error_count += 1
                         logger.error(f"Error resimulating {sim.simulation_id}: {e}")
-                
+
                 db.commit()
                 activity_logger.log_activity(
                     f"Resimulated {updated_count}/{total} simulations (errors: {error_count})",
                     "INFO"
                 )
-                
+
                 # Refresh the table
                 new_table = get_simulation_table(_engine)
-                
+
                 # Create sync trigger to notify predictions tab
                 sync_trigger = {
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "updated_count": updated_count,
                     "total": total
                 }
-                
+
                 return dbc.Alert(
                     f"✅ Successfully resimulated {updated_count} of {total} simulations. Errors: {error_count}",
                     color="success" if error_count == 0 else "warning",
                     dismissable=True,
                     duration=6000
                 ), new_table, sync_trigger
-                
+
         except Exception as e:
             logger.error(f"Error resimulating all simulations: {e}", exc_info=True)
             activity_logger.log_activity(f"Error resimulating all simulations: {e}", "ERROR")
@@ -1151,7 +1152,7 @@ def register_callbacks(app):
             "currency": currency or "USD",
             "risk_adjustment": risk_adj if risk_adj is not None else 0.3
         }
-        
+
         if not capital or capital <= 0:
             return html.Small("Enter portfolio capital to see summary", className="text-muted fst-italic"), store_data
 
@@ -1165,5 +1166,5 @@ def register_callbacks(app):
                 html.Small(f"Risk Adjustment: {risk_adj_pct:.0f}%", className="text-muted")
             ])
         ])
-        
+
         return summary, store_data

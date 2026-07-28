@@ -3,10 +3,10 @@ version: "3.9"
 x-app-env: &app-env
   APP_ENV: ${APP_ENV:-container}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  SECRET_KEY: ${SECRET_KEY:-dev-secret-key}
+  SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env (openssl rand -hex 32)}
   API_V1_PREFIX: ${API_V1_PREFIX:-/api/v1}
   CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://localhost:8050","http://localhost:8000"]}
-  DATABASE_URL: postgresql://trademeup_user:trademeup_pass@postgres:5432/trademeup
+  DATABASE_URL: postgresql://${POSTGRES_USER:-trademeup_user}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-trademeup}
   REDIS_URL: ${REDIS_URL:-redis://localhost:6379/0}
   LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
@@ -27,6 +27,9 @@ x-app-env: &app-env
   ENABLE_SCENARIOS: ${ENABLE_SCENARIOS:-true}
   MIN_PREDICTION_IMPACT_THRESHOLD: ${MIN_PREDICTION_IMPACT_THRESHOLD:-0.4}
   DASH_DEBUG: ${DASH_DEBUG:-false}
+  # Inside the container the app must listen on all interfaces so Docker can
+  # map the port; exposure is controlled by BIND_HOST on the host side below.
+  DASH_HOST: 0.0.0.0
 
 x-app-common: &app-common
   build:
@@ -46,11 +49,12 @@ services:
     image: pgvector/pgvector:pg18
     container_name: trademeup_postgres
     environment:
-      POSTGRES_USER: trademeup_user
-      POSTGRES_PASSWORD: trademeup_pass
-      POSTGRES_DB: trademeup
+      POSTGRES_USER: ${POSTGRES_USER:-trademeup_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-trademeup}
     ports:
-      - "5432:5432"
+      # Loopback only: the database must not be reachable from the network.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./migrations/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -69,7 +73,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "${BIND_HOST:-127.0.0.1}:8000:8000"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health >/dev/null || exit 1"]
       interval: 10s
@@ -86,7 +90,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "8050:8050"
+      - "${BIND_HOST:-127.0.0.1}:8050:8050"
 
   worker:
     <<: *app-common

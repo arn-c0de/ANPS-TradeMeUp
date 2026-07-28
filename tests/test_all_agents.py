@@ -1,26 +1,28 @@
 """Comprehensive test script for all agents."""
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import logging
-from src.models.database import get_db
-from src.agents.ingestion_agent import IngestionAgent
-from src.agents.data_quality_agent import DataQualityAgent
+
+from src.agents.ab_testing_agent import ABTestingAgent
+from src.agents.confidence_calibration_agent import ConfidenceCalibrationAgent
 from src.agents.content_understanding_agent import ContentUnderstandingAgent
+from src.agents.correlation_analysis_agent import CorrelationAnalysisAgent
+from src.agents.data_quality_agent import DataQualityAgent
 from src.agents.entity_mapping_agent import EntityMappingAgent
 from src.agents.fact_verification_agent import FactVerificationAgent
 from src.agents.impact_scoring_agent import ImpactScoringAgent
-from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
-from src.agents.regime_detection_agent import RegimeDetectionAgent
-from src.agents.signal_decay_agent import SignalDecayAgent
-from src.agents.correlation_analysis_agent import CorrelationAnalysisAgent
-from src.agents.prediction_agent import PredictionAgent
-from src.agents.confidence_calibration_agent import ConfidenceCalibrationAgent
+from src.agents.ingestion_agent import IngestionAgent
 from src.agents.meta_strategy_agent import MetaStrategyAgent
-from src.agents.scenario_generation_agent import ScenarioGenerationAgent
 from src.agents.model_performance_monitor import ModelPerformanceMonitor
-from src.agents.ab_testing_agent import ABTestingAgent
+from src.agents.prediction_agent import PredictionAgent
+from src.agents.regime_detection_agent import RegimeDetectionAgent
+from src.agents.scenario_generation_agent import ScenarioGenerationAgent
+from src.agents.signal_decay_agent import SignalDecayAgent
+from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
+from src.models.database import get_db
 
 logging.basicConfig(
     level=logging.INFO,

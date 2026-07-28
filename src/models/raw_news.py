@@ -1,8 +1,9 @@
 """Database model for raw news articles."""
-from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, Index
-from sqlalchemy.dialects.postgresql import JSONB
 import uuid
+from datetime import datetime
+
+from sqlalchemy import Column, DateTime, Index, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 
 from src.models.database import Base, utc_now
 from src.models.types import GUID

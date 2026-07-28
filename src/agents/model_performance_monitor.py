@@ -1,10 +1,11 @@
 """Agent 12.5: Model Performance Monitor - Track and analyze model performance."""
 import logging
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta, timezone
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+
 import numpy as np
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from src.models.predictions import Prediction, PredictionOutcome
 
@@ -30,7 +31,7 @@ class ModelPerformanceMonitor:
         self,
         model_version: str = 'xgboost_baseline',
         lookback_days: int = 30
-    ) -> Dict:
+    ) -> dict:
         """
         Calculate comprehensive accuracy metrics for a model.
 
@@ -41,7 +42,7 @@ class ModelPerformanceMonitor:
         Returns:
             Performance metrics
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
         # Fetch predictions with outcomes
         predictions = self.db.query(Prediction).join(
@@ -114,7 +115,7 @@ class ModelPerformanceMonitor:
         model_version: str = 'xgboost_baseline',
         short_window: int = 7,
         long_window: int = 30
-    ) -> Dict:
+    ) -> dict:
         """
         Detect if model performance is degrading.
 
@@ -160,7 +161,7 @@ class ModelPerformanceMonitor:
     def generate_performance_report(
         self,
         model_version: str = 'xgboost_baseline'
-    ) -> Dict:
+    ) -> dict:
         """
         Generate comprehensive performance report.
 
@@ -183,7 +184,7 @@ class ModelPerformanceMonitor:
 
         return {
             'model_version': model_version,
-            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'generated_at': datetime.now(UTC).isoformat(),
             'performance_7d': metrics_7d,
             'performance_30d': metrics_30d,
             'performance_90d': metrics_90d,
@@ -191,7 +192,7 @@ class ModelPerformanceMonitor:
             'by_horizon': by_horizon
         }
 
-    def _calculate_by_horizon(self, model_version: str) -> Dict:
+    def _calculate_by_horizon(self, model_version: str) -> dict:
         """Calculate performance by prediction horizon."""
         horizons = ['1d', '5d', '20d']
         by_horizon = {}
@@ -233,7 +234,7 @@ class ModelPerformanceMonitor:
 
         return by_horizon
 
-    def process_batch(self, limit: int = 5) -> Dict:
+    def process_batch(self, limit: int = 5) -> dict:
         """
         Generate performance reports for all models.
 
@@ -265,7 +266,7 @@ class ModelPerformanceMonitor:
         logger.info(f"Performance monitoring complete. Stats: {stats}")
         return stats
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get performance monitoring statistics."""
         total_models = self.db.query(Prediction.model_version).distinct().count()
 

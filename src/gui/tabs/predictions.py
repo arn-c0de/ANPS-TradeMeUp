@@ -5,30 +5,31 @@ Predictions Tab - View and Filter Predictions
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import dash
-from dash import ALL, Input, Output, State, dcc, html, dash_table
-from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
+from dash import ALL, Input, Output, State, dash_table, dcc, html
+from dash.exceptions import PreventUpdate
 from sqlalchemy import desc
 from sqlalchemy.orm import Session, joinedload
 
-from src.models.predictions import Prediction, PredictionOutcome
-from src.models.trading_simulation import TradingSimulation
-from src.models.entities import Entity
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
-from src.models.analysis import ImpactScore, SurpriseScore, FactVerification
-from src.models.database import engine as _engine
-from src.services.prediction_performance_service import prediction_performance_service
-from src.gui.utils.callbacks import safe_callback
-from src.gui.utils.task_queue import get_task_queue, add_gui_task
 from src.gui.helpers.prediction_details_popup import (
+    _format_saved_performance,
     get_prediction_details,
-    _format_saved_performance
 )
-from src.utils.json_helpers import ensure_dict, ensure_list as _ensure_list
+from src.gui.utils.callbacks import safe_callback
+from src.gui.utils.task_queue import add_gui_task, get_task_queue
+from src.models.analysis import FactVerification, ImpactScore, SurpriseScore
+from src.models.database import engine as _engine
+from src.models.entities import Entity
+from src.models.predictions import Prediction, PredictionOutcome
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
+from src.models.trading_simulation import TradingSimulation
+from src.services.prediction_performance_service import prediction_performance_service
+from src.utils.json_helpers import ensure_dict
+from src.utils.json_helpers import ensure_list as _ensure_list
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +202,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                 if refreshing_prediction_id:
                     logger.info(f"🔄 Expiring session cache before loading predictions (refreshing: {refreshing_prediction_id})")
                     db.expire_all()
-                
+
                 # Use eager loading to fetch entity and outcome in single query (fixes N+1 problem)
                 query = db.query(Prediction).options(
                     joinedload(Prediction.entity),
@@ -224,14 +225,14 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     if isinstance(start, str):
                         start = datetime.fromisoformat(start).date()
                     # Start of day (timezone-aware for PostgreSQL)
-                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+                    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=UTC)
                     query = query.filter(Prediction.created_at >= start_dt)
                 if end:
                     # Convert string to date if needed
                     if isinstance(end, str):
                         end = datetime.fromisoformat(end).date()
                     # End of day (timezone-aware for PostgreSQL)
-                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+                    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=UTC)
                     query = query.filter(Prediction.created_at <= end_dt)
 
             if min_confidence > 0:
@@ -252,11 +253,11 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                         surprise_scores = db.query(SurpriseScore).filter(
                             SurpriseScore.news_id.in_(news_ids)
                         ).all()
-                        
+
                         if surprise_scores:
                             # Get average surprise score (use surprise_normalized field)
                             avg_surprise = sum(abs(s.surprise_normalized) for s in surprise_scores if s.surprise_normalized) / len(surprise_scores)
-                            
+
                             # Apply filter
                             if surprise_filter == 'high' and avg_surprise > 0.7:
                                 filtered_preds.append(pred)
@@ -334,12 +335,12 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     # Show ONLY saved performance data - NEVER recalculate on refresh
                     # actual_return is already stored as percentage (e.g., -17.03 = -17.03%)
                     return_val = outcome.actual_return
-                    
+
                     logger.info(f"📊 Showing saved performance for {pred.prediction_id}: return_val={return_val}, outcome.actual_return={outcome.actual_return}")
-                    
+
                     # Format last update time
                     if outcome.evaluation_timestamp:
-                        time_ago = datetime.now(timezone.utc) - outcome.evaluation_timestamp
+                        time_ago = datetime.now(UTC) - outcome.evaluation_timestamp
                         if time_ago.days > 0:
                             time_str = f"{time_ago.days}d ago"
                         elif time_ago.seconds > 3600:
@@ -349,7 +350,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                         update_info = html.Small(f"({time_str})", className="text-muted", style={"fontSize": "0.7rem"})
                     else:
                         update_info = ""
-                    
+
                     perf_display = html.Td([
                         html.Div(
                             f"{return_val:+.2f}%",
@@ -357,7 +358,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                         ),
                         update_info
                     ], title="Saved performance data - click 🔄 to update")
-                    
+
                     # Show result based on saved direction_correct
                     result_display = html.Td(
                         "✅" if outcome.direction_correct else "❌",
@@ -367,7 +368,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     return_24h_display = html.Td("—", className="text-muted text-center")
                 else:
                     # Not yet loaded
-                    perf_display = html.Td("—", className="text-muted text-center", 
+                    perf_display = html.Td("—", className="text-muted text-center",
                                           title="Click 🔄 to load")
                     result_display = html.Td("—", className="text-muted text-center")
                     return_24h_display = html.Td("—", className="text-muted text-center")
@@ -406,20 +407,20 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                             title="Refreshing..." if is_refreshing else "Load & Save Performance",
                             disabled=is_refreshing,
                             style={
-                                "minWidth": "44px", 
-                                "minHeight": "44px", 
+                                "minWidth": "44px",
+                                "minHeight": "44px",
                                 "touchAction": "manipulation",
                                 "pointerEvents": "auto",
                                 "cursor": "pointer",
                                 "zIndex": "10"
                             }
                         ),
-                        dbc.Button("Details", 
+                        dbc.Button("Details",
                                    id={"type": "pred-detail-btn", "index": str(pred.prediction_id)},
                                    size="sm", color="info", outline=True, className="touch-button",
                                    style={
-                                       "minWidth": "70px", 
-                                       "minHeight": "44px", 
+                                       "minWidth": "70px",
+                                       "minHeight": "44px",
                                        "touchAction": "manipulation",
                                        "pointerEvents": "auto",
                                        "cursor": "pointer",
@@ -745,16 +746,16 @@ def register_callbacks(app):
                     pred = db.query(Prediction).filter(
                         Prediction.prediction_id == prediction_id
                     ).first()
-                    
+
                     if pred and pred.entity_id:
                         logger.info(f"📊 Batch-updating all predictions for {pred.entity_id}")
-                        
+
                         from src.services.auto_prediction_processor import auto_processor
                         update_stats = auto_processor.update_all_predictions_for_entity(
                             db,
                             pred.entity_id
                         )
-                        
+
                         logger.info(f"✅ Batch update complete: {update_stats['updated']}/{update_stats['total_found']} predictions updated")
             except Exception as e:
                 logger.error(f"Error in batch update: {e}")

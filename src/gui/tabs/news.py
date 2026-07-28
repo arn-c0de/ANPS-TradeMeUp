@@ -2,16 +2,16 @@
 News Feed Tab - Browse and Filter News Articles
 """
 
-from dash import dcc, html, Input, Output
 import dash_bootstrap_components as dbc
+from dash import Input, Output, dcc, html
 from sqlalchemy import desc, distinct
 from sqlalchemy.orm import Session
 
 from src.gui.utils.callbacks import safe_callback
-from src.models.database import SessionLocal, engine
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
 from src.models.analysis import ImpactScore
+from src.models.database import SessionLocal, engine
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
 
 
 def create_layout():
@@ -89,26 +89,26 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
         query = db.query(RawNews, ProcessedNews).outerjoin(
             ProcessedNews, RawNews.news_id == ProcessedNews.news_id
         ).options(defer(ProcessedNews.embedding))
-        
+
         # Apply filters
         if sources:
             query = query.filter(RawNews.source.in_(sources))
-        
+
         if events:
             query = query.filter(ProcessedNews.event_type.in_(events))
-        
+
         # Note: Sentiment filtering done in Python (post-query) due to SQLite JSON limitations
-        
+
         if search and len(search) > 0:
             search_term = f"%{search.lower()}%"
             query = query.filter(
                 (RawNews.title.ilike(search_term)) |
                 (RawNews.full_text.ilike(search_term))
             )
-        
+
         query = query.order_by(desc(RawNews.fetched_at)).limit(500)
         results = query.all()
-        
+
         # Apply sentiment filter in Python
         if sentiment and results:
             filtered_results = []
@@ -122,16 +122,16 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
                     elif sentiment == "neutral" and -0.3 <= sent_val <= 0.3:
                         filtered_results.append((raw_news, processed))
             results = filtered_results
-        
+
         # Limit results after filtering
         results = results[:100]
-        
+
         if not results:
             return dbc.Alert("No news articles match your filters.", color="info")
-        
+
         # Get all news IDs for batch loading impact scores
         news_ids = [raw_news.news_id for raw_news, _ in results]
-        
+
         # Load all impact scores in one query
         impact_scores_dict = {}
         if news_ids:
@@ -139,7 +139,7 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
                 impact_scores_list = db.query(ImpactScore).filter(
                     ImpactScore.news_id.in_(news_ids)
                 ).all()
-                
+
                 # Group by news_id and get max impact score per news
                 # Convert UUIDs to strings for reliable comparison (SQLite stores as strings)
                 for impact in impact_scores_list:
@@ -155,14 +155,14 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.warning(f"Error loading impact scores: {e}")
-        
+
         cards = []
         for raw_news, processed in results:
             # Get max impact score for this news article
             # Convert UUID to string for lookup (handles both UUID objects and strings)
             news_id_key = str(raw_news.news_id) if raw_news.news_id else None
             max_impact = impact_scores_dict.get(news_id_key) if news_id_key else None
-            
+
             # Sentiment badge
             sentiment_badge = None
             if processed and processed.sentiment:
@@ -173,12 +173,12 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
                     sentiment_badge = dbc.Badge("😟 Negative", color="danger", className="ms-2")
                 else:
                     sentiment_badge = dbc.Badge("😐 Neutral", color="secondary", className="ms-2")
-            
+
             # Event badge
             event_badge = None
             if processed and processed.event_type:
                 event_badge = dbc.Badge(processed.event_type.upper(), color="primary", className="ms-2")
-            
+
             # Impact score badge with color coding
             impact_badge = None
             if max_impact is not None:
@@ -189,7 +189,7 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
                     impact_color = "warning"
                 else:
                     impact_color = "secondary"
-                
+
                 impact_badge = dbc.Badge(
                     f"Impact: {max_impact:.2f}",
                     color=impact_color,
@@ -203,15 +203,15 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
                     className="ms-2",
                     style={"opacity": "0.6"}
                 )
-            
+
             card = dbc.Card([
                 dbc.CardBody([
                     html.Div([
                         html.Div([
                             html.A(
-                                raw_news.title, 
-                                href=raw_news.url, 
-                                target="_blank", 
+                                raw_news.title,
+                                href=raw_news.url,
+                                target="_blank",
                                 className="text-light text-decoration-none news-title"
                             ),
                             html.Span([sentiment_badge, event_badge, impact_badge], className="ms-2")
@@ -219,14 +219,14 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
                         html.Div([
                             dbc.Badge(raw_news.source, color="secondary", className="me-2 badge-sm"),
                             html.Small(
-                                raw_news.fetched_at.strftime("%d.%m.%Y %H:%M") if raw_news.fetched_at else "N/A", 
+                                raw_news.fetched_at.strftime("%d.%m.%Y %H:%M") if raw_news.fetched_at else "N/A",
                                 className="text-muted"
                             )
                         ], className="d-flex align-items-center")
                     ])
                 ], className="py-2 px-3")
             ], className="mb-2 news-card-compact")
-            
+
             cards.append(card)
 
         return html.Div(cards)

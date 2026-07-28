@@ -6,7 +6,7 @@ All data retrieval functions for the statistics tab.
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import dash_bootstrap_components as dbc
@@ -17,14 +17,14 @@ from dash import html
 from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.orm import Session
 
-from src.models.raw_news import RawNews
-from src.models.data_quality import DataQualityScore
-from src.models.processed_news import ProcessedNews
-from src.models.predictions import Prediction, PredictionOutcome
-from src.models.entities import Entity, NewsEntityMapping
-from src.models.analysis import ImpactScore, SurpriseScore, FactVerification, MarketRegime
-from src.models.trading_simulation import TradingSimulation
 from src.gui.error_handling import handle_db_errors
+from src.models.analysis import FactVerification, ImpactScore, MarketRegime, SurpriseScore
+from src.models.data_quality import DataQualityScore
+from src.models.entities import Entity, NewsEntityMapping
+from src.models.predictions import Prediction, PredictionOutcome
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
+from src.models.trading_simulation import TradingSimulation
 
 from .utils import _parse_date_range
 
@@ -292,7 +292,7 @@ def get_statistics_metrics(engine, date_range=None, granularity="all"):
             'years', 'all'); currently unused but kept for API compatibility
     """
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         hour_ago = now - timedelta(hours=1)
         day_ago = now - timedelta(hours=24)
         start_date, end_date = _parse_date_range(date_range)
@@ -548,7 +548,7 @@ def _sentiment_window_start(timeframe: str):
     days = {"7d": 7, "30d": 30, "90d": 90}.get(timeframe)
     if days is None:
         return None
-    return datetime.now(timezone.utc) - timedelta(days=days)
+    return datetime.now(UTC) - timedelta(days=days)
 
 
 def _average_sentiment_per_entity(rows) -> list:
@@ -698,7 +698,7 @@ def _get_top_entities(engine, direction: str, search_term: str = "", show_all: b
         start_date, end_date = _parse_date_range(date_range)
         using_default_range = not (start_date or end_date)
         if using_default_range:
-            start_date = datetime.utcnow() - timedelta(days=30)
+            start_date = datetime.now(UTC) - timedelta(days=30)
         range_label = "last 30 days" if using_default_range else "selected range"
 
         with Session(engine) as db:
@@ -1292,7 +1292,7 @@ def _load_index_constituents() -> dict:
     # Go up 4 levels: statistics -> tabs -> gui -> src -> project root
     project_root = Path(__file__).resolve().parents[4]
     config_path = project_root / "config" / "index_constituents.json"
-    with open(config_path, 'r') as f:
+    with open(config_path) as f:
         return json.load(f)
 
 

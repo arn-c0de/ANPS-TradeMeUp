@@ -1,17 +1,17 @@
 """Models package - imports all models to ensure SQLAlchemy can resolve relationships."""
 
 # Import database base first
+from src.models.analysis import ImpactScore, MarketRegime, SurpriseScore
+from src.models.chart_overlays import ChartOverlay
+from src.models.data_quality import DataQualityScore
 from src.models.database import Base, get_db
+from src.models.entities import Entity, EntityRelationship, NewsEntityMapping
+from src.models.predictions import Prediction, PredictionOutcome
+from src.models.processed_news import ProcessedNews
 
 # Import all models to ensure relationships are resolved
 from src.models.raw_news import RawNews
-from src.models.entities import Entity, NewsEntityMapping, EntityRelationship
-from src.models.processed_news import ProcessedNews
-from src.models.data_quality import DataQualityScore
-from src.models.analysis import MarketRegime, SurpriseScore, ImpactScore
-from src.models.predictions import Prediction, PredictionOutcome
 from src.models.trading_simulation import TradingSimulation
-from src.models.chart_overlays import ChartOverlay
 
 __all__ = [
     "Base",

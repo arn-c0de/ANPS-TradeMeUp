@@ -7,11 +7,10 @@ reducing code duplication and improving maintainability.
 
 from typing import Dict, Optional, Tuple
 
-
 DEFAULT_FULLSCREEN_STATE = {'fullscreen': False}
 
 
-def get_fullscreen_state(fullscreen_data: Optional[Dict]) -> bool:
+def get_fullscreen_state(fullscreen_data: dict | None) -> bool:
     """
     Safely extract fullscreen state from data dict.
     
@@ -26,7 +25,7 @@ def get_fullscreen_state(fullscreen_data: Optional[Dict]) -> bool:
     return fullscreen_data.get('fullscreen', False)
 
 
-def create_fullscreen_state(is_fullscreen: bool) -> Dict:
+def create_fullscreen_state(is_fullscreen: bool) -> dict:
     """
     Create a new fullscreen state dict.
     
@@ -39,7 +38,7 @@ def create_fullscreen_state(is_fullscreen: bool) -> Dict:
     return {'fullscreen': bool(is_fullscreen)}
 
 
-def toggle_fullscreen_state(current_state: Optional[Dict]) -> Dict:
+def toggle_fullscreen_state(current_state: dict | None) -> dict:
     """
     Toggle fullscreen state and return new state.
     
@@ -66,7 +65,7 @@ def get_container_classname(is_fullscreen: bool) -> str:
     return 'chart-container-fullscreen' if is_fullscreen else 'chart-container-normal'
 
 
-def get_toggle_button_config(is_fullscreen: bool) -> Tuple[str, str]:
+def get_toggle_button_config(is_fullscreen: bool) -> tuple[str, str]:
     """
     Get toggle button text and color based on state.
     
@@ -81,7 +80,7 @@ def get_toggle_button_config(is_fullscreen: bool) -> Tuple[str, str]:
     return "⛶", "info"
 
 
-def get_exit_button_style(is_fullscreen: bool) -> Dict:
+def get_exit_button_style(is_fullscreen: bool) -> dict:
     """
     Get exit button style based on fullscreen state.
     

@@ -1,13 +1,14 @@
 """Agent 7: Meta-Strategy Agent - Ensemble predictions from multiple models."""
 import logging
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta, timezone
-from sqlalchemy.orm import Session
-import numpy as np
 
-from src.models.predictions import Prediction
-from src.models.entities import Entity
+import numpy as np
+from sqlalchemy.orm import Session
+
 from src.models.database import SessionLocal
+from src.models.entities import Entity
+from src.models.predictions import Prediction
 from src.utils.json_helpers import ensure_dict
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ class MetaStrategyAgent:
         """
         self._model_weights = {}
 
-    def calculate_model_weights(self, lookback_days: int = 30) -> Dict[str, float]:
+    def calculate_model_weights(self, lookback_days: int = 30) -> dict[str, float]:
         """
         Calculate weights for each model based on historical performance.
 
@@ -42,12 +43,13 @@ class MetaStrategyAgent:
         Returns:
             Dictionary of model_id -> weight
         """
-        from src.models.predictions import PredictionOutcome
         from datetime import timedelta
+
+        from src.models.predictions import PredictionOutcome
 
         db = SessionLocal()
         try:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+            cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
             # Get all predictions with outcomes
             predictions = db.query(Prediction).join(
@@ -112,7 +114,7 @@ class MetaStrategyAgent:
         # Extract predicted direction from direction_probabilities
         probs = ensure_dict(prediction.direction_probabilities, {})
         predicted_dir = max(probs, key=probs.get) if probs else 'flat'
-        
+
         actual_return = outcome.actual_return
 
         if predicted_dir == 'up':
@@ -126,7 +128,7 @@ class MetaStrategyAgent:
         self,
         entity_id: str,
         horizon: str = '1d'
-    ) -> Optional[Prediction]:
+    ) -> Prediction | None:
         """
         Create ensemble prediction from multiple models.
 
@@ -140,7 +142,7 @@ class MetaStrategyAgent:
         db = SessionLocal()
         try:
             # Get recent predictions from all models
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            cutoff = datetime.now(UTC) - timedelta(hours=24)
 
             model_predictions = db.query(Prediction).filter(
                 Prediction.entity_id == entity_id,
@@ -177,7 +179,7 @@ class MetaStrategyAgent:
             ensemble = Prediction(
                 entity_id=entity_id,
                 horizon=horizon,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 model_version='meta_ensemble',
                 direction_probabilities={
                     'up': direction_votes['up'] / sum(direction_votes.values()),
@@ -193,7 +195,7 @@ class MetaStrategyAgent:
                 },
                 confidence=ensemble_confidence,
                 model_contributions={'model_weights': weights},
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(UTC)
             )
 
             db.add(ensemble)
@@ -213,7 +215,7 @@ class MetaStrategyAgent:
         finally:
             db.close()
 
-    def process_batch(self, limit: int = 10) -> Dict:
+    def process_batch(self, limit: int = 10) -> dict:
         """
         Create ensemble predictions for top entities.
 
@@ -223,8 +225,9 @@ class MetaStrategyAgent:
         Returns:
             Statistics
         """
-        from src.models.entities import NewsEntityMapping
         from sqlalchemy import func
+
+        from src.models.entities import NewsEntityMapping
 
         db = SessionLocal()
         try:
@@ -265,7 +268,7 @@ class MetaStrategyAgent:
         finally:
             db.close()
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get meta-strategy statistics."""
         db = SessionLocal()
         try:

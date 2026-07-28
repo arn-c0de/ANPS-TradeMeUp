@@ -13,13 +13,13 @@ class TradingSimulationAgent:
     def __init__(self):
         self.engine = TradingSimulationEngine()
 
-    def process_batch(self, limit: int = 50, lookback_days: int = 7) -> Dict:
+    def process_batch(self, limit: int = 50, lookback_days: int = 7) -> dict:
         """Process recent predictions into simulation decisions."""
         stats = self.engine.process_batch(limit=limit, lookback_days=lookback_days)
         logger.info(f"Trading simulation stats: {stats}")
         return stats
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Get overall simulation statistics."""
         return self.engine.get_statistics()
 
@@ -37,7 +37,7 @@ class TradingSimulationAgent:
         horizon_filter=None,
         date_range=None,
         limit: int = 100,
-    ) -> Dict:
+    ) -> dict:
         """Create simulations from predictions with filters."""
         return self.engine.create_simulations_from_predictions(
             entity_filter=entity_filter,

@@ -7,6 +7,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from sqlalchemy import text
+
 from src.models.database import engine
 
 print("Checking PostgreSQL database tables...")
@@ -20,9 +21,9 @@ with engine.connect() as conn:
         AND table_type = 'BASE TABLE'
         ORDER BY table_name
     """))
-    
+
     tables = [row[0] for row in result.fetchall()]
-    
+
     print(f"\nFound {len(tables)} tables:")
     for table in tables:
         # Get row count for each table

@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "gui" / "app.py"
 OUT = ROOT / "src" / "gui" / "callbacks" / "charts" / "extended.py"
 
-with open(APP, "r", encoding="utf-8") as f:
+with open(APP, encoding="utf-8") as f:
     content = f.read()
 
 start = content.find("# ============================================================================\n# CALLBACKS - CHARTS TAB")

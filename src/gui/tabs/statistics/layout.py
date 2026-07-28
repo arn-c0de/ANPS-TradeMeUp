@@ -92,7 +92,7 @@ def create_layout():
                 html.Div(id="statistics-metrics")
             ], width=12)
         ], className="mb-2"),
-        
+
         # Event & Quality Distribution
         dbc.Row([
             dbc.Col([
@@ -112,7 +112,7 @@ def create_layout():
                 ])
             ], width=6)
         ], className="mb-3"),
-        
+
         # Sentiment, Impact & Top Entities
         dbc.Row([
             dbc.Col([
@@ -140,7 +140,7 @@ def create_layout():
                 ])
             ], width=4)
         ], className="mb-3"),
-        
+
         # Index Trends & Stock Performance
         dbc.Row([
             dbc.Col([
@@ -152,7 +152,7 @@ def create_layout():
                 ])
             ], width=12)
         ], className="mb-3"),
-        
+
         # NEW: Entity Sentiment Analysis
         dbc.Row([
             dbc.Col([
@@ -180,7 +180,7 @@ def create_layout():
                 ])
             ], width=12)
         ], className="mb-3"),
-        
+
         # NEW: Top Positive & Negative Entities
         dbc.Row([
             dbc.Col([
@@ -242,7 +242,7 @@ def create_layout():
                 ])
             ], width=6)
         ], className="mb-3"),
-        
+
         # NEW: Entity Details Table
         dbc.Row([
             dbc.Col([
@@ -272,7 +272,7 @@ def create_layout():
                 ])
             ], width=12)
         ], className="mb-3"),
-        
+
         # News Volume Over Time
         dbc.Row([
             dbc.Col([
@@ -284,7 +284,7 @@ def create_layout():
                 ])
             ], width=12)
         ]),
-        
+
         # Entity Details Modal
         dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle(id="entity-modal-title")),
@@ -293,7 +293,7 @@ def create_layout():
                 dbc.Button("Close", id="close-entity-modal", className="ms-auto")
             ])
         ], id="entity-details-modal", size="xl", scrollable=True),
-        
+
         # Stock Predictions Modal
         dbc.Modal([
             dbc.ModalHeader(dbc.ModalTitle(id="stock-modal-title")),
@@ -302,7 +302,7 @@ def create_layout():
                 dbc.Button("Close", id="close-stock-modal", className="ms-auto")
             ])
         ], id="stock-predictions-modal", size="xl", scrollable=True),
-        
+
         # Toast notification for missing predictions
         dbc.Toast(
             "No prediction found for this news article. The prediction may not have been created yet.",
@@ -323,16 +323,16 @@ def create_layout():
                 "boxShadow": "0 4px 8px rgba(0,0,0,0.3)"
             }
         ),
-        
+
         # Store for selected entity
         dcc.Store(id="selected-entity-store", data=None),
 
         # Store for active time filter
         dcc.Store(id="active-filter-store", data="all"),
-        
+
         # Store for table sorting state
         dcc.Store(id="entity-table-sort-store", data={"column": None, "direction": None}),
-        
+
         # Stores for infinite scroll limits
         dcc.Store(id="positive-entities-limit", data=50),
         dcc.Store(id="negative-entities-limit", data=50)

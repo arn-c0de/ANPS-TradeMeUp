@@ -1,52 +1,31 @@
-[tool.poetry]
+[project]
 name = "anps-trademeup"
 version = "1.0.4"
 description = "ANPS (AI News Prediction System) - Multi-Agent News-Based Market Prediction System"
-authors = ["TradeMeUp Team"]
+authors = [{ name = "TradeMeUp Team" }]
 readme = "README.md"
+requires-python = ">=3.11"
 
-[tool.poetry.dependencies]
-python = "^3.11"
-fastapi = "^0.109.0"
-uvicorn = {extras = ["standard"], version = "^0.27.0"}
-sqlalchemy = "^2.0.25"
-alembic = "^1.13.1"
-psycopg2-binary = "^2.9.9"
-pydantic = "^2.5.3"
-pydantic-settings = "^2.1.0"
-python-dotenv = "^1.0.0"
-pandas = "^2.1.4"
-numpy = "^1.26.3"
-scikit-learn = "^1.4.0"
-xgboost = "^2.0.3"
-lightgbm = "^4.2.0"
-anthropic = "^0.18.0"
-openai = "^1.10.0"
-redis = "^5.0.1"
-celery = "^5.3.6"
-feedparser = "^6.0.11"
-beautifulsoup4 = "^4.12.3"
-requests = "^2.31.0"
-aiohttp = "^3.9.1"
-sentence-transformers = "^2.3.1"
-langdetect = "^1.0.9"
-plotly = "^5.18.0"
-dash = "^2.14.2"
-dash-bootstrap-components = "^1.5.0"
-pytest = ">=8.1.0"
-httpx = "^0.26.0"
-python-multipart = "^0.0.6"
-python-jose = {extras = ["cryptography"], version = "^3.3.0"}
-passlib = {extras = ["bcrypt"], version = "^1.7.4"}
-yfinance = "^0.2.35"
+# Runtime dependencies live in requirements.txt, which is the single source of
+# truth: the Docker image installs requirements-docker.txt and there is no
+# lockfile. Declaring them a second time here only let the two drift apart.
+dynamic = ["dependencies"]
 
-[tool.poetry.group.dev.dependencies]
-ruff = "^0.1.13"
-black = "^23.12.1"
-mypy = "^1.8.0"
-pre-commit = "^3.6.0"
-ipython = "^8.19.0"
-ipykernel = "^6.28.0"
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.0",
+    "black>=26.5.1",
+    "mypy>=2.3.0",
+    "pre-commit>=4.6.1",
+    "ipython>=8.19.0",
+    "ipykernel>=6.28.0",
+]
 
 [tool.ruff]
 line-length = 100
@@ -67,5 +46,5 @@ warn_unused_configs = true
 disallow_untyped_defs = false
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"

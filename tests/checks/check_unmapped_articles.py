@@ -1,10 +1,11 @@
 """Check how many articles don't have entity mappings"""
 
-from src.models.database import SessionLocal
-from src.models.raw_news import RawNews
-from src.models.processed_news import ProcessedNews
-from src.models.entities import NewsEntityMapping
 from sqlalchemy import exists, func
+
+from src.models.database import SessionLocal
+from src.models.entities import NewsEntityMapping
+from src.models.processed_news import ProcessedNews
+from src.models.raw_news import RawNews
 
 db = SessionLocal()
 
@@ -22,10 +23,10 @@ without_mappings = db.query(func.count(RawNews.news_id)).join(
     ~exists().where(NewsEntityMapping.news_id == RawNews.news_id)
 ).scalar()
 
-print(f"📊 Entity Mapping Coverage:")
+print("📊 Entity Mapping Coverage:")
 print(f"   Total Processed Articles: {total_processed}")
 print(f"   With Mappings: {with_mappings} ({with_mappings/total_processed*100:.1f}%)")
 print(f"   Without Mappings: {without_mappings} ({without_mappings/total_processed*100:.1f}%)")
-print(f"   Target: ~1400 with mappings (70%)")
+print("   Target: ~1400 with mappings (70%)")
 
 db.close()
