@@ -130,7 +130,7 @@ def create_layout():
                                     dbc.Button("Split ↕", id="layout-split-v", color="primary", size="sm", outline=True),
                                     dbc.Button("Quad", id="layout-quad", color="primary", size="sm", outline=True)
                                 ], size="sm", className="me-3 d-inline"),
-                                dbc.Label("� Layout:", className="fw-bold me-2 ms-3 d-inline"),
+                                dbc.Label("Layout:", className="fw-bold me-2 ms-3 d-inline"),
                                 dcc.Dropdown(
                                     id="layout-preset-dropdown",
                                     options=[
@@ -253,7 +253,7 @@ def create_layout():
                 dcc.Dropdown(
                     id="panel-settings-chart-type",
                     options=[
-                        {'label': '📊Candlestick', 'value': 'candlestick'},
+                        {'label': '📊 Candlestick', 'value': 'candlestick'},
                         {'label': '📈 Line Chart', 'value': 'line'}
                     ],
                     clearable=False,
@@ -1053,7 +1053,7 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, 
         dragmode=interaction_mode,
         auto_scroll=auto_scroll_enabled,
         view_state=view_state,
-        loaded_data=loaded_data  # NEW: Pass loaded data for infinite scroll
+        loaded_data=loaded_data  # Pass loaded data for infinite scroll
     )
     chart_content = chart_component
     trading_overlay = create_trading_overlay(stats_data, show_stats, panel_id=panel_id) if show_stats else None
@@ -1079,7 +1079,7 @@ def create_chart_panel(panel_id: str, config: dict, show_controls: bool = True, 
                 )
             ],
         className="p-1",
-        style={ # ADDED position: relative HERE
+        style={ # position: relative anchors the absolutely-positioned trading overlay
             'position': 'relative',
             'height': 'calc(100% - 32px)',
             'overflow': 'hidden'

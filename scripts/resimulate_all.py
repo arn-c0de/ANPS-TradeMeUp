@@ -280,7 +280,7 @@ def main():
     # PostgreSQL info for parallel processing
     if args.workers > 1:
         logger.info(f"🚀 PostgreSQL parallel processing enabled with {args.workers} workers")
-        logger.info(f"💡 Tip: Adjust --workers based on your PostgreSQL connection pool size")
+        logger.info("💡 Tip: Adjust --workers based on your PostgreSQL connection pool size")
         logger.info("")
     
     logger.info("=" * 80)
@@ -292,7 +292,7 @@ def main():
             # Get total counts
             total_simulations = db.query(func.count(TradingSimulation.simulation_id)).scalar() or 0
             
-            logger.info(f"📊 Current Status:")
+            logger.info("📊 Current Status:")
             logger.info(f"   - Total Simulations: {total_simulations}")
             if args.limit:
                 logger.info(f"   - Limit: {args.limit}")

@@ -62,7 +62,7 @@ def backfill_phase(agent, phase_name: str, batch_size: int = 100):
             
             # Safety: max 100 batches to prevent infinite loops
             if batch_num >= 100:
-                logger.warning(f"⚠️ Reached max batches (100), stopping to prevent runaway")
+                logger.warning("⚠️ Reached max batches (100), stopping to prevent runaway")
                 break
             
             batch_num += 1

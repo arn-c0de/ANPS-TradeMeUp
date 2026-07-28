@@ -437,8 +437,8 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     html.Th("Entity"),
                     html.Th("Direction"),
                     html.Th("Confidence"),
-                html.Th("Decision", title="Simulation decision"),
-                html.Th("Risk", title="Composite risk score (0-1)"),
+                    html.Th("Decision", title="Simulation decision"),
+                    html.Th("Risk", title="Composite risk score (0-1)"),
                     html.Th("📊 Performance", title="Click 🔄 to load live data"),
                     html.Th("✓/✗ Result", title="Strategy outcome"),
                     html.Th("📈 24h", title="24h performance"),
@@ -555,7 +555,6 @@ def register_callbacks(app):
          State("current-prediction-id", "data")],
         prevent_initial_call=True
     )
-
     def toggle_prediction_modal(detail_clicks, sim_detail_clicks, close_click, refresh_click, is_open, button_ids, sim_button_ids, cached_data, current_pred_id):
         """Open/close prediction detail modal and cache prediction_id"""
         from dash import callback_context
@@ -617,8 +616,7 @@ def register_callbacks(app):
             id_dict = json.loads(id_str)
             prediction_id = id_dict.get("index")
             if prediction_id:
-                # IMPORTANT: Refactor task to use the centralized service, which is known to work correctly in the popup
-                from src.services.prediction_performance_service import prediction_performance_service
+                # Use the centralized performance service (same code path as the details popup)
                 def refresh_task():
                     """Wrapper task to call the centralized performance calculation and saving service."""
                     try:

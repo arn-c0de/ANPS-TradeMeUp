@@ -234,7 +234,6 @@ Respond ONLY with JSON."""
         content = f"{article.title} {article.full_text}".lower()
         
         # Check for each theme (use word boundaries for short terms)
-        import re
         for theme, etfs in self.THEME_TO_ETF.items():
             # Use word boundaries for short keywords to avoid false matches
             if len(theme) <= 3:
