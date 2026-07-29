@@ -276,6 +276,11 @@ Respond ONLY with JSON."""
             logger.debug(f"Calling LLM for article {article.news_id}")
             analysis = self.llm.generate_json(prompt, temperature=0.1)
 
+            # Billed tokens for the call that produced this record, so the
+            # cost of a phase can be read back off the data it wrote instead
+            # of estimated from prompt lengths after the fact.
+            call_usage = self.llm.last_usage
+
             # Validate required fields
             required_fields = ['summary_short', 'event_type', 'sentiment']
             missing_fields = [f for f in required_fields if f not in analysis]
@@ -305,6 +310,7 @@ Respond ONLY with JSON."""
                 # OpenAI and local models have different dimensions.
                 'embedding_model': embedding_model,
                 'temperature': 0.1,
+                'token_usage': call_usage,
                 'timestamp': datetime.now(UTC).isoformat()
             }
 

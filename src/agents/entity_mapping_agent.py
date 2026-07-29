@@ -12,7 +12,6 @@ import re
 import warnings
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import List
 
 from sqlalchemy.orm import Session
 
@@ -22,9 +21,15 @@ import yfinance as yf
 from src.models.database import get_scoped_session
 from src.models.entities import Entity, NewsEntityMapping
 from src.models.raw_news import RawNews
-from src.services.llm_service import llm_service
+from src.services.llm_service import llm_service, truncate_for_prompt
 
 logger = logging.getLogger(__name__)
+
+# Prompt budget for the extraction call, in approximate tokens. Entity
+# extraction needs enough of the article to see who is being discussed, but
+# not the whole body: the names cluster near the top, and the key-facts path
+# below is usually much shorter than this ceiling anyway.
+EXTRACTION_CONTENT_TOKENS = 750
 
 
 class EntityMappingAgent:
@@ -714,10 +719,12 @@ Respond ONLY with JSON."""
             # Fallback to raw text
             content = f"{article.title}\n\n{article.full_text}"
 
-        # Prepare prompt
+        # Prepare prompt. Budget in tokens and cut on a sentence boundary,
+        # matching the content agent - the previous hard character slice had
+        # no stated budget and could hand the model a truncated word.
         prompt = self.prompt_template.format(
             title=article.title,
-            content=content[:3000]  # Limit length
+            content=truncate_for_prompt(content, EXTRACTION_CONTENT_TOKENS),
         )
 
         try:

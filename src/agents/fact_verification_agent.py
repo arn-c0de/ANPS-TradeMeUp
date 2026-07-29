@@ -24,13 +24,29 @@ class FactVerificationAgent:
     - Flag potential misinformation
     """
 
+    # Credibility recorded when there were no claims to check. Neutral by
+    # construction: absence of claims is not evidence either way, and it must
+    # not read as a verified-clean article.
+    NO_CLAIMS_CREDIBILITY = 0.5
+
+    # Claims sent to the model in one verification call.
+    MAX_CLAIMS_PER_CALL = 10
+
     def __init__(self):
         """
         Initialize fact verification agent.
-        
+
         Note: Uses scoped sessions internally for better isolation.
         """
         self.llm = llm_service
+
+    @staticmethod
+    def _claims_of(article: ProcessedNews) -> list:
+        """Extracted claims for ``article``, as a list (possibly empty)."""
+        key_facts = article.key_facts or []
+        if not isinstance(key_facts, list):
+            return []
+        return key_facts
 
     def _verify_article_no_commit(self, db: Session, news_id: str) -> FactVerification:
         """
@@ -54,6 +70,23 @@ class FactVerificationAgent:
 
         if not article:
             raise ValueError(f"Processed article {news_id} not found")
+
+        # An article with no extracted claims gives the model nothing to check.
+        # Sending it anyway spent a full call to have claims invented or an
+        # empty list returned, on every article whose content analysis fell
+        # back. Record the fact that there was nothing to verify instead.
+        if not self._claims_of(article):
+            logger.info(f"Article {news_id} has no extracted claims, skipping LLM verification")
+            return FactVerification(
+                news_id=news_id,
+                claims_verified=[],
+                contradictions_found=False,
+                contradiction_details=[],
+                credibility_score=self.NO_CLAIMS_CREDIBILITY,
+                verification_method='no_claims',
+                verified_at=datetime.now(UTC),
+                verification_notes='No extracted claims to verify.',
+            )
 
         logger.info(f"Verifying facts in article {news_id}")
 
@@ -127,7 +160,7 @@ class FactVerificationAgent:
         """Build fact verification prompt."""
         facts_text = "\n".join([
             f"- {f.get('fact', '') if isinstance(f, dict) else str(f)}"
-            for f in (article.key_facts or [])[:10]
+            for f in self._claims_of(article)[:self.MAX_CLAIMS_PER_CALL]
         ])
 
         # Get title from news relationship (correct name in model)
@@ -137,7 +170,7 @@ class FactVerificationAgent:
 
         prompt = f"""Verify the factual accuracy of claims in this financial news article:
 
-Article Title: {article_title}"
+Article Title: {article_title}
 
 Key Facts Claimed:
 {facts_text}

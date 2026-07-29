@@ -2,6 +2,7 @@
 import json
 import logging
 import re
+from dataclasses import asdict, dataclass
 from threading import Lock
 from urllib.parse import urlparse
 
@@ -28,6 +29,34 @@ LOCAL_EMBEDDING_DEVICE = "cpu"  # CPU only, to avoid GPU memory overflow
 
 _local_embedding_model = None
 _local_embedding_lock = Lock()
+
+
+@dataclass
+class TokenUsage:
+    """Tokens actually billed, as reported by the provider.
+
+    Every provider used here returns real counts; the pipeline previously
+    discarded them and fell back to a characters/4 estimate, which is the one
+    number you cannot tune against because it never reflects what was charged.
+    """
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    calls: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+    def add(self, prompt_tokens: int, completion_tokens: int) -> None:
+        self.prompt_tokens += int(prompt_tokens or 0)
+        self.completion_tokens += int(completion_tokens or 0)
+        self.calls += 1
+
+    def as_dict(self) -> dict:
+        data = asdict(self)
+        data['total_tokens'] = self.total_tokens
+        return data
 
 
 def _get_local_embedding_model():
@@ -94,6 +123,13 @@ class LLMService:
         self.provider = provider or settings.llm_provider
         self.temperature = settings.default_temperature
         self.max_tokens = settings.max_tokens
+
+        # Billed-token accounting. `usage` accumulates for the life of the
+        # process; `last_usage` describes the most recent call, so a caller
+        # can attribute cost to the record it just produced.
+        self.usage = TokenUsage()
+        self.last_usage: dict | None = None
+        self._usage_lock = Lock()
 
         logger.info(f"Initialized LLM service with provider: {self.provider}")
 
@@ -179,6 +215,42 @@ class LLMService:
 
         else:
             raise ValueError(f"Unknown LLM provider: {self.provider}")
+
+    def _record_usage(self, prompt_tokens, completion_tokens) -> dict:
+        """Record one call's billed tokens and return them."""
+        record = {
+            'provider': self.provider,
+            'model': self.model,
+            'prompt_tokens': int(prompt_tokens or 0),
+            'completion_tokens': int(completion_tokens or 0),
+        }
+        record['total_tokens'] = record['prompt_tokens'] + record['completion_tokens']
+
+        with self._usage_lock:
+            self.usage.add(record['prompt_tokens'], record['completion_tokens'])
+            self.last_usage = record
+
+        logger.debug(
+            "LLM call used %d prompt + %d completion tokens (%s/%s)",
+            record['prompt_tokens'],
+            record['completion_tokens'],
+            record['provider'],
+            record['model'],
+        )
+        return record
+
+    def get_usage(self) -> dict:
+        """Cumulative billed tokens since the last reset."""
+        with self._usage_lock:
+            return self.usage.as_dict()
+
+    def reset_usage(self) -> dict:
+        """Zero the cumulative counters, returning what they held."""
+        with self._usage_lock:
+            previous = self.usage.as_dict()
+            self.usage = TokenUsage()
+            self.last_usage = None
+        return previous
 
     def _test_ollama_connection(self):
         """Test connection to Ollama server."""
@@ -266,6 +338,9 @@ class LLMService:
         response.raise_for_status()
 
         result = response.json()
+        self._record_usage(
+            result.get("prompt_eval_count", 0), result.get("eval_count", 0)
+        )
         return result.get("response", "")
 
     def _generate_openai(
@@ -298,6 +373,12 @@ class LLMService:
         try:
             response = self.openai_client.chat.completions.create(**request_kwargs)
 
+            usage = getattr(response, "usage", None)
+            self._record_usage(
+                getattr(usage, "prompt_tokens", 0),
+                getattr(usage, "completion_tokens", 0),
+            )
+
             return response.choices[0].message.content
         except Exception as e:
             error_msg = str(e)
@@ -329,6 +410,12 @@ class LLMService:
             messages=[
                 {"role": "user", "content": prompt}
             ]
+        )
+
+        usage = getattr(message, "usage", None)
+        self._record_usage(
+            getattr(usage, "input_tokens", 0),
+            getattr(usage, "output_tokens", 0),
         )
 
         return message.content[0].text
@@ -508,5 +595,39 @@ def truncate_for_prompt(text: str, max_tokens: int) -> str:
     return clipped
 
 
+_llm_service: LLMService | None = None
+_llm_service_lock = Lock()
+
+
+def get_llm_service() -> LLMService:
+    """Return the shared LLM service, constructing it on first use.
+
+    Deliberately lazy, for the same reason ``src.utils.cache`` is: building
+    this at import time meant that merely importing an agent constructed an
+    HTTP client, and on the Ollama provider issued a probe request that blocks
+    for up to OLLAMA_PROBE_TIMEOUT seconds when no server is running. That
+    cost was paid by every process that touched an agent module, including
+    test collection and the GUI.
+    """
+    global _llm_service
+
+    if _llm_service is None:
+        with _llm_service_lock:
+            if _llm_service is None:
+                _llm_service = LLMService()
+
+    return _llm_service
+
+
+class _LazyLLMServiceProxy:
+    """Module-level ``llm_service`` name that resolves on first attribute access."""
+
+    def __getattr__(self, name):
+        return getattr(get_llm_service(), name)
+
+    def __setattr__(self, name, value):
+        setattr(get_llm_service(), name, value)
+
+
 # Global LLM service instance
-llm_service = LLMService()
+llm_service = _LazyLLMServiceProxy()

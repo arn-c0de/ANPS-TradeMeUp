@@ -51,6 +51,7 @@ from src.models.database import SessionLocal
 from src.models.processed_news import ProcessedNews
 from src.models.raw_news import RawNews
 from src.models.system_logs import SystemLog
+from src.services.llm_service import llm_service
 from src.utils.activity_logger import activity_logger
 
 logging.basicConfig(
@@ -350,6 +351,11 @@ class ContinuousPipeline:
 
                 activity_logger.log_activity(f"Starting Pipeline Iteration #{iteration}", "INFO")
 
+                # Token spend is measured per iteration, so the cost of a
+                # configuration change can be read off consecutive iterations
+                # rather than inferred from the provider's monthly bill.
+                tokens_before = llm_service.get_usage()
+
                 # Create fresh database session with retry logic
                 max_retries = 3
                 for attempt in range(max_retries):
@@ -391,8 +397,23 @@ class ContinuousPipeline:
                 memory_after = self._check_memory()
                 memory_delta = memory_after - memory_before
 
+                tokens_after = llm_service.get_usage()
+                iteration_tokens = {
+                    key: tokens_after[key] - tokens_before[key]
+                    for key in ('prompt_tokens', 'completion_tokens', 'total_tokens', 'calls')
+                }
+
                 logger.info(f"Iteration #{iteration} completed in {duration:.1f}s (avg: {self._get_avg_iteration_time():.1f}s)")
                 logger.info(f"Memory delta: {memory_delta:+.1f}MB (now: {memory_after:.1f}MB)")
+                logger.info(
+                    "LLM tokens this iteration: %d prompt + %d completion = %d over %d calls "
+                    "(process total: %d)",
+                    iteration_tokens['prompt_tokens'],
+                    iteration_tokens['completion_tokens'],
+                    iteration_tokens['total_tokens'],
+                    iteration_tokens['calls'],
+                    tokens_after['total_tokens'],
+                )
                 activity_logger.log_activity(f"Iteration #{iteration} completed in {duration:.1f}s", "SUCCESS")
 
                 # Adjust batch sizes based on performance
@@ -609,6 +630,15 @@ class ContinuousPipeline:
         logger.info(f"  - Avg Iteration Time: {self._get_avg_iteration_time():.1f}s")
         if self.iteration_times:
             logger.info(f"  - Min/Max Iteration: {min(self.iteration_times):.1f}s / {max(self.iteration_times):.1f}s")
+
+        total_usage = llm_service.get_usage()
+        logger.info(
+            "  - LLM Tokens: %d prompt + %d completion = %d over %d calls",
+            total_usage['prompt_tokens'],
+            total_usage['completion_tokens'],
+            total_usage['total_tokens'],
+            total_usage['calls'],
+        )
         logger.info("Shutdown complete.")
 
 
