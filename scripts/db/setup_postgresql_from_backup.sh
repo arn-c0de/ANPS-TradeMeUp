@@ -11,12 +11,33 @@
 
 set -e  # Exit on error
 
-BACKUP_FILE="/media/arn/4E786B03786AE8E3/trademeup_backup.dump"
+# Resolve the repository root from the script's own location, matching the
+# other scripts here. The .env.local handling further down reads and writes
+# repo-relative paths, so running this from anywhere else used to create the
+# file in whatever directory you happened to be standing in.
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT_DIR"
+
 DB_NAME="trademeup"
 DB_USER="trademeup_user"
 DB_PASS="trademeup_pass"
 DB_HOST="localhost"
 DB_PORT="5432"
+
+# Where the dump lives is a property of the machine, not of the project, so it
+# is passed in rather than hardcoded to one contributor's external drive.
+BACKUP_FILE="${1:-${TRADEMEUP_BACKUP_FILE:-}}"
+
+if [ -z "$BACKUP_FILE" ]; then
+    cat <<USAGE
+Usage: $(basename "$0") <backup-file>
+   or: TRADEMEUP_BACKUP_FILE=<backup-file> $(basename "$0")
+
+Restores a PostgreSQL dump into a freshly created '$DB_NAME' database.
+Accepts either a pg_dump custom-format dump or a plain SQL file.
+USAGE
+    exit 2
+fi
 
 echo "================================================================================"
 echo "🚀 TradeMeUp - PostgreSQL Setup with Backup Import"
@@ -29,9 +50,10 @@ echo ""
 # Check if backup file exists
 if [ ! -f "$BACKUP_FILE" ]; then
     echo "❌ ERROR: Backup file not found!"
-    echo "   Expected: $BACKUP_FILE"
+    echo "   Given: $BACKUP_FILE"
     echo ""
-    read -p "Press enter to exit..."
+    echo "   Pass the dump as an argument, or set TRADEMEUP_BACKUP_FILE."
+    echo ""
     exit 1
 fi
 
@@ -249,4 +271,10 @@ echo "  3. Run pipeline:    ./scripts/runtime/run_pipeline.sh"
 echo ""
 echo "Configuration saved in .env.local"
 echo ""
-read -p "Press enter to finish..."
+
+# Only pause when a human is watching. Now that the dump path is an argument,
+# this script can be driven from another script, where a blocking prompt on
+# the success path would hang the caller forever.
+if [ -t 0 ]; then
+    read -p "Press enter to finish..."
+fi
