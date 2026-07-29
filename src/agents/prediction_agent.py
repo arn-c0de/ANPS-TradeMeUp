@@ -25,8 +25,14 @@ from src.models.database import get_scoped_session
 from src.models.entities import Entity
 from src.models.predictions import Prediction
 from src.utils.json_helpers import ensure_list
+from src.utils.prediction_math import FLAT_RETURN_TOLERANCE_PCT
 
 logger = logging.getLogger(__name__)
+
+
+def _normal_cdf(z: float) -> float:
+    """Standard normal CDF. Avoids pulling in scipy for one function."""
+    return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
 
 
 class PredictionAgent:
@@ -69,6 +75,21 @@ class PredictionAgent:
     # decimal fraction. Deliberately a single constant: the feature set
     # carries no per-entity realised volatility yet.
     ASSUMED_DAILY_VOLATILITY = 0.018
+
+    # Size of the move a full-impact, fully one-sided signal implies, as a
+    # decimal fraction at the default horizon. Applied symmetrically to both
+    # directions - see _predict_with_heuristics.
+    HEURISTIC_MOVE_PER_IMPACT = 0.05
+
+    # How far sentiment and the surprise direction can each push the
+    # up/down split. Their sum bounds the tilt into [-1, 1].
+    SENTIMENT_TILT_WEIGHT = 0.7
+    SURPRISE_TILT_WEIGHT = 0.3
+
+    # Magnitude of the move implied by a fully confident directional call
+    # from the trained classifier, as a decimal fraction at the default
+    # horizon. Symmetric by construction.
+    MODEL_MOVE_PER_UNIT_EDGE = 0.03
 
     def __init__(self, model_version: str = "xgboost_v1.0"):
         """
@@ -141,7 +162,7 @@ class PredictionAgent:
         fractions (0.02 == 2%), and readers previously had to infer that from
         the magnitude.
         """
-        sigma = self.ASSUMED_DAILY_VOLATILITY * math.sqrt(self._horizon_days(horizon))
+        sigma = self._horizon_sigma(horizon)
 
         # Normal quantiles: z(0.05)=-1.645, z(0.25)=-0.674, z(0.75)=+0.674,
         # z(0.95)=+1.645
@@ -210,12 +231,12 @@ class PredictionAgent:
             probas = self.model.predict_proba(X)[0]
             direction_probabilities = self._map_class_probabilities(probas)
 
-            # Expected return, scaled to the horizon (see _horizon_return_scale)
-            base_mean = (
-                direction_probabilities['up'] * 0.03 +
-                direction_probabilities['flat'] * 0.00 +
-                direction_probabilities['down'] * -0.02
-            )
+            # Expected return, scaled to the horizon (see _horizon_return_scale).
+            # Driven by the model's directional edge, with the same magnitude
+            # on both legs: the previous +0.03 / -0.02 pair meant even a
+            # perfectly undecided model returned a positive expected move.
+            edge = direction_probabilities['up'] - direction_probabilities['down']
+            base_mean = edge * self.MODEL_MOVE_PER_UNIT_EDGE
             expected_mean = base_mean * self._horizon_return_scale(horizon)
 
             # Feature importance (if available)
@@ -240,6 +261,68 @@ class PredictionAgent:
             logger.error(f"Error in model prediction: {e}")
             return self._predict_with_heuristics(features, horizon)
 
+    def _directional_tilt(self, features: dict) -> float:
+        """Signed lean of the heuristic, in [-1, 1]; +1 is fully bullish.
+
+        Only signed features belong here. ``impact_score`` is deliberately
+        absent: it measures how much an article matters, not whether it is
+        good or bad news, and adding it to the bullish side made a
+        maximally negative story predict a rise.
+        """
+        sentiment = float(features.get('sentiment_overall', 0.0))
+
+        # surprise_direction is -1/0/+1; weight it by how big the surprise was
+        # so a marginal beat does not count the same as a large one.
+        surprise_direction = float(features.get('surprise_direction', 0.0))
+        surprise_magnitude = float(features.get('surprise_magnitude', 0.0))
+        surprise = np.clip(surprise_direction, -1.0, 1.0) * np.clip(
+            surprise_magnitude, 0.0, 1.0
+        )
+
+        tilt = (
+            self.SENTIMENT_TILT_WEIGHT * np.clip(sentiment, -1.0, 1.0)
+            + self.SURPRISE_TILT_WEIGHT * surprise
+        )
+        return float(np.clip(tilt, -1.0, 1.0))
+
+    def _horizon_sigma(self, horizon: str) -> float:
+        """Standard deviation of the return over ``horizon``, as a fraction."""
+        return self.ASSUMED_DAILY_VOLATILITY * math.sqrt(self._horizon_days(horizon))
+
+    def _direction_probabilities_from_distribution(
+        self, expected_mean: float, horizon: str
+    ) -> dict:
+        """Derive up/flat/down from a normal return distribution.
+
+        'flat' is not a free parameter: it is the probability that the move
+        lands inside the tolerance band that :mod:`src.utils.prediction_math`
+        uses when deciding whether a prediction was right. Choosing it
+        independently, as this agent used to, meant the stated probabilities
+        and the scoring rule disagreed - a prediction could be graded against
+        a band it had never priced.
+        """
+        sigma = self._horizon_sigma(horizon)
+        band = FLAT_RETURN_TOLERANCE_PCT / 100.0
+
+        if sigma <= 0:
+            # Degenerate, but do not divide by zero: everything is the mean.
+            if expected_mean > band:
+                return {'up': 1.0, 'flat': 0.0, 'down': 0.0}
+            if expected_mean < -band:
+                return {'up': 0.0, 'flat': 0.0, 'down': 1.0}
+            return {'up': 0.0, 'flat': 1.0, 'down': 0.0}
+
+        down = _normal_cdf((-band - expected_mean) / sigma)
+        up = 1.0 - _normal_cdf((band - expected_mean) / sigma)
+        flat = max(0.0, 1.0 - up - down)
+
+        total = up + flat + down
+        return {
+            'up': float(up / total),
+            'flat': float(flat / total),
+            'down': float(down / total),
+        }
+
     def _predict_with_heuristics(self, features: dict, horizon: str) -> dict:
         """
         Generate prediction using simple heuristics (when no model).
@@ -251,48 +334,40 @@ class PredictionAgent:
         Returns:
             Prediction results
         """
-        # Use impact score and sentiment as simple heuristics
-        impact = features.get('impact_score', 0.5)
-        sentiment = features.get('sentiment_overall', 0.0)
+        # Impact says how big the move is, not which way it goes. Sentiment
+        # and the surprise direction are the only signed inputs available, so
+        # they set the direction while impact scales the size of the move.
+        impact = float(features.get('impact_score', 0.5))
+        tilt = self._directional_tilt(features)
 
-        # Calculate bullish probability based on impact and sentiment
-        bullish_prob = 0.33 + (impact * 0.2) + (sentiment * 0.15)
-        bullish_prob = np.clip(bullish_prob, 0.1, 0.9)
-
-        bearish_prob = 0.33 - (impact * 0.1) - (sentiment * 0.1)
-        bearish_prob = np.clip(bearish_prob, 0.1, 0.5)
-
-        flat_prob = 1.0 - bullish_prob - bearish_prob
-        flat_prob = max(0.1, flat_prob)
-
-        # Normalize
-        total = bullish_prob + flat_prob + bearish_prob
-        direction_probabilities = {
-            'up': float(bullish_prob / total),
-            'flat': float(flat_prob / total),
-            'down': float(bearish_prob / total)
-        }
-
-        # Expected return, scaled to the horizon
         expected_mean = (
-            direction_probabilities['up'] * (impact * 0.05) +
-            direction_probabilities['down'] * -(impact * 0.03)
-        ) * self._horizon_return_scale(horizon)
+            tilt * impact * self.HEURISTIC_MOVE_PER_IMPACT
+            * self._horizon_return_scale(horizon)
+        )
+
+        # Read the direction probabilities off the same distribution the
+        # expected return describes, rather than inventing a second, unrelated
+        # set of numbers. They now also agree with how the prediction is later
+        # graded: prediction_math classifies a realised move as flat inside
+        # the same tolerance band.
+        direction_probabilities = self._direction_probabilities_from_distribution(
+            expected_mean, horizon
+        )
 
         # Key drivers (heuristic)
         key_drivers = [
             {'driver': 'impact_score', 'importance': 0.40},
             {'driver': 'sentiment_overall', 'importance': 0.30},
-            {'driver': 'surprise_factor', 'importance': 0.20},
+            {'driver': 'surprise_direction', 'importance': 0.20},
             {'driver': 'regime_sensitivity', 'importance': 0.10}
         ]
 
-        # Dynamic confidence based on impact and max probability
-        # Higher impact and stronger directional signal = higher confidence
-        max_prob = max(direction_probabilities.values())
-        base_confidence = 0.45 + (impact * 0.25)  # 0.45-0.70 based on impact
-        directional_boost = (max_prob - 0.33) * 0.3  # Boost if strong direction
-        confidence = np.clip(base_confidence + directional_boost, 0.40, 0.85)
+        # Confidence follows how one-sided the call is, not merely how loud
+        # the article was: an important article with no directional signal is
+        # a weak prediction, however high its impact score.
+        edge = abs(direction_probabilities['up'] - direction_probabilities['down'])
+        base_confidence = 0.40 + (impact * 0.15)
+        confidence = np.clip(base_confidence + edge * 0.35, 0.40, 0.85)
 
         return {
             'direction_probabilities': direction_probabilities,
