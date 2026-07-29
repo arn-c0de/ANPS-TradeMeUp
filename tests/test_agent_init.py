@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 import logging
 
+from src.agents import build_agent
 from src.agents.ab_testing_agent import ABTestingAgent
 from src.agents.confidence_calibration_agent import ConfidenceCalibrationAgent
 from src.agents.content_understanding_agent import ContentUnderstandingAgent
@@ -39,8 +40,10 @@ def _test_agent_init(agent_class, agent_name, db):
     logger.info(f"{'='*80}")
 
     try:
-        # Just try to initialize agent
-        agent = agent_class(db)
+        # Pass the session only to agents that still take one. Handing a
+        # session to a converted agent raises TypeError, which used to make
+        # most of this suite report a failure that was the test's own fault.
+        agent = build_agent(agent_class, db)
         logger.info(f"✅ {agent_name} - Successfully initialized")
 
         # Try to get statistics (this may return empty results but shouldn't crash)

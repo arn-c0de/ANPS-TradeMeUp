@@ -4,7 +4,7 @@ Modular design for easy expansion as new agents are added
 """
 
 import traceback
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import dash
 import dash_bootstrap_components as dbc
@@ -12,6 +12,7 @@ from dash import Input, Output, State, dcc, html
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from src.agents import build_agent
 from src.config.settings import settings
 
 # Agent test configurations - EASY TO EXPAND
@@ -22,8 +23,6 @@ AGENT_TESTS = {
         "description": "Fetch articles from RSS feeds",
         "module": "src.agents.ingestion_agent",
         "class": "IngestionAgent",
-        "test_method": "test_single_fetch",
-        "expected_output": "articles fetched",
         "tier": "TIER 1: Data Ingestion"
     },
     "agent_1_5": {
@@ -32,8 +31,7 @@ AGENT_TESTS = {
         "description": "Assess article quality and detect duplicates",
         "module": "src.agents.data_quality_agent",
         "class": "DataQualityAgent",
-        "test_method": "test_quality_check",
-        "expected_output": "quality score calculated",
+        "requires": "calculate_quality_score",
         "tier": "TIER 1: Data Ingestion"
     },
     "agent_2": {
@@ -42,8 +40,6 @@ AGENT_TESTS = {
         "description": "LLM-based content analysis",
         "module": "src.agents.content_understanding_agent",
         "class": "ContentUnderstandingAgent",
-        "test_method": "test_llm_connection",
-        "expected_output": "LLM response received",
         "tier": "TIER 2: Understanding"
     },
     "agent_3": {
@@ -52,8 +48,7 @@ AGENT_TESTS = {
         "description": "Extract and map entities to tickers",
         "module": "src.agents.entity_mapping_agent",
         "class": "EntityMappingAgent",
-        "test_method": "test_entity_extraction",
-        "expected_output": "entities extracted",
+        "requires": "process_batch",
         "tier": "TIER 2: Understanding"
     },
     "agent_4": {
@@ -62,8 +57,7 @@ AGENT_TESTS = {
         "description": "Calculate news impact scores",
         "module": "src.agents.impact_scoring_agent",
         "class": "ImpactScoringAgent",
-        "test_method": "test_impact_calculation",
-        "expected_output": "impact score calculated",
+        "requires": "process_batch",
         "tier": "TIER 3: Analysis"
     },
     "agent_4_5": {
@@ -72,8 +66,7 @@ AGENT_TESTS = {
         "description": "Detect earnings surprises",
         "module": "src.agents.surprise_quantification_agent",
         "class": "SurpriseQuantificationAgent",
-        "test_method": "test_surprise_detection",
-        "expected_output": "surprise calculated",
+        "requires": "calculate_surprise",
         "tier": "TIER 3: Analysis"
     },
     "agent_5": {
@@ -82,8 +75,7 @@ AGENT_TESTS = {
         "description": "Detect current market regime",
         "module": "src.agents.regime_detection_agent",
         "class": "RegimeDetectionAgent",
-        "test_method": "test_regime_classification",
-        "expected_output": "regime detected",
+        "requires": "detect_regime",
         "tier": "TIER 3: Analysis"
     },
     "agent_6": {
@@ -92,8 +84,7 @@ AGENT_TESTS = {
         "description": "Generate market predictions",
         "module": "src.agents.prediction_agent",
         "class": "PredictionAgent",
-        "test_method": "test_prediction_generation",
-        "expected_output": "prediction generated",
+        "requires": "process_batch",
         "tier": "TIER 4: Prediction"
     },
     "agent_7": {
@@ -102,8 +93,7 @@ AGENT_TESTS = {
         "description": "Verify news claims and detect misinformation",
         "module": "src.agents.fact_verification_agent",
         "class": "FactVerificationAgent",
-        "test_method": "test_fact_check",
-        "expected_output": "fact check completed",
+        "requires": "process_batch",
         "tier": "TIER 3: Analysis"
     },
     "agent_8": {
@@ -112,8 +102,7 @@ AGENT_TESTS = {
         "description": "Analyze correlations between news and market movements",
         "module": "src.agents.correlation_analysis_agent",
         "class": "CorrelationAnalysisAgent",
-        "test_method": "test_correlation_calculation",
-        "expected_output": "correlation calculated",
+        "requires": "process_batch",
         "tier": "TIER 3: Analysis"
     },
     "agent_9": {
@@ -122,8 +111,7 @@ AGENT_TESTS = {
         "description": "Track news impact decay over time",
         "module": "src.agents.signal_decay_agent",
         "class": "SignalDecayAgent",
-        "test_method": "test_decay_calculation",
-        "expected_output": "decay calculated",
+        "requires": "process_batch",
         "tier": "TIER 3: Analysis"
     },
     "agent_10": {
@@ -132,8 +120,6 @@ AGENT_TESTS = {
         "description": "Generate market scenarios based on news",
         "module": "src.agents.scenario_generation_agent",
         "class": "ScenarioGenerationAgent",
-        "test_method": "test_scenario_generation",
-        "expected_output": "scenarios generated",
         "tier": "TIER 4: Prediction"
     },
     "agent_11": {
@@ -142,8 +128,6 @@ AGENT_TESTS = {
         "description": "Calibrate prediction confidence levels",
         "module": "src.agents.confidence_calibration_agent",
         "class": "ConfidenceCalibrationAgent",
-        "test_method": "test_calibration",
-        "expected_output": "confidence calibrated",
         "tier": "TIER 4: Prediction"
     },
     "agent_12": {
@@ -152,8 +136,6 @@ AGENT_TESTS = {
         "description": "Optimize strategy selection and weighting",
         "module": "src.agents.meta_strategy_agent",
         "class": "MetaStrategyAgent",
-        "test_method": "test_strategy_selection",
-        "expected_output": "strategy selected",
         "tier": "TIER 5: Optimization"
     },
     "agent_13": {
@@ -162,8 +144,6 @@ AGENT_TESTS = {
         "description": "Monitor and analyze model performance",
         "module": "src.agents.model_performance_monitor",
         "class": "ModelPerformanceMonitor",
-        "test_method": "test_performance_tracking",
-        "expected_output": "performance tracked",
         "tier": "TIER 5: Optimization"
     },
     "agent_14": {
@@ -172,8 +152,6 @@ AGENT_TESTS = {
         "description": "Run A/B tests on strategies and models",
         "module": "src.agents.ab_testing_agent",
         "class": "ABTestingAgent",
-        "test_method": "test_ab_testing",
-        "expected_output": "A/B test executed",
         "tier": "TIER 5: Optimization"
     },
     "simulation_engine": {
@@ -182,8 +160,6 @@ AGENT_TESTS = {
         "description": "Validate predicted market impact, risk scoring, and trade decisions",
         "module": "src.simulations.trading_simulator",
         "class": "TradingSimulationEngine",
-        "test_method": "test_simulation_engine",
-        "expected_output": "simulation checks passed",
         "tier": "TIER 6: Simulation"
     }
 }
@@ -326,22 +302,6 @@ def test_agent(agent_key):
 
     start_time = datetime.now()
 
-    # List of refactored agents that DON'T need db parameter
-    REFACTORED_AGENTS = {
-        "agent_1_5",  # DataQualityAgent
-        "agent_2",    # ContentUnderstandingAgent
-        "agent_3",    # EntityMappingAgent
-        "agent_4",    # ImpactScoringAgent
-        "agent_4_5",  # SurpriseQuantificationAgent
-        "agent_6",    # PredictionAgent
-        "agent_7",    # FactVerificationAgent
-        "agent_8",    # CorrelationAnalysisAgent
-        "agent_9",    # SignalDecayAgent
-        "agent_11",   # ConfidenceCalibrationAgent
-        "agent_12",   # MetaStrategyAgent
-        "simulation_engine",  # TradingSimulationEngine
-    }
-
     try:
         # Dynamic import
         module_path = agent_info["module"]
@@ -351,28 +311,27 @@ def test_agent(agent_key):
         module = __import__(module_path, fromlist=[class_name])
         agent_class = getattr(module, class_name)
 
-        # Initialize database session (for non-refactored agents)
         from src.models.database import normalize_database_url
         engine = create_engine(normalize_database_url(settings.database_url))
-        db = Session(engine)
 
-        # Initialize agent - REFACTORED agents don't need db parameter
-        if agent_key in REFACTORED_AGENTS:
-            agent = agent_class()  # ✅ No db parameter for refactored agents
-        else:
-            agent = agent_class(db)  # Old style for non-refactored agents
+        with Session(engine) as db:
+            # Most agents now open their own scoped sessions and take no
+            # arguments; the rest still expect a session. build_agent asks the
+            # constructor rather than consulting a hand-maintained list.
+            agent = build_agent(agent_class, db)
 
-        # Check if agent has required methods
-        required_methods = ['process_batch', '__init__']
-        missing_methods = [m for m in required_methods if not hasattr(agent, m)]
-        if missing_methods:
-            db.close()
-            return False, f"Missing methods: {', '.join(missing_methods)}", {"missing": missing_methods}
+            # Check if agent has required methods
+            required_methods = ['process_batch', '__init__']
+            missing_methods = [m for m in required_methods if not hasattr(agent, m)]
+            if missing_methods:
+                return (
+                    False,
+                    f"Missing methods: {', '.join(missing_methods)}",
+                    {"missing": missing_methods},
+                )
 
-        # Agent-specific tests
-        test_result = run_agent_specific_test(agent, agent_key)
-
-        db.close()
+            # Agent-specific tests
+            test_result = run_agent_specific_test(agent, agent_key)
 
         duration = (datetime.now() - start_time).total_seconds()
 
@@ -390,169 +349,139 @@ def test_agent(agent_key):
 def run_agent_specific_test(agent, agent_key):
     """Run agent-specific tests"""
     try:
-        if agent_key == "agent_1":
-            # Test RSS feed connection - check class attribute
-            rss_feeds = getattr(agent, 'RSS_FEEDS', None) or getattr(agent, 'rss_feeds', None)
-            if rss_feeds and len(rss_feeds) > 0:
-                return {"success": True, "message": f"Found {len(rss_feeds)} RSS feeds configured"}
-            return {"success": False, "message": "No RSS feeds configured"}
+        custom_check = _CUSTOM_CHECKS.get(agent_key)
+        if custom_check:
+            return custom_check(agent)
 
-        elif agent_key == "agent_1_5":
-            # Test quality scoring logic
-            if hasattr(agent, 'calculate_quality_score'):
-                return {"success": True, "message": "Quality scoring method available"}
-            return {"success": False, "message": "Missing calculate_quality_score method"}
+        # Everything else is a method-presence check, declared in AGENT_TESTS.
+        required = AGENT_TESTS.get(agent_key, {}).get("requires")
+        if required:
+            if hasattr(agent, required):
+                return {"success": True, "message": f"✅ {required}() available"}
+            return {"success": False, "message": f"Missing {required} method"}
 
-        elif agent_key == "agent_2":
-            # Test LLM connection
-            if hasattr(agent, 'llm'):
-                return {"success": True, "message": f"LLM service initialized: {agent.llm.provider}"}
-            return {"success": False, "message": "LLM service not initialized"}
-
-        elif agent_key == "agent_3":
-            # Test entity extraction - check for process_batch (refactored)
-            if hasattr(agent, 'process_batch'):
-                return {"success": True, "message": "✅ Entity mapping agent ready (refactored)"}
-            return {"success": False, "message": "Missing process_batch method"}
-
-        elif agent_key == "agent_4":
-            # Test impact calculation - check for process_batch (refactored)
-            if hasattr(agent, 'process_batch'):
-                return {"success": True, "message": "✅ Impact scoring agent ready (refactored)"}
-            return {"success": False, "message": "Missing process_batch method"}
-
-        elif agent_key == "agent_4_5":
-            # Test surprise calculation
-            if hasattr(agent, 'calculate_surprise'):
-                return {"success": True, "message": "Surprise calculation method available"}
-            return {"success": False, "message": "Missing calculate_surprise method"}
-
-        elif agent_key == "agent_5":
-            # Test regime detection
-            if hasattr(agent, 'detect_regime'):
-                return {"success": True, "message": "Regime detection method available"}
-            return {"success": False, "message": "Missing detect_regime method"}
-
-        elif agent_key == "agent_6":
-            # Test prediction generation - check for process_batch (refactored)
-            if hasattr(agent, 'process_batch'):
-                return {"success": True, "message": "✅ Prediction agent ready (refactored)"}
-            return {"success": False, "message": "Missing process_batch method"}
-
-        elif agent_key == "agent_7":
-            # Test fact verification - check for process_batch (refactored)
-            if hasattr(agent, 'process_batch'):
-                return {"success": True, "message": "✅ Fact verification agent ready (refactored)"}
-            return {"success": False, "message": "Missing process_batch method"}
-
-        elif agent_key == "agent_8":
-            # Test correlation analysis - check for process_batch (refactored)
-            if hasattr(agent, 'process_batch'):
-                return {"success": True, "message": "✅ Correlation agent ready (refactored)"}
-            return {"success": False, "message": "Missing process_batch method"}
-
-        elif agent_key == "agent_9":
-            # Test signal decay - check for process_batch (refactored)
-            if hasattr(agent, 'process_batch'):
-                return {"success": True, "message": "✅ Signal decay agent ready (refactored)"}
-            return {"success": False, "message": "Missing process_batch method"}
-
-        elif agent_key == "simulation_engine":
-            # Test risk calculation and trading simulation utilities (no DB/network calls)
-            from src.simulations.risk_calculations import RiskCalculator, RiskInputs
-
-            calculator = RiskCalculator()
-            inputs = RiskInputs(
-                model_uncertainty=0.2,
-                divergence_pct=2.5,
-                volatility_regime="medium",
-                liquidity_stress=0.3,
-                regime_confidence=0.7,
-                transaction_cost_ratio=0.2,
-                market_impact_bps=6.0,
-                correlation_breakdown=0.1,
-            )
-            risk_result = calculator.calculate(inputs)
-            risk_score = risk_result.get("risk_score")
-            if risk_score is None or not (0.0 <= risk_score <= 1.0):
-                return {
-                    "success": False,
-                    "message": "Risk score out of bounds",
-                    "risk_result": risk_result,
-                }
-
-            # Validate predicted return normalization behavior
-            class _PredictionStub:
-                expected_return = {"mean": 0.02}
-
-            expected_return_pct = agent._get_expected_return_pct(_PredictionStub())
-            if abs(expected_return_pct - 2.0) > 0.001:
-                return {
-                    "success": False,
-                    "message": "Expected return normalization failed",
-                    "expected_return_pct": expected_return_pct,
-                }
-
-            # Validate cost estimation and decision logic
-            total_bps, breakdown = agent._estimate_costs_bps(
-                price=150.0,
-                volatility_regime="medium",
-                predicted_direction="up",
-                horizon="5d"
-            )
-            if total_bps <= 0 or not breakdown:
-                return {
-                    "success": False,
-                    "message": "Cost estimation failed",
-                    "cost_breakdown": breakdown,
-                }
-
-            decision, constraint_info = agent._calculate_decision(
-                predicted_direction="up",
-                expected_return_pct=2.0,
-                confidence=0.8,
-                risk_score=0.4,
-                cost_ratio=0.2,
-            )
-            if decision != "buy":
-                return {
-                    "success": False,
-                    "message": f"Unexpected decision outcome: {decision}",
-                    "decision": decision,
-                    "constraint_info": constraint_info,
-                }
-
-            # Validate market snapshot handling with stubbed provider
-            class _StaticMarketDataProvider:
-                def get_live_price(self, ticker):
-                    return {
-                        "symbol": ticker,
-                        "price": 123.45,
-                        "change_percent": 0.12,
-                        "timestamp": datetime.now(UTC),
-                    }
-
-            agent.market_data_provider = _StaticMarketDataProvider()
-            snapshot = agent._get_market_snapshot("TEST")
-            if not snapshot or snapshot.get("price") is None:
-                return {
-                    "success": False,
-                    "message": "Market snapshot missing price",
-                    "snapshot": snapshot,
-                }
-
-            return {
-                "success": True,
-                "message": "Risk, market data, and decision checks passed",
-                "risk_score": risk_score,
-                "decision": decision,
-            }
-
-        else:
-            return {"success": True, "message": "Basic initialization successful"}
+        return {"success": True, "message": "Basic initialization successful"}
 
     except Exception as e:
         return {"success": False, "message": str(e), "traceback": traceback.format_exc()}
+
+
+def _check_ingestion_agent(agent):
+    """Agent 1: RSS feeds must be configured."""
+    rss_feeds = getattr(agent, 'RSS_FEEDS', None) or getattr(agent, 'rss_feeds', None)
+    if rss_feeds and len(rss_feeds) > 0:
+        return {"success": True, "message": f"Found {len(rss_feeds)} RSS feeds configured"}
+    return {"success": False, "message": "No RSS feeds configured"}
+
+
+def _check_content_understanding_agent(agent):
+    """Agent 2: the LLM service must be wired up."""
+    if hasattr(agent, 'llm'):
+        return {"success": True, "message": f"LLM service initialized: {agent.llm.provider}"}
+    return {"success": False, "message": "LLM service not initialized"}
+
+
+def _check_simulation_engine(agent):
+    """Walk the simulation engine end to end without DB or network calls."""
+    try:
+        from src.simulations.risk_calculations import RiskCalculator, RiskInputs
+
+        calculator = RiskCalculator()
+        inputs = RiskInputs(
+            model_uncertainty=0.2,
+            divergence_pct=2.5,
+            volatility_regime="medium",
+            liquidity_stress=0.3,
+            regime_confidence=0.7,
+            transaction_cost_ratio=0.2,
+            market_impact_bps=6.0,
+            correlation_breakdown=0.1,
+        )
+        risk_result = calculator.calculate(inputs)
+        risk_score = risk_result.get("risk_score")
+        if risk_score is None or not (0.0 <= risk_score <= 1.0):
+            return {
+                "success": False,
+                "message": "Risk score out of bounds",
+                "risk_result": risk_result,
+            }
+
+        # Validate predicted return normalization behavior
+        class _PredictionStub:
+            expected_return = {"mean": 0.02}
+
+        expected_return_pct = agent._get_expected_return_pct(_PredictionStub())
+        if abs(expected_return_pct - 2.0) > 0.001:
+            return {
+                "success": False,
+                "message": "Expected return normalization failed",
+                "expected_return_pct": expected_return_pct,
+            }
+
+        # Validate cost estimation and decision logic
+        total_bps, breakdown = agent._estimate_costs_bps(
+            price=150.0,
+            volatility_regime="medium",
+            predicted_direction="up",
+            horizon="5d"
+        )
+        if total_bps <= 0 or not breakdown:
+            return {
+                "success": False,
+                "message": "Cost estimation failed",
+                "cost_breakdown": breakdown,
+            }
+
+        decision, constraint_info = agent._calculate_decision(
+            predicted_direction="up",
+            expected_return_pct=2.0,
+            confidence=0.8,
+            risk_score=0.4,
+            cost_ratio=0.2,
+        )
+        if decision != "buy":
+            return {
+                "success": False,
+                "message": f"Unexpected decision outcome: {decision}",
+                "decision": decision,
+                "constraint_info": constraint_info,
+            }
+
+        # Validate market snapshot handling with stubbed provider
+        class _StaticMarketDataProvider:
+            def get_live_price(self, ticker):
+                return {
+                    "symbol": ticker,
+                    "price": 123.45,
+                    "change_percent": 0.12,
+                    "timestamp": datetime.now(UTC),
+                }
+
+        agent.market_data_provider = _StaticMarketDataProvider()
+        snapshot = agent._get_market_snapshot("TEST")
+        if not snapshot or snapshot.get("price") is None:
+            return {
+                "success": False,
+                "message": "Market snapshot missing price",
+                "snapshot": snapshot,
+            }
+
+        return {
+            "success": True,
+            "message": "Risk, market data, and decision checks passed",
+            "risk_score": risk_score,
+            "decision": decision,
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e), "traceback": traceback.format_exc()}
+
+
+# Agents whose health check is more than "does this method exist".
+_CUSTOM_CHECKS = {
+    "agent_1": _check_ingestion_agent,
+    "agent_2": _check_content_understanding_agent,
+    "simulation_engine": _check_simulation_engine,
+}
 
 
 def get_test_summary(test_results):

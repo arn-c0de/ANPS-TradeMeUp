@@ -3,9 +3,17 @@
 Backfill Script - Process all existing articles through all agents
 Completes missing analyses for articles already in the database
 Uses the same LLM settings (Ollama/OpenAI) as configured in environment
+
+Every phase does the same thing: count what is still missing, then drive the
+owning agent's ``process_batch`` until it stops making progress. That shape is
+described once in :func:`run_phase`; the phases themselves are just data in
+:data:`PHASES`.
 """
 import argparse
+import logging
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -13,11 +21,10 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-import logging
+from sqlalchemy.orm import Session
 
+from src.agents import build_agent
 from src.agents.content_understanding_agent import ContentUnderstandingAgent
-
-# Import all agents
 from src.agents.data_quality_agent import DataQualityAgent
 from src.agents.entity_mapping_agent import EntityMappingAgent
 from src.agents.fact_verification_agent import FactVerificationAgent
@@ -25,8 +32,6 @@ from src.agents.impact_scoring_agent import ImpactScoringAgent
 from src.agents.prediction_agent import PredictionAgent
 from src.agents.regime_detection_agent import RegimeDetectionAgent
 from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
-
-# Import settings to use environment configuration
 from src.config.settings import settings
 from src.models.analysis import FactVerification, ImpactScore, SurpriseScore
 from src.models.data_quality import DataQualityScore
@@ -41,6 +46,16 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Articles below this quality score are not worth running NLP over.
+MIN_QUALITY_FOR_CONTENT = 0.6
+
+# Only impact scores at or above this level get a prediction.
+MIN_IMPACT_FOR_PREDICTION = 0.4
+
+# Safety margin on the iteration cap, so a phase whose agent keeps reporting
+# progress on the same rows cannot spin forever.
+ITERATION_BUFFER = 2
 
 
 def print_section(title):
@@ -69,307 +84,191 @@ def print_llm_config():
     print()
 
 
-def backfill_quality_assessment(db, batch_size=100):
-    """Process all RawNews without quality scores"""
-    print_section("Phase 1: Quality Assessment Backfill")
+# --------------------------------------------------------------------------
+# Pending-work queries
+#
+# Each returns how many rows still need this phase, which drives both the
+# "nothing to do" short-circuit and the iteration cap.
+# --------------------------------------------------------------------------
 
-    # Count articles needing processing
-    unassessed = db.query(RawNews).outerjoin(
+def _count_without_quality(db: Session) -> int:
+    return db.query(RawNews).outerjoin(
         DataQualityScore, RawNews.news_id == DataQualityScore.news_id
     ).filter(DataQualityScore.news_id.is_(None)).count()
 
-    logger.info(f"Articles needing quality assessment: {unassessed}")
 
-    if unassessed == 0:
-        logger.info("✓ All articles have quality scores")
-        return 0
-
-    agent = DataQualityAgent(db)
-    processed = 0
-    max_iterations = (unassessed // batch_size) + 2  # Allow some buffer
-    iterations = 0
-
-    while iterations < max_iterations:
-        iterations += 1
-        result = agent.process_batch(limit=batch_size)
-        batch_processed = result.get('processed', 0)
-
-        if batch_processed == 0:
-            break
-
-        processed += batch_processed
-        logger.info(f"Progress: {processed}/{unassessed} articles assessed")
-
-        # Commit periodically to prevent data loss
-        if processed % (batch_size * 5) == 0:
-            db.commit()
-            logger.info("Database checkpoint committed")
-
-    logger.info(f"✓ Completed quality assessment for {processed} articles")
-    db.commit()  # Final commit for this phase
-    return processed
-
-
-def backfill_content_understanding(db, batch_size=50):
-    """Process all quality-checked RawNews through NLP"""
-    print_section("Phase 2: Content Understanding Backfill")
-
-    # Count articles needing processing - must have quality score >= 0.6
-    unprocessed = db.query(RawNews).join(
+def _count_without_content(db: Session) -> int:
+    return db.query(RawNews).join(
         DataQualityScore, RawNews.news_id == DataQualityScore.news_id
     ).filter(
-        DataQualityScore.quality_score >= 0.6
+        DataQualityScore.quality_score >= MIN_QUALITY_FOR_CONTENT
     ).outerjoin(
         ProcessedNews, RawNews.news_id == ProcessedNews.news_id
     ).filter(ProcessedNews.news_id.is_(None)).count()
 
-    logger.info(f"Articles needing NLP processing: {unprocessed}")
 
-    if unprocessed == 0:
-        logger.info("✓ All quality articles have been processed")
-        return 0
-
-    agent = ContentUnderstandingAgent(db)
-    processed = 0
-    errors = 0
-    max_iterations = (unprocessed // batch_size) + 2
-    iterations = 0
-
-    while iterations < max_iterations:
-        iterations += 1
-        result = agent.process_batch(limit=batch_size)
-        batch_processed = result.get('processed', 0)
-        errors += result.get('errors', 0)
-
-        if batch_processed == 0:
-            break
-
-        processed += batch_processed
-        logger.info(f"Progress: {processed}/{unprocessed} articles analyzed (errors: {errors})")
-
-        if processed % (batch_size * 5) == 0:
-            db.commit()
-            logger.info("Database checkpoint committed")
-
-    logger.info(f"✓ Completed NLP for {processed} articles (errors: {errors})")
-    db.commit()  # Final commit for this phase
-    return processed
+def _count_missing(db: Session, related_model) -> int:
+    """Count ProcessedNews rows that have no matching row in ``related_model``."""
+    return db.query(ProcessedNews).outerjoin(
+        related_model, ProcessedNews.news_id == related_model.news_id
+    ).filter(related_model.news_id.is_(None)).count()
 
 
-def backfill_entity_mapping(db, batch_size=30):
-    """Process all ProcessedNews through entity mapping"""
-    print_section("Phase 3: Entity Mapping Backfill")
+def _count_predictable_impacts(db: Session) -> int:
+    """High-impact scores are the input to prediction generation.
 
-    # Count articles needing processing
-    unmapped = db.query(ProcessedNews).outerjoin(
-        NewsEntityMapping, ProcessedNews.news_id == NewsEntityMapping.news_id
-    ).filter(NewsEntityMapping.news_id.is_(None)).count()
-
-    logger.info(f"Articles needing entity mapping: {unmapped}")
-
-    if unmapped == 0:
-        logger.info("✓ All processed articles have entity mappings")
-        return 0
-
-    agent = EntityMappingAgent(db)
-    processed = 0
-
-    while True:
-        result = agent.process_batch(limit=batch_size)
-        batch_processed = result.get('processed', 0)
-
-        if batch_processed == 0:
-            break
-
-        processed += batch_processed
-        mappings = result.get('total_mappings', 0)
-        logger.info(f"Progress: {processed}/{unmapped} articles mapped ({mappings} mappings)")
-
-    logger.info(f"✓ Completed entity mapping for {processed} articles")
-    return processed
-
-
-def backfill_fact_verification(db, batch_size=50):
-    """Process all ProcessedNews through fact verification"""
-    print_section("Phase 4: Fact Verification Backfill")
-
-    # Count articles needing processing
-    unverified = db.query(ProcessedNews).outerjoin(
-        FactVerification, ProcessedNews.news_id == FactVerification.news_id
-    ).filter(FactVerification.news_id.is_(None)).count()
-
-    logger.info(f"Articles needing fact verification: {unverified}")
-
-    if unverified == 0:
-        logger.info("✓ All processed articles have been fact-checked")
-        return 0
-
-    agent = FactVerificationAgent(db)
-    processed = 0
-    max_iterations = (unverified // batch_size) + 2
-    iterations = 0
-
-    while iterations < max_iterations:
-        iterations += 1
-        result = agent.process_batch(limit=batch_size)
-        batch_processed = result.get('processed', 0)
-
-        if batch_processed == 0:
-            break
-
-        processed += batch_processed
-        logger.info(f"Progress: {processed}/{unverified} articles verified")
-
-        if processed % (batch_size * 5) == 0:
-            db.commit()
-            logger.info("Database checkpoint committed")
-
-    logger.info(f"✓ Completed fact verification for {processed} articles")
-    db.commit()  # Final commit for this phase
-    return processed
-
-
-def backfill_surprise_scoring(db, batch_size=50):
-    """Process all ProcessedNews through surprise quantification"""
-    print_section("Phase 5: Surprise Quantification Backfill")
-
-    # Count articles needing processing
-    unsurprised = db.query(ProcessedNews).outerjoin(
-        SurpriseScore, ProcessedNews.news_id == SurpriseScore.news_id
-    ).filter(SurpriseScore.news_id.is_(None)).count()
-
-    logger.info(f"Articles needing surprise scoring: {unsurprised}")
-
-    if unsurprised == 0:
-        logger.info("✓ All processed articles have surprise scores")
-        return 0
-
-    # Note: SurpriseQuantificationAgent uses scoped sessions internally
-    agent = SurpriseQuantificationAgent()
-    processed = 0
-    total_surprises = 0
-    max_iterations = (unsurprised // batch_size) + 2
-    iterations = 0
-
-    while iterations < max_iterations:
-        iterations += 1
-        result = agent.process_batch(limit=batch_size)
-        batch_processed = result.get('processed', 0)
-
-        if batch_processed == 0:
-            break
-
-        processed += batch_processed
-        total_surprises += result.get('surprises_found', 0)
-        logger.info(f"Progress: {processed}/{unsurprised} articles scored ({total_surprises} surprises found)")
-
-        if processed % (batch_size * 5) == 0:
-            db.commit()
-            logger.info("Database checkpoint committed")
-
-    logger.info(f"✓ Completed surprise scoring for {processed} articles ({total_surprises} surprises found)")
-    db.commit()  # Final commit for this phase
-    return processed
-
-
-def backfill_impact_scoring(db, batch_size=50):
-    """Process all ProcessedNews with entities through impact scoring"""
-    print_section("Phase 6: Impact Scoring Backfill")
-
-    # Count articles needing processing
-    unscored = db.query(ProcessedNews).outerjoin(
-        ImpactScore, ProcessedNews.news_id == ImpactScore.news_id
-    ).filter(ImpactScore.news_id.is_(None)).count()
-
-    logger.info(f"Articles needing impact scoring: {unscored}")
-
-    if unscored == 0:
-        logger.info("✓ All processed articles have impact scores")
-        return 0
-
-    # Note: ImpactScoringAgent uses scoped sessions internally
-    agent = ImpactScoringAgent()
-    processed = 0
-    total_scores = 0
-    max_iterations = (unscored // batch_size) + 2
-    iterations = 0
-
-    while iterations < max_iterations:
-        iterations += 1
-        result = agent.process_batch(limit=batch_size)
-        batch_processed = result.get('processed', 0)
-
-        if batch_processed == 0:
-            break
-
-        processed += batch_processed
-        total_scores += result.get('impact_scores', 0)
-        logger.info(f"Progress: {processed}/{unscored} articles scored ({total_scores} impact scores created)")
-
-        if processed % (batch_size * 5) == 0:
-            db.commit()
-            logger.info("Database checkpoint committed")
-
-    logger.info(f"✓ Completed impact scoring for {processed} articles")
-    db.commit()  # Final commit for this phase
-    return processed
-
-
-def backfill_predictions(db, batch_size=50):
-    """Generate predictions for high-impact scores"""
-    print_section("Phase 7: Prediction Generation Backfill")
-
-    # Count impact scores needing predictions
-    from src.models.analysis import ImpactScore
-    from src.models.predictions import Prediction
-
-    # Get all high-impact scores
-    high_impact = db.query(ImpactScore).filter(
-        ImpactScore.impact_score >= 0.4
+    This counts all of them rather than only the unpredicted ones: there is no
+    cheap join for "already predicted", and the agent skips what it has already
+    handled. The number is used for progress display and the iteration cap.
+    """
+    return db.query(ImpactScore).filter(
+        ImpactScore.impact_score >= MIN_IMPACT_FOR_PREDICTION
     ).count()
 
-    logger.info(f"High-impact scores in database: {high_impact}")
 
-    # Estimate how many need predictions (rough estimate)
-    existing_predictions = db.query(Prediction).count()
-    logger.info(f"Existing predictions: {existing_predictions}")
+# --------------------------------------------------------------------------
+# Phase table
+# --------------------------------------------------------------------------
 
-    if high_impact == 0:
-        logger.info("✓ No high-impact scores to predict")
+@dataclass(frozen=True)
+class BackfillPhase:
+    """One backfill phase: what to count, which agent to drive, how to say it."""
+
+    key: str                                  # stats key and --skip-<key> flag
+    title: str                                # section header
+    label: str                                # summary table label
+    noun: str                                 # e.g. "articles assessed"
+    agent_class: type
+    count_pending: Callable[[Session], int]
+    batch_size: int | None = None             # overrides the CLI default
+    # Optional secondary tally pulled out of each process_batch result,
+    # e.g. ('surprises_found', 'surprises found').
+    extra: tuple[str, str] | None = None
+
+
+PHASES: list[BackfillPhase] = [
+    BackfillPhase(
+        key='quality',
+        title='Phase 1: Quality Assessment Backfill',
+        label='Quality Assessment',
+        noun='articles assessed',
+        agent_class=DataQualityAgent,
+        count_pending=_count_without_quality,
+        batch_size=100,
+    ),
+    BackfillPhase(
+        key='content',
+        title='Phase 2: Content Understanding Backfill',
+        label='Content Understanding',
+        noun='articles analyzed',
+        agent_class=ContentUnderstandingAgent,
+        count_pending=_count_without_content,
+    ),
+    BackfillPhase(
+        key='entities',
+        title='Phase 3: Entity Mapping Backfill',
+        label='Entity Mapping',
+        noun='articles mapped',
+        agent_class=EntityMappingAgent,
+        count_pending=lambda db: _count_missing(db, NewsEntityMapping),
+        batch_size=30,
+        extra=('total_mappings', 'mappings'),
+    ),
+    BackfillPhase(
+        key='facts',
+        title='Phase 4: Fact Verification Backfill',
+        label='Fact Verification',
+        noun='articles verified',
+        agent_class=FactVerificationAgent,
+        count_pending=lambda db: _count_missing(db, FactVerification),
+    ),
+    BackfillPhase(
+        key='surprises',
+        title='Phase 5: Surprise Quantification Backfill',
+        label='Surprise Scoring',
+        noun='articles scored',
+        agent_class=SurpriseQuantificationAgent,
+        count_pending=lambda db: _count_missing(db, SurpriseScore),
+        extra=('surprises_found', 'surprises found'),
+    ),
+    BackfillPhase(
+        key='impact',
+        title='Phase 6: Impact Scoring Backfill',
+        label='Impact Scoring',
+        noun='articles scored',
+        agent_class=ImpactScoringAgent,
+        count_pending=lambda db: _count_missing(db, ImpactScore),
+        # The agent reports this as 'total_scores'; the previous code read a
+        # non-existent 'impact_scores' key, so the tally always showed 0.
+        extra=('total_scores', 'impact scores created'),
+    ),
+    BackfillPhase(
+        key='predictions',
+        title='Phase 7: Prediction Generation Backfill',
+        label='Predictions',
+        noun='scores processed',
+        agent_class=PredictionAgent,
+        count_pending=_count_predictable_impacts,
+        extra=('predictions_created', 'predictions generated'),
+    ),
+]
+
+
+def run_phase(phase: BackfillPhase, db: Session, default_batch_size: int) -> int:
+    """Drive one phase's agent until it stops making progress.
+
+    Returns the number of rows the agent reported processing. The agents own
+    their own sessions and commit as they go, so ``db`` is only used to count
+    the outstanding work.
+    """
+    print_section(phase.title)
+
+    batch_size = phase.batch_size or default_batch_size
+    pending = phase.count_pending(db)
+    logger.info(f"Rows needing {phase.label.lower()}: {pending}")
+
+    if pending == 0:
+        logger.info(f"✓ Nothing outstanding for {phase.label.lower()}")
         return 0
 
-    # Note: PredictionAgent uses scoped sessions internally, no db param needed
-    agent = PredictionAgent()
-    total_processed = 0
-    total_predictions = 0
-    max_iterations = (high_impact // batch_size) + 10  # Buffer for safety
-    iterations = 0
+    agent = build_agent(phase.agent_class, db)
+    processed = 0
+    errors = 0
+    extra_total = 0
 
-    # Run until no more predictions needed
-    while iterations < max_iterations:
-        iterations += 1
+    # A batch that processes nothing means the agent is done, but cap the loop
+    # regardless so a misreporting agent cannot spin forever.
+    max_iterations = (pending // batch_size) + ITERATION_BUFFER
+
+    for _ in range(max_iterations):
         result = agent.process_batch(limit=batch_size)
-        batch_processed = result.get('processed', 0)
-        batch_predictions = result.get('predictions_created', 0)
 
+        batch_processed = result.get('processed', 0)
         if batch_processed == 0:
             break
 
-        total_processed += batch_processed
-        total_predictions += batch_predictions
-        logger.info(f"Progress: {total_processed} scores processed, {total_predictions} predictions generated")
+        processed += batch_processed
+        errors += result.get('errors', 0)
 
-        # Commit periodically to prevent data loss
-        if total_processed % (batch_size * 5) == 0:
-            db.commit()
-            logger.info("Database checkpoint committed")
+        progress = f"Progress: {processed}/{pending} {phase.noun}"
+        if phase.extra:
+            extra_total += result.get(phase.extra[0], 0)
+            progress += f" ({extra_total} {phase.extra[1]})"
+        if errors:
+            progress += f" (errors: {errors})"
+        logger.info(progress)
 
-    logger.info(f"✓ Completed prediction generation: {total_processed} scores processed, {total_predictions} predictions created")
-    db.commit()  # Final commit for this phase
-    return total_processed
+    summary = f"✓ Completed {phase.label.lower()} for {processed} rows"
+    if phase.extra:
+        summary += f" ({extra_total} {phase.extra[1]})"
+    if errors:
+        summary += f" (errors: {errors})"
+    logger.info(summary)
+
+    return processed
 
 
-def update_market_regime(db):
+def update_market_regime(db: Session) -> int:
     """Update current market regime"""
     print_section("Phase 8: Market Regime Update")
 
@@ -381,19 +280,26 @@ def update_market_regime(db):
     return 1
 
 
+def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI, deriving one --skip-<phase> flag per entry in PHASES."""
+    parser = argparse.ArgumentParser(
+        description='Backfill missing analyses for existing articles'
+    )
+    for phase in PHASES:
+        parser.add_argument(
+            f'--skip-{phase.key}',
+            action='store_true',
+            help=f'Skip {phase.label.lower()}',
+        )
+    parser.add_argument(
+        '--batch-size', type=int, default=50, help='Batch size for processing'
+    )
+    return parser
+
+
 def main():
     """Run complete backfill process"""
-    parser = argparse.ArgumentParser(description='Backfill missing analyses for existing articles')
-    parser.add_argument('--skip-quality', action='store_true', help='Skip quality assessment')
-    parser.add_argument('--skip-content', action='store_true', help='Skip content understanding')
-    parser.add_argument('--skip-entities', action='store_true', help='Skip entity mapping')
-    parser.add_argument('--skip-facts', action='store_true', help='Skip fact verification')
-    parser.add_argument('--skip-surprises', action='store_true', help='Skip surprise scoring')
-    parser.add_argument('--skip-impact', action='store_true', help='Skip impact scoring')
-    parser.add_argument('--skip-predictions', action='store_true', help='Skip predictions')
-    parser.add_argument('--batch-size', type=int, default=50, help='Batch size for processing')
-
-    args = parser.parse_args()
+    args = build_parser().parse_args()
 
     start_time = datetime.now()
 
@@ -403,74 +309,30 @@ def main():
     print("=" * 80)
     print(f"Start time: {start_time}")
 
-    # Print LLM configuration
     print_llm_config()
 
-    db = SessionLocal()
-
     try:
-        # Run all backfill phases
-        stats = {}
+        with SessionLocal() as db:
+            stats = {}
 
-        if not args.skip_quality:
-            stats['quality'] = backfill_quality_assessment(db, batch_size=args.batch_size)
-        else:
-            logger.info("Skipping quality assessment")
-            stats['quality'] = 0
+            for phase in PHASES:
+                if getattr(args, f'skip_{phase.key}'):
+                    logger.info(f"Skipping {phase.label.lower()}")
+                    stats[phase.key] = 0
+                    continue
+                stats[phase.key] = run_phase(phase, db, args.batch_size)
 
-        if not args.skip_content:
-            stats['content'] = backfill_content_understanding(db, batch_size=args.batch_size)
-        else:
-            logger.info("Skipping content understanding")
-            stats['content'] = 0
+            stats['regime'] = update_market_regime(db)
 
-        if not args.skip_entities:
-            stats['entities'] = backfill_entity_mapping(db, batch_size=30)
-        else:
-            logger.info("Skipping entity mapping")
-            stats['entities'] = 0
-
-        if not args.skip_facts:
-            stats['facts'] = backfill_fact_verification(db, batch_size=args.batch_size)
-        else:
-            logger.info("Skipping fact verification")
-            stats['facts'] = 0
-
-        if not args.skip_surprises:
-            stats['surprises'] = backfill_surprise_scoring(db, batch_size=args.batch_size)
-        else:
-            logger.info("Skipping surprise scoring")
-            stats['surprises'] = 0
-
-        if not args.skip_impact:
-            stats['impact'] = backfill_impact_scoring(db, batch_size=args.batch_size)
-        else:
-            logger.info("Skipping impact scoring")
-            stats['impact'] = 0
-
-        if not args.skip_predictions:
-            stats['predictions'] = backfill_predictions(db, batch_size=args.batch_size)
-        else:
-            logger.info("Skipping predictions")
-            stats['predictions'] = 0
-
-        stats['regime'] = update_market_regime(db)
-
-        # Final summary
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
+        duration = (datetime.now() - start_time).total_seconds()
 
         print_section("BACKFILL COMPLETE - SUMMARY")
         print(f"Duration: {duration:.1f} seconds ({duration/60:.1f} minutes)")
         print()
-        print("Articles Processed:")
-        print(f"  Quality Assessment:     {stats['quality']}")
-        print(f"  Content Understanding:  {stats['content']}")
-        print(f"  Entity Mapping:         {stats['entities']}")
-        print(f"  Fact Verification:      {stats['facts']}")
-        print(f"  Surprise Scoring:       {stats['surprises']}")
-        print(f"  Impact Scoring:         {stats['impact']}")
-        print(f"  Predictions:            {stats['predictions']}")
+        print("Rows Processed:")
+        width = max(len(phase.label) for phase in PHASES) + 2
+        for phase in PHASES:
+            print(f"  {phase.label + ':':<{width}} {stats[phase.key]}")
         print()
         print("✓ All backfill operations completed successfully!")
         print("=" * 80)
@@ -478,8 +340,6 @@ def main():
     except Exception as e:
         logger.error(f"Backfill failed: {e}", exc_info=True)
         raise
-    finally:
-        db.close()
 
 
 if __name__ == "__main__":

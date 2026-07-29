@@ -36,13 +36,12 @@ def signal_handler(signum, frame):
 
 def fetch_once():
     """Execute single RSS fetch"""
-    db = SessionLocal()
     try:
-        # Create ingestion agent and fetch
-        agent = IngestionAgent(db)
+        with SessionLocal() as db:
+            agent = IngestionAgent(db)
 
-        logger.info("Fetching RSS feeds...")
-        results = agent.fetch_all_rss_feeds()
+            logger.info("Fetching RSS feeds...")
+            results = agent.fetch_all_rss_feeds()
 
         # Calculate totals
         total_new = sum(results.values())
@@ -70,8 +69,6 @@ def fetch_once():
         logger.error(f"❌ Error during RSS fetch: {e}", exc_info=True)
         activity_logger.log_activity(f"RSS Fetch Error: {str(e)}", "ERROR")
         return 0, 0
-    finally:
-        db.close()
 
 
 def main():

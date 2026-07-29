@@ -8,6 +8,7 @@ sys.path.insert(0, str(project_root))
 
 import logging
 
+from src.agents import build_agent
 from src.agents.content_understanding_agent import ContentUnderstandingAgent
 from src.agents.data_quality_agent import DataQualityAgent
 from src.agents.entity_mapping_agent import EntityMappingAgent
@@ -21,6 +22,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# The LLM makes content understanding much slower than the other stages, so it
+# and the entity mapping that follows it run in small batches.
+QUALITY_BATCH = 100
+LLM_BATCH = 5
+
+
+def _run_stage(step: str, label: str, agent, limit: int) -> dict:
+    """Run one batch stage and log both its result and the agent's totals."""
+    logger.info(f"\n[{step}] Running {label}...")
+
+    results = agent.process_batch(limit=limit)
+    logger.info(f"{label} results: {results}")
+
+    stats = agent.get_statistics()
+    logger.info(f"{label} stats: {stats}")
+    return stats
+
 
 def main():
     """Run the complete MVP pipeline."""
@@ -28,58 +46,41 @@ def main():
     logger.info("TradeMeUp MVP Pipeline - Phase 1")
     logger.info("=" * 60)
 
-    # Create database session
-    db = SessionLocal()
-
     try:
-        # ===== AGENT 1: Data Ingestion =====
-        logger.info("\n[1/4] Running Agent 1: Data Ingestion...")
-        ingestion = IngestionAgent(db)
+        with SessionLocal() as db:
+            # ===== AGENT 1: Data Ingestion =====
+            # Fetching is not a process_batch stage, so it stays explicit.
+            logger.info("\n[1/4] Running Agent 1: Data Ingestion...")
+            ingestion = build_agent(IngestionAgent, db)
 
-        # Fetch from RSS feeds
-        rss_results = ingestion.fetch_all_rss_feeds()
-        logger.info(f"RSS results: {rss_results}")
+            rss_results = ingestion.fetch_all_rss_feeds()
+            logger.info(f"RSS results: {rss_results}")
 
-        # Fetch from News API (if key available)
-        if settings.news_api_key:
-            api_count = ingestion.fetch_news_api(settings.news_api_key)
-            logger.info(f"News API: {api_count} new articles")
+            if settings.news_api_key:
+                api_count = ingestion.fetch_news_api(settings.news_api_key)
+                logger.info(f"News API: {api_count} new articles")
 
-        ing_stats = ingestion.get_statistics()
-        logger.info(f"Ingestion stats: {ing_stats}")
+            ing_stats = ingestion.get_statistics()
+            logger.info(f"Ingestion stats: {ing_stats}")
 
-        # ===== AGENT 1.5: Data Quality =====
-        logger.info("\n[2/4] Running Agent 1.5: Data Quality...")
-        quality = DataQualityAgent(db)
+            # ===== AGENTS 1.5, 2, 3 =====
+            # build_agent passes the session only to agents that still take
+            # one; these three open their own and reject a positional argument.
+            qual_stats = _run_stage(
+                "2/4", "Agent 1.5: Data Quality",
+                build_agent(DataQualityAgent, db), QUALITY_BATCH,
+            )
 
-        quality_results = quality.process_batch(limit=100)
-        logger.info(f"Quality results: {quality_results}")
+            logger.info(f"Using LLM provider: {settings.llm_provider}")
+            cont_stats = _run_stage(
+                "3/4", "Agent 2: Content Understanding (NLP)",
+                build_agent(ContentUnderstandingAgent, db), LLM_BATCH,
+            )
 
-        qual_stats = quality.get_statistics()
-        logger.info(f"Quality stats: {qual_stats}")
-
-        # ===== AGENT 2: Content Understanding =====
-        logger.info("\n[3/4] Running Agent 2: Content Understanding (NLP)...")
-        logger.info(f"Using LLM provider: {settings.llm_provider}")
-
-        content = ContentUnderstandingAgent(db)
-
-        # Process smaller batch (LLM is slower)
-        content_results = content.process_batch(limit=5)
-        logger.info(f"Content understanding results: {content_results}")
-
-        cont_stats = content.get_statistics()
-        logger.info(f"Content stats: {cont_stats}")
-
-        # ===== AGENT 3: Entity Mapping =====
-        logger.info("\n[4/4] Running Agent 3: Entity Mapping...")
-        entities = EntityMappingAgent(db)
-
-        entity_results = entities.process_batch(limit=5)
-        logger.info(f"Entity mapping results: {entity_results}")
-
-        ent_stats = entities.get_statistics()
-        logger.info(f"Entity stats: {ent_stats}")
+            ent_stats = _run_stage(
+                "4/4", "Agent 3: Entity Mapping",
+                build_agent(EntityMappingAgent, db), LLM_BATCH,
+            )
 
         # ===== SUMMARY =====
         logger.info("\n" + "=" * 60)
@@ -96,8 +97,6 @@ def main():
     except Exception as e:
         logger.error(f"Error in pipeline: {e}", exc_info=True)
         raise
-    finally:
-        db.close()
 
 
 if __name__ == "__main__":

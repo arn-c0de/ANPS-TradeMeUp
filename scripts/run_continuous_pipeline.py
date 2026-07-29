@@ -15,9 +15,10 @@ import signal
 import sys
 import time
 from collections import deque
-from datetime import UTC, datetime, timezone
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import psutil
 
@@ -25,6 +26,7 @@ import psutil
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from src.agents import build_agent
 from src.agents.ab_testing_agent import ABTestingAgent
 from src.agents.confidence_calibration_agent import ConfidenceCalibrationAgent
 from src.agents.content_understanding_agent import ContentUnderstandingAgent
@@ -56,6 +58,114 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Starting batch size per phase, and the ceiling each may grow to when
+# iterations are running comfortably. Both are keyed by a phase's `batch_key`.
+INITIAL_BATCH_SIZES = {
+    'quality': 50,
+    'content': 30,
+    'entity': 20,
+    'surprise': 30,
+    'impact': 30,
+    'decay': 50,
+    'prediction': 50,
+    'simulation': 50,
+    'fact_verification': 30,
+    'correlation': 10,   # Lower because it's computation-heavy
+    'calibration': 20,
+    'meta_strategy': 10,  # Creates ensemble predictions
+    'scenarios': 5,
+}
+
+MAX_BATCH_SIZES = {
+    'quality': 100,
+    'content': 50,
+    'entity': 30,
+    'surprise': 50,
+    'impact': 50,
+    'decay': 100,
+    'prediction': 100,
+    'simulation': 100,
+    'fact_verification': 50,
+    'correlation': 20,
+    'calibration': 30,
+    'meta_strategy': 20,
+    # Bounded by the number of defined scenario types, so growing past it
+    # would be a no-op.
+    'scenarios': 5,
+}
+
+DEFAULT_MAX_BATCH_SIZE = 50
+MIN_BATCH_SIZE = 5
+
+# Only impact scores at or above this level get a prediction, one per horizon.
+MIN_IMPACT_FOR_PREDICTION = 0.4
+PREDICTION_HORIZONS = ('1d', '5d', '20d')
+
+# Brief pause between iterations while a backlog is still being worked off.
+BACKLOG_PAUSE_SECONDS = 2
+
+# An iteration slower than this shrinks batches; faster than SPEEDUP_SECONDS
+# (with no recent errors) grows them.
+SLOWDOWN_SECONDS = 300
+SPEEDUP_SECONDS = 120
+
+
+@dataclass(frozen=True)
+class PipelinePhase:
+    """One step of a pipeline iteration.
+
+    Every phase does the same thing - check for a stop request, announce
+    itself, drive one agent method, log the result - so that shape lives once
+    in :meth:`ContinuousPipeline._run_phase` and the phases are just data.
+    """
+
+    number: float
+    name: str                                   # shown in the activity log
+    agent_class: type | None = None
+    method: str = 'process_batch'
+    batch_key: str | None = None                # key into self.batch_sizes
+    kwargs: Mapping[str, object] = field(default_factory=dict)
+    setting: str | None = None                  # settings flag gating this phase
+    handler: str | None = None                  # ContinuousPipeline method instead of an agent
+    optional: bool = False                      # failure warns instead of aborting
+
+
+# Ordered pipeline. `process_batch` is what actually writes records; a phase
+# that calls `get_statistics` only reports on work someone else did.
+PHASES: tuple[PipelinePhase, ...] = (
+    PipelinePhase(1, 'Data Ingestion', IngestionAgent, method='fetch_all_rss_feeds'),
+    PipelinePhase(2, 'Quality Assessment', DataQualityAgent, batch_key='quality'),
+    PipelinePhase(3, 'Content Analysis', ContentUnderstandingAgent, batch_key='content'),
+    PipelinePhase(4, 'Entity Mapping', EntityMappingAgent, batch_key='entity'),
+    PipelinePhase(5, 'Market Regime', RegimeDetectionAgent, method='update_regime'),
+    PipelinePhase(6, 'Surprise Quantification', SurpriseQuantificationAgent,
+                  batch_key='surprise'),
+    PipelinePhase(7, 'Impact Scoring', ImpactScoringAgent, batch_key='impact'),
+    # Phases 8 and 9 called get_statistics(), which only counts existing rows.
+    # No decay model and no entity correlation was ever created by the
+    # pipeline, so both counts stayed at zero forever.
+    PipelinePhase(8, 'Signal Decay Modeling', SignalDecayAgent, batch_key='decay'),
+    PipelinePhase(9, 'Correlation Analysis', CorrelationAnalysisAgent,
+                  batch_key='correlation'),
+    PipelinePhase(10, 'Predictions', PredictionAgent, batch_key='prediction'),
+    PipelinePhase(10.5, 'Auto-Processing Predictions',
+                  handler='_auto_process_predictions', optional=True),
+    PipelinePhase(11, 'Trading Simulation', TradingSimulationAgent,
+                  batch_key='simulation', kwargs={'lookback_days': 7}),
+    PipelinePhase(12, 'Scenario Generation', ScenarioGenerationAgent,
+                  batch_key='scenarios', setting='enable_scenarios'),
+    PipelinePhase(13, 'Fact Verification', FactVerificationAgent,
+                  batch_key='fact_verification', setting='enable_fact_checking'),
+    PipelinePhase(14, 'Confidence Calibration', ConfidenceCalibrationAgent,
+                  batch_key='calibration', setting='enable_calibration'),
+    PipelinePhase(15, 'Meta-Strategy Ensemble', MetaStrategyAgent,
+                  batch_key='meta_strategy', setting='enable_meta_strategy'),
+    # Reporting-only phases: these two genuinely just summarise past results.
+    PipelinePhase(16, 'Performance Monitoring', ModelPerformanceMonitor,
+                  method='get_statistics'),
+    PipelinePhase(17, 'A/B Testing', ABTestingAgent, method='get_statistics'),
+)
 
 # Attach DB log handler so pipeline logs appear in the dashboard log viewer
 try:
@@ -89,21 +199,7 @@ class ContinuousPipeline:
         self.backoff_time = 5  # Initial backoff time in seconds
 
         # Dynamic batch sizes (will be adjusted based on performance)
-        self.batch_sizes = {
-            'quality': 50,
-            'content': 30,  # Increased from 10 to 30
-            'entity': 20,   # Increased from 10 to 20
-            'surprise': 30,  # Increased from 20 to 30
-            'impact': 30,    # Increased from 20 to 30
-            'prediction': 50,
-            'simulation': 50,
-            # NEW AGENTS
-            'fact_verification': 30,
-            'correlation': 10,  # Lower because it's computation-heavy
-            'calibration': 20,
-            'meta_strategy': 10,  # Creates ensemble predictions
-            'scenarios': 5
-        }
+        self.batch_sizes = dict(INITIAL_BATCH_SIZES)
 
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -120,21 +216,18 @@ class ContinuousPipeline:
         logger.info("Pipeline Phase Configuration")
         logger.info("=" * 80)
 
-        phases = [
-            ("Phase 12: Scenario Generation", settings.enable_scenarios),
-            ("Phase 13: Fact Verification", settings.enable_fact_checking),
-            ("Phase 14: Confidence Calibration", settings.enable_calibration),
-            ("Phase 15: Meta-Strategy Ensemble", settings.enable_meta_strategy),
-        ]
-
         enabled_phases = []
         disabled_phases = []
 
-        for phase_name, is_enabled in phases:
-            if is_enabled:
-                enabled_phases.append(phase_name)
+        # Derived from PHASES so a newly gated phase shows up here on its own.
+        for phase in PHASES:
+            if phase.setting is None:
+                continue
+            label = f"Phase {phase.number:g}: {phase.name}"
+            if self._phase_is_enabled(phase):
+                enabled_phases.append(label)
             else:
-                disabled_phases.append(phase_name)
+                disabled_phases.append(label)
 
         if enabled_phases:
             logger.info("✅ ENABLED Phases:")
@@ -173,31 +266,15 @@ class ContinuousPipeline:
 
     def _adjust_batch_sizes(self, duration: float):
         """Dynamically adjust batch sizes based on iteration performance"""
-        # If iteration took too long (>5 min), reduce batch sizes
-        if duration > 300:
-            for key in self.batch_sizes:
-                self.batch_sizes[key] = max(5, int(self.batch_sizes[key] * 0.8))
+        if duration > SLOWDOWN_SECONDS:
+            for key, size in self.batch_sizes.items():
+                self.batch_sizes[key] = max(MIN_BATCH_SIZE, int(size * 0.8))
             logger.info(f"Reduced batch sizes due to slow iteration: {self.batch_sizes}")
-        # If iteration was fast (<2 min) and no recent errors, increase batch sizes
-        elif duration < 120 and self.consecutive_errors == 0:
-            for key in self.batch_sizes:
-                max_size = {
-                    'quality': 100,
-                    'content': 50,  # Increased max
-                    'entity': 30,   # Increased max
-                    'surprise': 50,
-                    'impact': 50,
-                    'prediction': 100,
-                    'simulation': 100,
-                    'fact_verification': 50,
-                    'correlation': 20,
-                    'calibration': 30,
-                    'meta_strategy': 20,
-                    # Bounded by the number of defined scenario types, so
-                    # growing past it would be a no-op.
-                    'scenarios': 5
-                }
-                self.batch_sizes[key] = min(max_size.get(key, 50), int(self.batch_sizes[key] * 1.2))
+
+        elif duration < SPEEDUP_SECONDS and self.consecutive_errors == 0:
+            for key, size in self.batch_sizes.items():
+                ceiling = MAX_BATCH_SIZES.get(key, DEFAULT_MAX_BATCH_SIZE)
+                self.batch_sizes[key] = min(ceiling, int(size * 1.2))
             logger.info(f"Increased batch sizes due to good performance: {self.batch_sizes}")
 
     def _get_avg_iteration_time(self) -> float:
@@ -321,66 +398,16 @@ class ContinuousPipeline:
                 # Adjust batch sizes based on performance
                 self._adjust_batch_sizes(duration)
 
-                # Check if there's any unprocessed work in the pipeline
-                check_db = SessionLocal()
-                try:
-                    from sqlalchemy import and_
+                # If there's any unprocessed data, continue immediately.
+                # Otherwise wait for new data.
+                pending = self._count_pending_work()
+                total_pending = sum(pending.values())
 
-                    from src.models.analysis import ImpactScore, SurpriseScore
-                    from src.models.entities import NewsEntityMapping
-                    from src.models.predictions import Prediction
-
-                    # Count articles at different pipeline stages that need processing
-                    # 1. RawNews without quality_score (use == None for SQLAlchemy)
-                    unassessed = check_db.query(RawNews).filter(RawNews.quality_score.is_(None)).count()
-
-                    # 2. Quality-checked RawNews without ProcessedNews
-                    unanalyzed = check_db.query(RawNews).filter(
-                        RawNews.quality_score.is_not(None)
-                    ).outerjoin(
-                        ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-                    ).filter(ProcessedNews.news_id.is_(None)).count()
-
-                    # 3. ProcessedNews without entity mapping
-                    unmapped = check_db.query(ProcessedNews).outerjoin(
-                        NewsEntityMapping, ProcessedNews.news_id == NewsEntityMapping.news_id
-                    ).filter(NewsEntityMapping.news_id.is_(None)).count()
-
-                    # 4. ProcessedNews without surprise score
-                    unsurprised = check_db.query(ProcessedNews).outerjoin(
-                        SurpriseScore, ProcessedNews.news_id == SurpriseScore.news_id
-                    ).filter(SurpriseScore.news_id.is_(None)).count()
-
-                    # 5. ProcessedNews without impact score
-                    unscored = check_db.query(ProcessedNews).outerjoin(
-                        ImpactScore, ProcessedNews.news_id == ImpactScore.news_id
-                    ).filter(ImpactScore.news_id.is_(None)).count()
-
-                    # 6. ImpactScores >= 0.4 without predictions (simplified check)
-                    # Note: Predictions use related_news_ids JSON array, so we check ImpactScores instead
-                    high_impact_scores = check_db.query(ImpactScore).filter(
-                        ImpactScore.impact_score >= 0.4
-                    ).count()
-
-                    existing_predictions = check_db.query(Prediction).count()
-
-                    # Rough estimate: each high impact should have 3 predictions (1d, 5d, 20d)
-                    expected_predictions = high_impact_scores * 3
-                    unpredicted = max(0, expected_predictions - existing_predictions)
-
-                    total_pending = unassessed + unanalyzed + unmapped + unsurprised + unscored + unpredicted
-                except Exception as e:
-                    logger.error(f"Error checking pending work: {e}", exc_info=True)
-                    total_pending = 0  # Continue anyway if check fails
-                finally:
-                    check_db.close()
-
-                # If there's any unprocessed data, continue immediately
-                # Otherwise wait for new data
                 if total_pending > 0:
-                    logger.info(f"Found {total_pending} items pending (assessed:{unassessed}, analyzed:{unanalyzed}, mapped:{unmapped}, surprised:{unsurprised}, scored:{unscored}, predicted:{unpredicted})")
+                    breakdown = ", ".join(f"{stage}:{count}" for stage, count in pending.items())
+                    logger.info(f"Found {total_pending} items pending ({breakdown})")
                     logger.info("Continuing immediately to process backlog...")
-                    self._sleep_with_stop_check(2)  # Brief pause to avoid overwhelming the system
+                    self._sleep_with_stop_check(BACKLOG_PAUSE_SECONDS)
                 else:
                     logger.info(f"All articles fully processed, waiting {self.check_interval}s for new data...")
                     self._sleep_with_stop_check(self.check_interval)
@@ -425,6 +452,116 @@ class ContinuousPipeline:
                     finally:
                         self.db = None
 
+    @staticmethod
+    def _count_pending_work() -> dict[str, int]:
+        """Count rows still waiting at each pipeline stage.
+
+        Drives the decision between looping straight into another iteration and
+        sleeping until new articles arrive. Returns zeros if the check itself
+        fails - a counting problem must not stall the pipeline.
+        """
+        from src.models.analysis import ImpactScore, SurpriseScore
+        from src.models.entities import NewsEntityMapping
+        from src.models.predictions import Prediction
+
+        def missing_for(db, related_model):
+            """ProcessedNews rows with no matching row in ``related_model``."""
+            return db.query(ProcessedNews).outerjoin(
+                related_model, ProcessedNews.news_id == related_model.news_id
+            ).filter(related_model.news_id.is_(None)).count()
+
+        try:
+            with SessionLocal() as db:
+                unassessed = db.query(RawNews).filter(
+                    RawNews.quality_score.is_(None)
+                ).count()
+
+                # Quality-checked RawNews that has not been through NLP yet.
+                unanalyzed = db.query(RawNews).filter(
+                    RawNews.quality_score.is_not(None)
+                ).outerjoin(
+                    ProcessedNews, RawNews.news_id == ProcessedNews.news_id
+                ).filter(ProcessedNews.news_id.is_(None)).count()
+
+                # Predictions reference articles through a JSON array, so there
+                # is no join to count them directly. Estimate instead: each
+                # high-impact score should yield one prediction per horizon.
+                high_impact = db.query(ImpactScore).filter(
+                    ImpactScore.impact_score >= MIN_IMPACT_FOR_PREDICTION
+                ).count()
+                existing_predictions = db.query(Prediction).count()
+                unpredicted = max(
+                    0, high_impact * len(PREDICTION_HORIZONS) - existing_predictions
+                )
+
+                return {
+                    'assessed': unassessed,
+                    'analyzed': unanalyzed,
+                    'mapped': missing_for(db, NewsEntityMapping),
+                    'surprised': missing_for(db, SurpriseScore),
+                    'scored': missing_for(db, ImpactScore),
+                    'predicted': unpredicted,
+                }
+        except Exception as e:
+            logger.error(f"Error checking pending work: {e}", exc_info=True)
+            return {}
+
+    def _phase_is_enabled(self, phase: PipelinePhase) -> bool:
+        """Whether a settings-gated phase should run this iteration."""
+        return phase.setting is None or bool(getattr(settings, phase.setting, False))
+
+    def _auto_process_predictions(self):
+        """Phase 10.5: turn fresh predictions into outcomes and simulations."""
+        from src.services.auto_prediction_processor import auto_processor
+
+        # Cover the predictions made since the previous iteration, plus slack.
+        lookback_minutes = int(self.check_interval / 60) + 10
+        stats = auto_processor.process_new_predictions(
+            self.db, lookback_minutes=lookback_minutes
+        )
+
+        if stats['total_found'] > 0:
+            logger.info(
+                f"Auto-processed {stats['total_found']} predictions: "
+                f"{stats['outcomes_created']} outcomes, "
+                f"{stats['simulations_created']} simulations"
+            )
+        return stats
+
+    def _run_phase(self, phase: PipelinePhase):
+        """Run one phase and return its result (None if skipped or it failed softly)."""
+        if not self._phase_is_enabled(phase):
+            logger.debug(
+                f"Phase {phase.number}: {phase.name} skipped "
+                f"(disabled via {phase.setting})"
+            )
+            return None
+
+        self._check_for_external_stop()
+        activity_logger.log_phase(phase.number, phase.name)
+
+        try:
+            if phase.handler:
+                result = getattr(self, phase.handler)()
+            else:
+                # build_agent passes self.db only to agents that still take one.
+                agent = build_agent(phase.agent_class, self.db)
+                kwargs = dict(phase.kwargs)
+                if phase.batch_key:
+                    kwargs['limit'] = self.batch_sizes[phase.batch_key]
+                result = getattr(agent, phase.method)(**kwargs)
+        except Exception as e:
+            if not phase.optional:
+                raise
+            # An optional phase must not take the whole iteration down.
+            logger.warning(f"Phase {phase.number} ({phase.name}) failed: {e}")
+            return None
+
+        # Handlers phrase their own result line; agent phases get the generic one.
+        if not phase.handler:
+            logger.info(f"{phase.name}: {result}")
+        return result
+
     def _run_pipeline_iteration(self):
         """Run one complete pipeline iteration with dynamic batch sizes
 
@@ -435,180 +572,14 @@ class ContinuousPipeline:
         No shared session is passed to agents.
         """
         try:
-            # Phase 1: Data Ingestion
-            self._check_for_external_stop()
-            activity_logger.log_phase(1, "Data Ingestion")
-            ingestion = IngestionAgent(self.db)
-            rss_results = ingestion.fetch_all_rss_feeds()
-            new_articles = sum(rss_results.values())
-            logger.info(f"Ingested: {rss_results}")
+            new_articles = 0
 
-            # Phase 2: Quality Check (process unassessed articles) - DYNAMIC BATCH SIZE
-            # ✅ REFACTORED: Uses scoped sessions internally
-            self._check_for_external_stop()
-            activity_logger.log_phase(2, "Quality Assessment")
-            quality = DataQualityAgent()  # ✅ No db parameter!
-            quality_results = quality.process_batch(limit=self.batch_sizes['quality'])
-            logger.info(f"Quality check: {quality_results}")
+            for phase in PHASES:
+                result = self._run_phase(phase)
 
-            # Phase 3: Content Understanding - ✅ OPTIMIZED with scoped sessions
-            self._check_for_external_stop()
-            activity_logger.log_phase(3, "Content Analysis")
-            content = ContentUnderstandingAgent()  # ✅ No db parameter!
-            content_results = content.process_batch(limit=self.batch_sizes['content'])
-            logger.info(f"NLP Analysis: {content_results}")
-
-            # Phase 4: Entity Mapping - ✅ OPTIMIZED with scoped sessions
-            self._check_for_external_stop()
-            activity_logger.log_phase(4, "Entity Mapping")
-            entities = EntityMappingAgent()  # ✅ No db parameter!
-            entity_results = entities.process_batch(limit=self.batch_sizes['entity'])
-            logger.info(f"Entities: {entity_results}")
-
-            # Phase 5: Market Regime (single update, no batch)
-            # TODO: Refactor RegimeDetectionAgent to use scoped sessions
-            self._check_for_external_stop()
-            activity_logger.log_phase(5, "Market Regime")
-            regime = RegimeDetectionAgent(self.db)
-            regime_result = regime.update_regime()
-            logger.info(f"Regime: {regime_result}")
-
-            # Phase 6: Surprise Quantification - DYNAMIC BATCH SIZE
-            # ✅ REFACTORED: Uses scoped sessions internally
-            self._check_for_external_stop()
-            activity_logger.log_phase(6, "Surprise Quantification")
-            surprise = SurpriseQuantificationAgent()  # ✅ No db parameter!
-            surprise_results = surprise.process_batch(limit=self.batch_sizes['surprise'])
-            logger.info(f"Surprises: {surprise_results}")
-
-            # Phase 7: Impact Scoring - ✅ OPTIMIZED with scoped sessions
-            self._check_for_external_stop()
-            activity_logger.log_phase(7, "Impact Scoring")
-            impact = ImpactScoringAgent()  # ✅ No db parameter!
-            impact_results = impact.process_batch(limit=self.batch_sizes['impact'])
-            logger.info(f"Impact: {impact_results}")
-
-            # Phase 8: Signal Decay Modeling (apply to impact scores)
-            # ✅ REFACTORED: Uses scoped sessions internally
-            self._check_for_external_stop()
-            activity_logger.log_phase(8, "Signal Decay Modeling")
-            signal_decay = SignalDecayAgent()  # ✅ No db parameter!
-            decay_stats = signal_decay.get_statistics()
-            logger.info(f"Signal Decay: {decay_stats}")
-
-            # Phase 9: Correlation Analysis (between entities)
-            # ✅ REFACTORED: Uses scoped sessions internally
-            self._check_for_external_stop()
-            activity_logger.log_phase(9, "Correlation Analysis")
-            correlation = CorrelationAnalysisAgent()  # ✅ No db parameter!
-            corr_stats = correlation.get_statistics()
-            logger.info(f"Correlation: {corr_stats}")
-
-            # Phase 10: Predictions - ✅ OPTIMIZED with scoped sessions
-            self._check_for_external_stop()
-            activity_logger.log_phase(10, "Predictions")
-            predictions = PredictionAgent()  # ✅ No db parameter!
-            pred_results = predictions.process_batch(limit=self.batch_sizes['prediction'])
-            logger.info(f"Predictions: {pred_results}")
-
-            # Phase 10.5: Auto-Process New Predictions (Performance & Simulations)
-            self._check_for_external_stop()
-            activity_logger.log_phase(10.5, "Auto-Processing Predictions")
-            try:
-                from src.services.auto_prediction_processor import auto_processor
-                # Process predictions from last iteration (check_interval + buffer)
-                lookback_minutes = int(self.check_interval / 60) + 10
-                auto_stats = auto_processor.process_new_predictions(self.db, lookback_minutes=lookback_minutes)
-
-                if auto_stats['total_found'] > 0:
-                    logger.info(f"Auto-processed {auto_stats['total_found']} predictions: "
-                              f"{auto_stats['outcomes_created']} outcomes, "
-                              f"{auto_stats['simulations_created']} simulations")
-            except Exception as e:
-                logger.warning(f"Auto-processing failed: {e}")
-                # Continue pipeline even if auto-processing fails
-
-            # ===== NEW PHASES (Phase 2 Agents) =====
-
-            # Phase 11: Trading Simulation (predictions vs market)
-            self._check_for_external_stop()
-            activity_logger.log_phase(11, "Trading Simulation")
-            simulator = TradingSimulationAgent()
-            sim_results = simulator.process_batch(limit=self.batch_sizes['simulation'], lookback_days=7)
-            logger.info(f"Simulation: {sim_results}")
-
-            # Phase 12: Scenario Generation (stress test predictions)
-            # Check if scenarios are enabled in settings
-            if settings.enable_scenarios:
-                self._check_for_external_stop()
-                activity_logger.log_phase(12, "Scenario Generation")
-                scenario_gen = ScenarioGenerationAgent(self.db)
-                # process_batch(), not get_statistics(): the latter only lists
-                # the available scenario types, so no scenario was ever
-                # actually generated by the pipeline.
-                scenario_stats = scenario_gen.process_batch(limit=self.batch_sizes['scenarios'])
-                logger.info(f"Scenarios: {scenario_stats}")
-            else:
-                logger.debug("Phase 12: Scenario Generation skipped (disabled in settings)")
-
-            # Phase 13: Fact Verification
-            # ✅ REFACTORED: Uses scoped sessions internally
-            # Check if fact checking is enabled in settings (can be expensive in tokens)
-            if settings.enable_fact_checking:
-                self._check_for_external_stop()
-                activity_logger.log_phase(13, "Fact Verification")
-                fact_verifier = FactVerificationAgent()  # ✅ No db parameter!
-                fact_results = fact_verifier.process_batch(limit=self.batch_sizes['fact_verification'])
-                logger.info(f"Fact Verification: {fact_results}")
-            else:
-                logger.debug("Phase 13: Fact Verification skipped (disabled in settings to save tokens)")
-
-            # Phase 14: Confidence Calibration (for predictions)
-            # ✅ REFACTORED: Uses scoped sessions internally
-            # Check if calibration is enabled in settings
-            if settings.enable_calibration:
-                self._check_for_external_stop()
-                activity_logger.log_phase(14, "Confidence Calibration")
-                calibrator = ConfidenceCalibrationAgent()  # ✅ No db parameter!
-                # process_batch() writes calibrated_confidence back onto the
-                # predictions. get_statistics() only measured the calibration
-                # error, so calibrated_confidence was never populated and every
-                # consumer fell back to the raw confidence.
-                calibration_stats = calibrator.process_batch(limit=self.batch_sizes['calibration'])
-                logger.info(f"Calibration: {calibration_stats}")
-            else:
-                logger.debug("Phase 14: Confidence Calibration skipped (disabled in settings)")
-
-            # Phase 15: Meta-Strategy (Ensemble Predictions)
-            # ✅ REFACTORED: Uses scoped sessions internally
-            # Check if meta-strategy is enabled in settings
-            if settings.enable_meta_strategy:
-                self._check_for_external_stop()
-                activity_logger.log_phase(15, "Meta-Strategy Ensemble")
-                meta_strategy = MetaStrategyAgent()  # ✅ No db parameter!
-                # process_batch() creates the ensemble predictions.
-                # get_statistics() only counted existing ones, which meant the
-                # count stayed at zero forever.
-                ensemble_results = meta_strategy.process_batch(limit=self.batch_sizes['meta_strategy'])
-                logger.info(f"Meta-Strategy: {ensemble_results}")
-            else:
-                logger.debug("Phase 15: Meta-Strategy Ensemble skipped (disabled in settings)")
-
-            # Phase 16: Model Performance Monitoring
-            # TODO: Refactor when needed
-            self._check_for_external_stop()
-            activity_logger.log_phase(16, "Performance Monitoring")
-            monitor = ModelPerformanceMonitor(self.db)
-            perf_stats = monitor.get_statistics()
-            logger.info(f"Performance: {perf_stats}")
-
-            # Phase 17: A/B Testing (compare model versions)
-            # TODO: Refactor when needed
-            self._check_for_external_stop()
-            activity_logger.log_phase(17, "A/B Testing")
-            ab_testing = ABTestingAgent(self.db)
-            ab_stats = ab_testing.get_statistics()
-            logger.info(f"A/B Testing: {ab_stats}")
+                # Ingestion reports {feed: count}; the caller wants the total.
+                if phase.method == 'fetch_all_rss_feeds' and result:
+                    new_articles = sum(result.values())
 
             return new_articles
 

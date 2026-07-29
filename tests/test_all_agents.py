@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 import logging
 
+from src.agents import build_agent
 from src.agents.ab_testing_agent import ABTestingAgent
 from src.agents.confidence_calibration_agent import ConfidenceCalibrationAgent
 from src.agents.content_understanding_agent import ContentUnderstandingAgent
@@ -39,7 +40,9 @@ def _test_agent(agent_class, agent_name, db, test_method='get_statistics'):
     logger.info(f"{'='*80}")
 
     try:
-        agent = agent_class(db)
+        # Pass the session only to agents that still take one; the converted
+        # agents open their own and reject a positional argument.
+        agent = build_agent(agent_class, db)
 
         # Get statistics
         if hasattr(agent, test_method):

@@ -60,201 +60,197 @@ def main():
     logger.info(f"LLM Provider: {settings.llm_provider}")
     logger.info(f"Database: {redact_url(settings.database_url)}")
 
-    # Create database session
-    db = SessionLocal()
-
     try:
-        # ===== PHASE 1: DATA COLLECTION =====
-        activity_logger.log_phase(1, "Data Collection (Agent 1)")
-        print_section("PHASE 1: Data Collection (Agent 1)")
+        with SessionLocal() as db:
+            # ===== PHASE 1: DATA COLLECTION =====
+            activity_logger.log_phase(1, "Data Collection (Agent 1)")
+            print_section("PHASE 1: Data Collection (Agent 1)")
 
-        activity_logger.log_agent_start("Ingestion Agent", "1")
-        ingestion = IngestionAgent(db)
+            activity_logger.log_agent_start("Ingestion Agent", "1")
+            ingestion = IngestionAgent(db)
 
-        # Fetch from RSS feeds
-        logger.info("Fetching from RSS feeds...")
-        activity_logger.log_activity("Fetching articles from RSS feeds...", "PROCESSING")
-        rss_results = ingestion.fetch_all_rss_feeds()
-        logger.info(f"RSS Results: {rss_results}")
-        activity_logger.log_activity(f"Fetched {rss_results.get('new_articles', 0)} new articles", "SUCCESS")
+            # Fetch from RSS feeds
+            logger.info("Fetching from RSS feeds...")
+            activity_logger.log_activity("Fetching articles from RSS feeds...", "PROCESSING")
+            rss_results = ingestion.fetch_all_rss_feeds()
+            logger.info(f"RSS Results: {rss_results}")
+            activity_logger.log_activity(f"Fetched {rss_results.get('new_articles', 0)} new articles", "SUCCESS")
 
-        # Fetch from News API (if available)
-        if settings.news_api_key:
-            logger.info("Fetching from News API...")
-            api_count = ingestion.fetch_news_api(settings.news_api_key)
-            logger.info(f"News API: {api_count} new articles")
-            activity_logger.log_activity(f"News API: {api_count} new articles", "SUCCESS")
+            # Fetch from News API (if available)
+            if settings.news_api_key:
+                logger.info("Fetching from News API...")
+                api_count = ingestion.fetch_news_api(settings.news_api_key)
+                logger.info(f"News API: {api_count} new articles")
+                activity_logger.log_activity(f"News API: {api_count} new articles", "SUCCESS")
 
-        ing_stats = ingestion.get_statistics()
-        logger.info(f"📊 Total articles in DB: {ing_stats['total_articles']}")
-        activity_logger.log_agent_success("Ingestion Agent", ing_stats['total_articles'])
+            ing_stats = ingestion.get_statistics()
+            logger.info(f"📊 Total articles in DB: {ing_stats['total_articles']}")
+            activity_logger.log_agent_success("Ingestion Agent", ing_stats['total_articles'])
 
-        # ===== PHASE 2: QUALITY ASSESSMENT =====
-        activity_logger.log_phase(2, "Quality Assessment (Agent 1.5)")
-        print_section("PHASE 2: Quality Assessment (Agent 1.5)")
+            # ===== PHASE 2: QUALITY ASSESSMENT =====
+            activity_logger.log_phase(2, "Quality Assessment (Agent 1.5)")
+            print_section("PHASE 2: Quality Assessment (Agent 1.5)")
 
-        activity_logger.log_agent_start("Data Quality Agent", "2")
-        quality = DataQualityAgent()
-        quality_results = quality.process_batch(limit=50)
-        logger.info(f"Quality Results: {quality_results}")
+            activity_logger.log_agent_start("Data Quality Agent", "2")
+            quality = DataQualityAgent()
+            quality_results = quality.process_batch(limit=50)
+            logger.info(f"Quality Results: {quality_results}")
 
-        qual_stats = quality.get_statistics()
-        logger.info(f"📊 Quality Stats: {qual_stats}")
-        activity_logger.log_agent_success("Data Quality Agent", quality_results.get('processed', 0))
+            qual_stats = quality.get_statistics()
+            logger.info(f"📊 Quality Stats: {qual_stats}")
+            activity_logger.log_agent_success("Data Quality Agent", quality_results.get('processed', 0))
 
-        # ===== PHASE 3: CONTENT UNDERSTANDING =====
-        activity_logger.log_phase(3, "Content Understanding (Agent 2 - NLP)")
-        print_section("PHASE 3: Content Understanding (Agent 2 - NLP)")
+            # ===== PHASE 3: CONTENT UNDERSTANDING =====
+            activity_logger.log_phase(3, "Content Understanding (Agent 2 - NLP)")
+            print_section("PHASE 3: Content Understanding (Agent 2 - NLP)")
 
-        logger.info(f"Using LLM: {settings.llm_provider}")
-        activity_logger.log_activity(f"Using LLM Provider: {settings.llm_provider}", "INFO")
+            logger.info(f"Using LLM: {settings.llm_provider}")
+            activity_logger.log_activity(f"Using LLM Provider: {settings.llm_provider}", "INFO")
 
-        activity_logger.log_agent_start("Content Understanding Agent", "3")
-        content = ContentUnderstandingAgent()
-        content_results = content.process_batch(limit=3)  # Small batch for LLM
-        logger.info(f"Content Analysis: {content_results}")
+            activity_logger.log_agent_start("Content Understanding Agent", "3")
+            content = ContentUnderstandingAgent()
+            content_results = content.process_batch(limit=3)  # Small batch for LLM
+            logger.info(f"Content Analysis: {content_results}")
 
-        cont_stats = content.get_statistics()
-        logger.info(f"📊 NLP Stats: {cont_stats}")
-        activity_logger.log_agent_success("Content Understanding Agent", content_results.get('processed', 0))
+            cont_stats = content.get_statistics()
+            logger.info(f"📊 NLP Stats: {cont_stats}")
+            activity_logger.log_agent_success("Content Understanding Agent", content_results.get('processed', 0))
 
-        # ===== PHASE 4: ENTITY MAPPING =====
-        activity_logger.log_phase(4, "Entity Mapping (Agent 3)")
-        print_section("PHASE 4: Entity Mapping (Agent 3)")
+            # ===== PHASE 4: ENTITY MAPPING =====
+            activity_logger.log_phase(4, "Entity Mapping (Agent 3)")
+            print_section("PHASE 4: Entity Mapping (Agent 3)")
 
-        activity_logger.log_agent_start("Entity Mapping Agent", "4")
-        entities = EntityMappingAgent()
-        entity_results = entities.process_batch(limit=3)
-        logger.info(f"Entity Mapping: {entity_results}")
+            activity_logger.log_agent_start("Entity Mapping Agent", "4")
+            entities = EntityMappingAgent()
+            entity_results = entities.process_batch(limit=3)
+            logger.info(f"Entity Mapping: {entity_results}")
 
-        ent_stats = entities.get_statistics()
-        logger.info(f"📊 Entity Stats: {ent_stats}")
-        activity_logger.log_agent_success("Entity Mapping Agent", entity_results.get('processed', 0))
+            ent_stats = entities.get_statistics()
+            logger.info(f"📊 Entity Stats: {ent_stats}")
+            activity_logger.log_agent_success("Entity Mapping Agent", entity_results.get('processed', 0))
 
-        # ===== PHASE 5: MARKET REGIME DETECTION =====
-        activity_logger.log_phase(5, "Market Regime Detection (Agent 5)")
-        print_section("PHASE 5: Market Regime Detection (Agent 5)")
+            # ===== PHASE 5: MARKET REGIME DETECTION =====
+            activity_logger.log_phase(5, "Market Regime Detection (Agent 5)")
+            print_section("PHASE 5: Market Regime Detection (Agent 5)")
 
-        activity_logger.log_agent_start("Regime Detection Agent", "5")
-        regime = RegimeDetectionAgent(db)
-        logger.info("Updating market regime...")
-        activity_logger.log_activity("Detecting current market regime...", "PROCESSING")
-        current_regime = regime.update_regime()
-        logger.info(f"Current Regime: {current_regime.regime}")
-        logger.info(f"VIX Level: {current_regime.regime_metadata.get('vix_level', 'N/A')}")
-        activity_logger.log_activity(f"Regime: {current_regime.regime}", "SUCCESS")
+            activity_logger.log_agent_start("Regime Detection Agent", "5")
+            regime = RegimeDetectionAgent(db)
+            logger.info("Updating market regime...")
+            activity_logger.log_activity("Detecting current market regime...", "PROCESSING")
+            current_regime = regime.update_regime()
+            logger.info(f"Current Regime: {current_regime.regime}")
+            logger.info(f"VIX Level: {current_regime.regime_metadata.get('vix_level', 'N/A')}")
+            activity_logger.log_activity(f"Regime: {current_regime.regime}", "SUCCESS")
 
-        # ===== PHASE 6: SURPRISE QUANTIFICATION =====
-        activity_logger.log_phase(6, "Surprise Quantification (Agent 4.5)")
-        print_section("PHASE 6: Surprise Quantification (Agent 4.5)")
+            # ===== PHASE 6: SURPRISE QUANTIFICATION =====
+            activity_logger.log_phase(6, "Surprise Quantification (Agent 4.5)")
+            print_section("PHASE 6: Surprise Quantification (Agent 4.5)")
 
-        activity_logger.log_agent_start("Surprise Quantification Agent", "6")
-        surprise = SurpriseQuantificationAgent()
-        surprise_results = surprise.process_batch(limit=10)
-        logger.info(f"Surprise Analysis: {surprise_results}")
+            activity_logger.log_agent_start("Surprise Quantification Agent", "6")
+            surprise = SurpriseQuantificationAgent()
+            surprise_results = surprise.process_batch(limit=10)
+            logger.info(f"Surprise Analysis: {surprise_results}")
 
-        surp_stats = surprise.get_statistics()
-        logger.info(f"📊 Surprise Stats: {surp_stats}")
-        activity_logger.log_agent_success("Surprise Quantification Agent", surprise_results.get('processed', 0))
+            surp_stats = surprise.get_statistics()
+            logger.info(f"📊 Surprise Stats: {surp_stats}")
+            activity_logger.log_agent_success("Surprise Quantification Agent", surprise_results.get('processed', 0))
 
-        # ===== PHASE 7: IMPACT SCORING =====
-        activity_logger.log_phase(7, "Impact Scoring (Agent 4)")
-        print_section("PHASE 7: Impact Scoring (Agent 4)")
+            # ===== PHASE 7: IMPACT SCORING =====
+            activity_logger.log_phase(7, "Impact Scoring (Agent 4)")
+            print_section("PHASE 7: Impact Scoring (Agent 4)")
 
-        activity_logger.log_agent_start("Impact Scoring Agent", "7")
-        impact = ImpactScoringAgent()
-        impact_results = impact.process_batch(limit=5)
-        logger.info(f"Impact Scoring: {impact_results}")
+            activity_logger.log_agent_start("Impact Scoring Agent", "7")
+            impact = ImpactScoringAgent()
+            impact_results = impact.process_batch(limit=5)
+            logger.info(f"Impact Scoring: {impact_results}")
 
-        imp_stats = impact.get_statistics()
-        logger.info(f"📊 Impact Stats: {imp_stats}")
-        if imp_stats.get('top_impactful'):
-            logger.info(f"Top Impactful News: {imp_stats.get('top_impactful')[:3]}")
-        activity_logger.log_agent_success("Impact Scoring Agent", impact_results.get('processed', 0))
+            imp_stats = impact.get_statistics()
+            logger.info(f"📊 Impact Stats: {imp_stats}")
+            if imp_stats.get('top_impactful'):
+                logger.info(f"Top Impactful News: {imp_stats.get('top_impactful')[:3]}")
+            activity_logger.log_agent_success("Impact Scoring Agent", impact_results.get('processed', 0))
 
-        # ===== PHASE 8: PREDICTION GENERATION =====
-        activity_logger.log_phase(8, "Prediction Generation (Agent 6)")
-        print_section("PHASE 8: Prediction Generation (Agent 6)")
+            # ===== PHASE 8: PREDICTION GENERATION =====
+            activity_logger.log_phase(8, "Prediction Generation (Agent 6)")
+            print_section("PHASE 8: Prediction Generation (Agent 6)")
 
-        activity_logger.log_agent_start("Prediction Agent", "8")
-        predictor = PredictionAgent()
-        pred_results = predictor.process_batch(limit=5)
-        logger.info(f"Prediction Generation: {pred_results}")
+            activity_logger.log_agent_start("Prediction Agent", "8")
+            predictor = PredictionAgent()
+            pred_results = predictor.process_batch(limit=5)
+            logger.info(f"Prediction Generation: {pred_results}")
 
-        pred_stats = predictor.get_statistics()
-        logger.info(f"📊 Prediction Stats: {pred_stats}")
-        activity_logger.log_agent_success("Prediction Agent", pred_results.get('generated', 0))
+            pred_stats = predictor.get_statistics()
+            logger.info(f"📊 Prediction Stats: {pred_stats}")
+            activity_logger.log_agent_success("Prediction Agent", pred_results.get('generated', 0))
 
-        # ===== AUTO-PROCESS NEW PREDICTIONS =====
-        print_section("AUTO-PROCESSING: Calculate Performance & Simulations")
-        logger.info("🔄 Auto-processing new predictions (last 60 minutes)...")
+            # ===== AUTO-PROCESS NEW PREDICTIONS =====
+            print_section("AUTO-PROCESSING: Calculate Performance & Simulations")
+            logger.info("🔄 Auto-processing new predictions (last 60 minutes)...")
 
-        from src.services.auto_prediction_processor import auto_processor
-        auto_stats = auto_processor.process_new_predictions(db, lookback_minutes=60)
+            from src.services.auto_prediction_processor import auto_processor
+            auto_stats = auto_processor.process_new_predictions(db, lookback_minutes=60)
 
-        logger.info(f"✅ Auto-processed {auto_stats['total_found']} predictions:")
-        logger.info(f"   - Outcomes created: {auto_stats['outcomes_created']}")
-        logger.info(f"   - Simulations created: {auto_stats['simulations_created']}")
-        if auto_stats['errors'] > 0:
-            logger.warning(f"   - Errors: {auto_stats['errors']}")
+            logger.info(f"✅ Auto-processed {auto_stats['total_found']} predictions:")
+            logger.info(f"   - Outcomes created: {auto_stats['outcomes_created']}")
+            logger.info(f"   - Simulations created: {auto_stats['simulations_created']}")
+            if auto_stats['errors'] > 0:
+                logger.warning(f"   - Errors: {auto_stats['errors']}")
 
-        # ===== PHASE 9: TRADING SIMULATION =====
-        activity_logger.log_phase(9, "Trading Simulation (Agent 8.5)")
-        print_section("PHASE 9: Trading Simulation (Agent 8.5)")
+            # ===== PHASE 9: TRADING SIMULATION =====
+            activity_logger.log_phase(9, "Trading Simulation (Agent 8.5)")
+            print_section("PHASE 9: Trading Simulation (Agent 8.5)")
 
-        activity_logger.log_agent_start("Trading Simulation Agent", "9")
-        simulator = TradingSimulationAgent()
-        sim_results = simulator.process_batch(limit=20, lookback_days=7)
-        logger.info(f"Trading Simulation: {sim_results}")
+            activity_logger.log_agent_start("Trading Simulation Agent", "9")
+            simulator = TradingSimulationAgent()
+            sim_results = simulator.process_batch(limit=20, lookback_days=7)
+            logger.info(f"Trading Simulation: {sim_results}")
 
-        sim_stats = simulator.get_statistics()
-        logger.info(f"📊 Simulation Stats: {sim_stats}")
-        activity_logger.log_agent_success("Trading Simulation Agent", sim_results.get('processed', 0))
+            sim_stats = simulator.get_statistics()
+            logger.info(f"📊 Simulation Stats: {sim_stats}")
+            activity_logger.log_agent_success("Trading Simulation Agent", sim_results.get('processed', 0))
 
-        # ===== FINAL SUMMARY =====
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
+            # ===== FINAL SUMMARY =====
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
 
-        print_section("PIPELINE COMPLETE - FINAL SUMMARY")
-        logger.info(f"Duration: {duration:.1f} seconds")
-        logger.info("")
-        logger.info("📈 DATA PIPELINE:")
-        logger.info(f"  - Raw Articles: {ing_stats['total_articles']}")
-        logger.info(f"  - High Quality: {qual_stats.get('high_quality', 0)}")
-        logger.info(f"  - NLP Processed: {cont_stats.get('total_processed', 0)}")
-        logger.info(f"  - Entities Mapped: {ent_stats.get('total_entities', 0)}")
-        logger.info("")
-        logger.info("🔍 ANALYSIS:")
-        logger.info(f"  - Surprises Found: {surp_stats.get('total_surprises', 0)}")
-        logger.info(f"  - Impact Scores: {imp_stats.get('total_scores', 0)}")
-        logger.info(f"  - High Impact: {imp_stats.get('high_impact', 0)}")
-        logger.info("")
-        logger.info("🎯 PREDICTIONS:")
-        logger.info(f"  - Total Predictions: {pred_stats.get('total_predictions', 0)}")
-        logger.info(f"  - Bullish: {pred_stats.get('bullish_predictions', 0)}")
-        logger.info(f"  - Bearish: {pred_stats.get('bearish_predictions', 0)}")
-        logger.info(f"  - Avg Confidence: {pred_stats.get('average_confidence', 0):.2f}")
-        logger.info("")
-        logger.info("🧪 SIMULATION:")
-        logger.info(f"  - Total Simulations: {sim_stats.get('total_simulations', 0)}")
-        logger.info(f"  - Buys: {sim_stats.get('buys', 0)}")
-        logger.info(f"  - Sells: {sim_stats.get('sells', 0)}")
-        logger.info(f"  - Holds: {sim_stats.get('holds', 0)}")
-        logger.info("")
-        logger.info("🌡️  CURRENT MARKET REGIME:")
-        logger.info(f"  {current_regime.regime}")
-        logger.info("=" * 70)
-        logger.info("\n✅ MVP PIPELINE COMPLETED SUCCESSFULLY!")
-        logger.info(f"End Time: {end_time}")
+            print_section("PIPELINE COMPLETE - FINAL SUMMARY")
+            logger.info(f"Duration: {duration:.1f} seconds")
+            logger.info("")
+            logger.info("📈 DATA PIPELINE:")
+            logger.info(f"  - Raw Articles: {ing_stats['total_articles']}")
+            logger.info(f"  - High Quality: {qual_stats.get('high_quality', 0)}")
+            logger.info(f"  - NLP Processed: {cont_stats.get('total_processed', 0)}")
+            logger.info(f"  - Entities Mapped: {ent_stats.get('total_entities', 0)}")
+            logger.info("")
+            logger.info("🔍 ANALYSIS:")
+            logger.info(f"  - Surprises Found: {surp_stats.get('total_surprises', 0)}")
+            logger.info(f"  - Impact Scores: {imp_stats.get('total_scores', 0)}")
+            logger.info(f"  - High Impact: {imp_stats.get('high_impact', 0)}")
+            logger.info("")
+            logger.info("🎯 PREDICTIONS:")
+            logger.info(f"  - Total Predictions: {pred_stats.get('total_predictions', 0)}")
+            logger.info(f"  - Bullish: {pred_stats.get('bullish_predictions', 0)}")
+            logger.info(f"  - Bearish: {pred_stats.get('bearish_predictions', 0)}")
+            logger.info(f"  - Avg Confidence: {pred_stats.get('average_confidence', 0):.2f}")
+            logger.info("")
+            logger.info("🧪 SIMULATION:")
+            logger.info(f"  - Total Simulations: {sim_stats.get('total_simulations', 0)}")
+            logger.info(f"  - Buys: {sim_stats.get('buys', 0)}")
+            logger.info(f"  - Sells: {sim_stats.get('sells', 0)}")
+            logger.info(f"  - Holds: {sim_stats.get('holds', 0)}")
+            logger.info("")
+            logger.info("🌡️  CURRENT MARKET REGIME:")
+            logger.info(f"  {current_regime.regime}")
+            logger.info("=" * 70)
+            logger.info("\n✅ MVP PIPELINE COMPLETED SUCCESSFULLY!")
+            logger.info(f"End Time: {end_time}")
 
-        activity_logger.log_pipeline_complete("TradeMeUp MVP Pipeline", duration)
+            activity_logger.log_pipeline_complete("TradeMeUp MVP Pipeline", duration)
 
     except Exception as e:
         logger.error(f"❌ Pipeline failed: {e}", exc_info=True)
         activity_logger.log_agent_error("Pipeline", str(e))
         raise
-    finally:
-        db.close()
 
 
 if __name__ == "__main__":

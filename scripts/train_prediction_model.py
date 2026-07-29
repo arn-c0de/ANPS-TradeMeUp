@@ -48,8 +48,7 @@ def build_dataset(days: int, horizon: int):
     end_date = datetime.now(UTC)
     start_date = end_date - timedelta(days=days)
 
-    db = SessionLocal()
-    try:
+    with SessionLocal() as db:
         engineer = FeatureEngineer(db)
         df = engineer.create_training_dataset(
             start_date=start_date,
@@ -57,8 +56,6 @@ def build_dataset(days: int, horizon: int):
             horizon_days=horizon,
         )
         return df, engineer.get_feature_names()
-    finally:
-        db.close()
 
 
 def train(df, feature_names, min_samples: int):
