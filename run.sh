@@ -11,7 +11,9 @@
 #   ./run.sh smoke      connectivity checks + the full test suite, per test
 #                       (--quick skips the suite)
 #   ./run.sh test       only the test suite, per test with failure detail
-#   ./run.sh logs [svc] follow logs
+#   ./run.sh logs       follow everything live: container output and the
+#                       app's own logs/*.log (--containers / --files to
+#                       narrow, or name a service: ./run.sh logs api)
 # ============================================================================
 set -euo pipefail
 
@@ -289,13 +291,71 @@ cmd_status() {
     [ -f "$ROOT_DIR/.env" ] && ok ".env present" || warn ".env missing"
 }
 
+# Everything the program writes, live and in one stream.
+#
+# Container stdout is only half of it: the pipeline and the dashboard also
+# write to logs/*.log, which is bind-mounted from the host. Following just one
+# of the two sources shows a partial picture, and the gap is easy to miss
+# because both look complete on their own.
 cmd_logs() {
     require_docker
+
+    local files_only=0 containers_only=0
+    case "${1:-}" in
+        --files)      files_only=1; shift ;;
+        --containers) containers_only=1; shift ;;
+    esac
+
+    # A named service is a request for that container alone; hand it to
+    # compose unchanged so its own flags keep working.
     if [ $# -gt 0 ]; then
         docker compose logs -f --tail 100 "$@"
-    else
-        docker compose logs -f --tail 100
+        return
     fi
+
+    local pids=()
+
+    # `tail | sed &` leaves two children but $! names only sed, so killing the
+    # recorded pids alone would strand every tail. Everything started here is
+    # a direct child of this shell, so sweep those too.
+    stop_followers() {
+        local pid
+        for pid in "${pids[@]}"; do
+            kill "$pid" 2>/dev/null
+        done
+        pkill -P $$ 2>/dev/null
+        wait 2>/dev/null
+        return 0
+    }
+    trap 'stop_followers; exit 0' INT TERM
+
+    if [ "$files_only" -eq 0 ]; then
+        docker compose logs -f --tail 50 &
+        pids+=($!)
+    fi
+
+    if [ "$containers_only" -eq 0 ]; then
+        local logfile label found=0
+        for logfile in "$ROOT_DIR"/logs/*.log; do
+            [ -f "$logfile" ] || continue
+            found=1
+            label="$(basename "$logfile" .log)"
+            # -F keeps following across the truncation and rotation the app
+            # does; sed -u so lines are not held back in a pipe buffer.
+            tail -n 50 -F "$logfile" 2>/dev/null | sed -u "s|^|${label}  \||" &
+            pids+=($!)
+        done
+        if [ "$found" -eq 0 ] && [ "$files_only" -eq 1 ]; then
+            warn "no log files in logs/ yet - the app writes them once it runs"
+        fi
+    fi
+
+    if [ "${#pids[@]}" -eq 0 ]; then
+        warn "nothing to follow"
+        return 0
+    fi
+
+    wait
 }
 
 # ---------------------------------------------------------------------------
