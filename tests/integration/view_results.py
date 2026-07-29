@@ -5,11 +5,10 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-import json
 
 from sqlalchemy import desc, func
 
-from src.models.analysis import ImpactScore, MarketRegime, SurpriseScore
+from src.models.analysis import ImpactScore, MarketRegime
 from src.models.data_quality import DataQualityScore
 from src.models.database import SessionLocal
 from src.models.entities import Entity, NewsEntityMapping

@@ -4,7 +4,7 @@ Simulations Tab - View trading simulation outcomes
 
 import json
 import logging
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import dash
 import dash_bootstrap_components as dbc

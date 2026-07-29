@@ -9,7 +9,7 @@ import logging
 import re
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List
 
 import dash
 import dash_bootstrap_components as dbc
@@ -34,9 +34,9 @@ from src.gui.tabs.charts.overlay_utils import (
     save_overlays_to_db,
 )
 from src.models.database import engine as _engine
-from src.services.market_data import market_data
 
-# Initialize market data provider
+# The shared provider singleton, not a per-module instance.
+from src.services.market_data import market_data
 
 logger = logging.getLogger(__name__)
 
@@ -1127,9 +1127,6 @@ def _register_tab_management_callbacks(app):
             tabs_data["active_tab"] = tab_id
             return tabs_data
 
-        # Use the shared provider singleton (not this module's own instance)
-        from src.services.market_data import market_data
-
         def fetch_df(symbol, timeframe):
             if timeframe == "1d_1m":
                 return market_data.get_intraday_data(symbol, days=1)
@@ -2051,8 +2048,6 @@ def _register_config_modal_callbacks(app):
             ]), []
 
         try:
-            # Use the shared provider singleton (not this module's own instance)
-            from src.services.market_data import market_data
             results = market_data.search_symbols(query, limit=8)
 
             if not results:

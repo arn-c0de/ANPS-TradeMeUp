@@ -1,6 +1,6 @@
 """Python logging.Handler that writes records to the system_logs DB table."""
 import logging
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 from src.utils.log_retention import prune_system_logs
 

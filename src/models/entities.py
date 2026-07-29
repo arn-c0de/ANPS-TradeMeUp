@@ -1,6 +1,5 @@
 """Database models for entities and their relationships."""
 import uuid
-from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB

@@ -1,6 +1,5 @@
 """Risk score calculations for trading simulation decisions."""
 from dataclasses import dataclass
-from typing import Dict, Optional
 
 
 def clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:

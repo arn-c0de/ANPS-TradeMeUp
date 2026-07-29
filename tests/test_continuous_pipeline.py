@@ -2,7 +2,6 @@
 Test script for the enhanced continuous pipeline
 Tests performance monitoring, error recovery, and graceful shutdown
 """
-import signal
 import sys
 import time
 from pathlib import Path

@@ -1,6 +1,5 @@
 """Database models for predictions and outcomes."""
 import uuid
-from datetime import datetime
 
 from sqlalchemy import (
     Boolean,

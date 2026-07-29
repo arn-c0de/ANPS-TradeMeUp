@@ -5,7 +5,7 @@ This module provides centralized functions for managing fullscreen state,
 reducing code duplication and improving maintainability.
 """
 
-from typing import Dict, Optional, Tuple
+from typing import Tuple
 
 DEFAULT_FULLSCREEN_STATE = {'fullscreen': False}
 

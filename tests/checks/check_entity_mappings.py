@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from src.config.settings import settings
 from src.models.entities import Entity, NewsEntityMapping
 from src.models.processed_news import ProcessedNews
-from src.models.raw_news import RawNews
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

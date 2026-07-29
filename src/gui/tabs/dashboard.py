@@ -3,7 +3,6 @@ Dashboard Tab - Overview and Key Metrics
 """
 
 import logging
-import os
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -21,7 +20,7 @@ from src.gui.utils.time_format import format_time_ago, format_time_left
 from src.models.analysis import FactVerification, MarketRegime, SurpriseScore
 from src.models.data_quality import DataQualityScore
 from src.models.database import engine
-from src.models.predictions import Prediction, PredictionOutcome
+from src.models.predictions import Prediction
 from src.models.processed_news import ProcessedNews
 from src.models.raw_news import RawNews
 from src.models.trading_simulation import TradingSimulation
@@ -304,10 +303,6 @@ def get_metrics(engine):
     try:
         with Session(engine) as db:
             # Use timezone-aware UTC time for PostgreSQL compatibility
-            import logging
-            from datetime import timezone
-            logger = logging.getLogger(__name__)
-
             now = datetime.now(UTC)
             hour_ago = now - timedelta(hours=1)
             day_ago = now - timedelta(hours=24)
@@ -1039,7 +1034,6 @@ def register_callbacks(app):
         """Open/close prediction detail modal from top performers"""
         import json
 
-        import dash
         from dash import callback_context
 
         if not callback_context.triggered:

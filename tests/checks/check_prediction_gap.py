@@ -4,7 +4,7 @@ Check why so few predictions are created from processed news
 
 import logging
 
-from sqlalchemy import and_, create_engine, func, or_
+from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings

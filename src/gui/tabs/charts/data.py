@@ -2,7 +2,7 @@
 Charts Tab - Data Retrieval Functions
 """
 
-from typing import Dict, Optional
+from typing import Optional
 
 import pandas as pd
 

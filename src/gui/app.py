@@ -10,7 +10,6 @@ import warnings
 warnings.filterwarnings('ignore', category=DeprecationWarning, module='yfinance')
 warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
 
-import logging
 
 import dash
 import dash_bootstrap_components as dbc

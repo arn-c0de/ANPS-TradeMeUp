@@ -1,7 +1,6 @@
 """Agent 2.5: Fact Verification Agent - Verify claims and cross-check facts."""
 import logging
-from datetime import UTC, datetime, timezone
-from typing import Dict, List, Optional
+from datetime import UTC, datetime
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session

@@ -13,7 +13,6 @@ sys.path.insert(0, str(project_root))
 
 from src.agents.impact_scoring_agent import ImpactScoringAgent
 from src.agents.surprise_quantification_agent import SurpriseQuantificationAgent
-from src.utils.activity_logger import activity_logger
 
 logging.basicConfig(
     level=logging.INFO,

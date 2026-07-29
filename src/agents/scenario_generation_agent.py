@@ -1,11 +1,10 @@
 """Agent 7.5: Scenario Generation Agent - Generate market scenarios and stress tests."""
 import logging
-from datetime import UTC, datetime, timezone
-from typing import Dict, List
+from datetime import UTC, datetime
+from typing import List
 
 from sqlalchemy.orm import Session
 
-from src.models.analysis import MarketRegime
 
 logger = logging.getLogger(__name__)
 

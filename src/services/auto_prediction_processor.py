@@ -9,14 +9,13 @@ Can be called after new predictions are created to ensure they are fully process
 """
 
 import logging
-from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, List
+from datetime import UTC, datetime, timedelta
+from typing import List
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from src.models.entities import Entity
-from src.models.predictions import Prediction, PredictionOutcome
+from src.models.predictions import Prediction
 from src.models.trading_simulation import TradingSimulation
 from src.services.prediction_performance_service import PredictionPerformanceService
 from src.simulations.trading_simulator import TradingSimulationEngine

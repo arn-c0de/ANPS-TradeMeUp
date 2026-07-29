@@ -10,9 +10,9 @@ OPTIMIZED VERSION:
 import logging
 import re
 import warnings
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List
 
 from sqlalchemy.orm import Session
 

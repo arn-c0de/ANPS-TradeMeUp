@@ -3,10 +3,10 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from time import sleep
-from typing import Dict, List, Optional
+from typing import List
 
 import feedparser
 import requests

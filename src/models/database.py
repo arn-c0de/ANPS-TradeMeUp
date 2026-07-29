@@ -1,5 +1,5 @@
 """Database connection and session management."""
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from typing import Generator
 
 from sqlalchemy import create_engine

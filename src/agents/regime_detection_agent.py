@@ -2,8 +2,7 @@
 import logging
 import uuid
 import warnings
-from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, Optional
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 

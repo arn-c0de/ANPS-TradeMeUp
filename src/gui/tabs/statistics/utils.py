@@ -3,7 +3,7 @@ Statistics Tab - Utility Functions
 Date handling and range resolution utilities
 """
 
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 
 def _coerce_datetime(value, is_end=False):

@@ -21,7 +21,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from src.models.database import engine
-from src.models.entities import Entity
 from src.models.predictions import Prediction, PredictionOutcome
 from src.models.trading_simulation import TradingSimulation
 from src.services.prediction_performance_service import PredictionPerformanceService

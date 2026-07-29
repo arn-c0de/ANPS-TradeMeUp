@@ -1,6 +1,5 @@
 """Database models for analysis results."""
 import uuid
-from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB

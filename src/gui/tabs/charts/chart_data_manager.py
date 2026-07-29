@@ -4,12 +4,9 @@ Manages chart data loading, caching, and infinite scroll functionality
 Follows patterns from MarketDataProvider for consistency
 """
 
-import hashlib
 import logging
 import threading
-from datetime import datetime, timedelta, timezone
-from functools import lru_cache
-from typing import Dict, Optional, Tuple
+from datetime import datetime, timedelta
 
 import pandas as pd
 

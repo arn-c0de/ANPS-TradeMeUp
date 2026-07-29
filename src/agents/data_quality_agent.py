@@ -1,14 +1,12 @@
 """Agent 1.5: Data Quality Agent - Validates and scores news quality."""
 import logging
-from datetime import UTC, datetime, timezone
-from typing import Dict, List, Optional
+from datetime import UTC, datetime
 
 from langdetect import LangDetectException, detect
 from sqlalchemy.orm import Session
 
 from src.models.data_quality import DataQualityScore
 from src.models.raw_news import RawNews
-from src.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 

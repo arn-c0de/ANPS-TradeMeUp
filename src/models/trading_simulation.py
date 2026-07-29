@@ -1,6 +1,5 @@
 """Database model for trading simulation results."""
 import uuid
-from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import JSONB

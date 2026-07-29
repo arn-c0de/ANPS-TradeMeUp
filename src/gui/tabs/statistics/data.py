@@ -6,7 +6,7 @@ All data retrieval functions for the statistics tab.
 
 import json
 import logging
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import dash_bootstrap_components as dbc

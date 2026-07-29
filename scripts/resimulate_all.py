@@ -29,7 +29,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from src.models.database import engine, get_scoped_session
-from src.models.entities import Entity
 from src.models.predictions import Prediction
 from src.models.trading_simulation import TradingSimulation
 from src.simulations.trading_simulator import TradingSimulationEngine

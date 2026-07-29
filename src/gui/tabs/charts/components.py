@@ -2,7 +2,7 @@
 Charts Tab - Component Creation Functions
 """
 
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import dash_bootstrap_components as dbc
 import pandas as pd

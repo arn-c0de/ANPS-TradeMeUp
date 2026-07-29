@@ -2,10 +2,9 @@
 import logging
 import re
 import uuid
-from datetime import UTC, datetime, timezone
-from typing import Dict, List, Optional
+from datetime import UTC, datetime
+from typing import List
 
-import numpy as np
 from sqlalchemy.orm import Session
 
 from src.models.analysis import SurpriseScore

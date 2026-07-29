@@ -132,7 +132,6 @@ class LLMService:
                     for proxy_url in [http_proxy, https_proxy]:
                         if proxy_url:
                             try:
-                                from urllib.parse import urlparse
                                 parsed = urlparse(proxy_url)
                                 if parsed.port in invalid_proxy_ports:
                                     logger.warning(f"Invalid proxy configuration detected: {proxy_url} (port {parsed.port} is discard port)")

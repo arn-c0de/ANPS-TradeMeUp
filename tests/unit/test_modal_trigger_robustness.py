@@ -1,8 +1,7 @@
 """
 Test for robust modal trigger handling when multiple inputs fire simultaneously
 """
-import json
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 

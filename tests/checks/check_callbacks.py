@@ -1,7 +1,6 @@
 """
 Quick test to check if callbacks are working
 """
-import sys
 
 from sqlalchemy.orm import Session
 

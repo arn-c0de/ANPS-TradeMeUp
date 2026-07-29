@@ -1,6 +1,5 @@
 """Database model for raw news articles."""
 import uuid
-from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB

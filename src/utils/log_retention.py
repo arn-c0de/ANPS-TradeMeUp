@@ -1,6 +1,6 @@
 """Shared retention helpers for the system_logs table."""
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 MAX_SYSTEM_LOG_ROWS = 20_000
 LOG_RETENTION_HOURS = 24

@@ -4,29 +4,23 @@ Predictions Tab - View and Filter Predictions
 
 import json
 import logging
-import uuid
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import ALL, Input, Output, State, dash_table, dcc, html
+from dash import ALL, Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 from sqlalchemy import desc
 from sqlalchemy.orm import Session, joinedload
 
-from src.gui.helpers.prediction_details_popup import (
-    _format_saved_performance,
-    get_prediction_details,
-)
+from src.gui.helpers.prediction_details_popup import get_prediction_details
 from src.gui.utils.callbacks import safe_callback
 from src.gui.utils.task_queue import add_gui_task, get_task_queue
 from src.gui.utils.time_format import format_time_ago
-from src.models.analysis import FactVerification, ImpactScore, SurpriseScore
+from src.models.analysis import SurpriseScore
 from src.models.database import engine as _engine
 from src.models.entities import Entity
-from src.models.predictions import Prediction, PredictionOutcome
-from src.models.processed_news import ProcessedNews
-from src.models.raw_news import RawNews
+from src.models.predictions import Prediction
 from src.models.trading_simulation import TradingSimulation
 from src.services.prediction_performance_service import prediction_performance_service
 from src.utils.json_helpers import ensure_dict
@@ -737,7 +731,6 @@ def register_callbacks(app):
             try:
                 with Session(_engine) as db:
                     # Get the prediction to find entity_id
-                    from src.models.predictions import Prediction
                     pred = db.query(Prediction).filter(
                         Prediction.prediction_id == prediction_id
                     ).first()

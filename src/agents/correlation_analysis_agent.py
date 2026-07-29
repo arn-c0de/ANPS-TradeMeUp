@@ -1,7 +1,7 @@
 """Agent 5.6: Correlation Analysis Agent - Analyze entity correlations and relationships."""
 import logging
-from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from datetime import UTC, datetime, timedelta
+from typing import List
 
 import numpy as np
 from sqlalchemy import func

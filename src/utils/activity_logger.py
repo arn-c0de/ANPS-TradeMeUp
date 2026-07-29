@@ -1,9 +1,8 @@
 """Activity Logger — real-time agent activity tracking and central DB log store."""
 
-import os
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from src.utils.log_retention import prune_system_logs
 

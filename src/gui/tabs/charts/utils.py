@@ -2,7 +2,7 @@
 Charts Tab - Utility Functions
 """
 
-from typing import Optional, Tuple
+from typing import Tuple
 
 import dash_bootstrap_components as dbc
 import pandas as pd

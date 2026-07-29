@@ -1,6 +1,5 @@
 """Agent 8.5: Trading Simulation Agent - Evaluate predictions vs market."""
 import logging
-from typing import Dict
 
 from src.simulations.trading_simulator import TradingSimulationEngine
 

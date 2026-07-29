@@ -9,7 +9,7 @@ import re
 import shlex
 import subprocess
 import sys
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import dash

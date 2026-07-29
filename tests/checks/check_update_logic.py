@@ -1,5 +1,4 @@
 """Test if update logic works correctly"""
-from datetime import datetime
 
 from sqlalchemy import update
 from sqlalchemy.orm import Session

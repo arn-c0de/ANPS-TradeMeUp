@@ -3,7 +3,6 @@ Live Chart Components
 Modular chart components for real-time market data visualization
 """
 
-from datetime import datetime, timedelta
 
 import pandas as pd
 import plotly.graph_objects as go

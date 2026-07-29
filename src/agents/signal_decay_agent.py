@@ -1,8 +1,7 @@
 """Agent 5.5: Signal Decay Modeling Agent - Model how news impact decays over time."""
 import logging
 import math
-from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, Optional
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session

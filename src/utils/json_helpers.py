@@ -5,7 +5,7 @@ Utilities for handling JSON data, particularly when migrating from SQLite to Pos
 SQLite stores JSON as TEXT, while PostgreSQL has native JSONB support.
 """
 import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import numpy as np
 
