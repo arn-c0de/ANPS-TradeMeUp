@@ -8,18 +8,22 @@ OPTIMIZED VERSION:
 - ✅ No session state leaks between batches
 """
 import logging
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 from src.models.database import get_scoped_session
 from src.models.processed_news import ProcessedNews
 from src.models.raw_news import RawNews
-from src.services.llm_service import llm_service
+from src.services.llm_service import llm_service, truncate_for_prompt
 
 logger = logging.getLogger(__name__)
+
+# Prompt budgets, in approximate tokens. The article body dominates the cost
+# of this agent, so these are the knobs that actually move token spend.
+ANALYSIS_CONTENT_TOKENS = 1000   # ~4000 characters, the previous hard limit
+EMBEDDING_INPUT_TOKENS = 250     # ~1000 characters
 
 
 class ContentUnderstandingAgent:
@@ -260,10 +264,11 @@ Respond ONLY with JSON."""
         Returns:
             Analysis results dictionary
         """
-        # Prepare prompt
+        # Prepare prompt. Budget in tokens rather than characters, and cut
+        # on a sentence boundary instead of mid-word.
         prompt = self.prompt_template.format(
             title=article.title,
-            content=article.full_text[:4000]  # Limit to avoid token limits
+            content=truncate_for_prompt(article.full_text, ANALYSIS_CONTENT_TOKENS),
         )
 
         try:
@@ -286,7 +291,9 @@ Respond ONLY with JSON."""
 
             # Generate embedding
             logger.debug(f"Generating embedding for article {article.news_id}")
-            embedding = self.llm.get_embedding(article.full_text[:1000])
+            embedding, embedding_model = self.llm.get_embedding_with_model(
+                truncate_for_prompt(article.full_text, EMBEDDING_INPUT_TOKENS)
+            )
 
             # Add metadata
             analysis['embedding'] = embedding
@@ -294,6 +301,9 @@ Respond ONLY with JSON."""
             analysis['llm_metadata'] = {
                 'provider': self.llm.provider,
                 'model': self.llm.model,
+                # Recorded so mixed embedding spaces stay identifiable: the
+                # OpenAI and local models have different dimensions.
+                'embedding_model': embedding_model,
                 'temperature': 0.1,
                 'timestamp': datetime.now(UTC).isoformat()
             }
@@ -306,8 +316,11 @@ Respond ONLY with JSON."""
             logger.warning(f"Creating fallback analysis for article {article.news_id}")
 
             # Return minimal valid analysis
+            embedding_model = None
             try:
-                embedding = self.llm.get_embedding(article.full_text[:1000])
+                embedding, embedding_model = self.llm.get_embedding_with_model(
+                    truncate_for_prompt(article.full_text, EMBEDDING_INPUT_TOKENS)
+                )
             except Exception:
                 embedding = []
 
@@ -324,6 +337,7 @@ Respond ONLY with JSON."""
                 'llm_metadata': {
                     'provider': self.llm.provider,
                     'model': self.llm.model,
+                    'embedding_model': embedding_model,
                     'error': str(e),
                     'fallback': True,
                     'timestamp': datetime.now(UTC).isoformat()

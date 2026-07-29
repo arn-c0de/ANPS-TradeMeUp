@@ -8,11 +8,11 @@ OPTIMIZED VERSION:
 - ✅ No session state leaks between batches
 """
 import logging
+import math
 import pickle
 import uuid
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import numpy as np
 import xgboost as xgb
@@ -24,6 +24,7 @@ from src.models.analysis import ImpactScore
 from src.models.database import get_scoped_session
 from src.models.entities import Entity
 from src.models.predictions import Prediction
+from src.utils.json_helpers import ensure_list
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,31 @@ class PredictionAgent:
     - Batch commits (creates all predictions in single transaction)
     - Continues processing even if individual items fail
     """
+
+    # Recorded as model_version when no trained model is on disk, so that
+    # heuristic output is never counted as model output.
+    HEURISTIC_MODEL_VERSION = "heuristic_v1"
+
+    # Trading days per horizon, used to scale both the expected move and the
+    # width of its distribution.
+    HORIZON_TRADING_DAYS = {'1d': 1, '5d': 5, '20d': 20}
+    DEFAULT_HORIZON_DAYS = 5
+
+    # Label spellings a trained classifier might use for each direction.
+    CLASS_LABEL_ALIASES = {
+        'down': 'down', '-1': 'down', 'bearish': 'down', '0': 'down',
+        'flat': 'flat', 'neutral': 'flat', '1': 'flat',
+        'up': 'up', 'bullish': 'up', '2': 'up',
+    }
+
+    # Confidence decays with horizon: a 20-day call is a weaker claim than a
+    # 1-day one from the same signal. Multiplier applied to the raw score.
+    HORIZON_CONFIDENCE_FACTOR = {'1d': 1.0, '5d': 0.92, '20d': 0.80}
+
+    # Daily volatility assumed when sizing the prediction interval, as a
+    # decimal fraction. Deliberately a single constant: the feature set
+    # carries no per-entity realised volatility yet.
+    ASSUMED_DAILY_VOLATILITY = 0.018
 
     def __init__(self, model_version: str = "xgboost_v1.0"):
         """
@@ -84,19 +110,96 @@ class PredictionAgent:
             logger.warning(f"Model not found at {model_path}, predictions will use heuristics")
             return None
 
-    def _predict_with_model(self, features: dict, feature_engineer: FeatureEngineer) -> dict:
+    def _horizon_days(self, horizon: str) -> int:
+        """Trading days covered by a horizon label."""
+        return self.HORIZON_TRADING_DAYS.get(horizon, self.DEFAULT_HORIZON_DAYS)
+
+    def _horizon_return_scale(self, horizon: str) -> float:
+        """Scale factor applied to the expected move for a given horizon.
+
+        News impact does not accumulate linearly with time - most of the move
+        happens early and then decays. Square-root-of-time is the standard
+        first approximation, normalised so the 5-day horizon (the pipeline's
+        default) keeps the historical magnitude.
+        """
+        return math.sqrt(self._horizon_days(horizon) / self.DEFAULT_HORIZON_DAYS)
+
+    def _horizon_adjusted_confidence(self, raw_confidence: float, horizon: str) -> float:
+        """Damp confidence for longer horizons and keep it in a sane band."""
+        factor = self.HORIZON_CONFIDENCE_FACTOR.get(horizon, 0.92)
+        return float(np.clip(raw_confidence * factor, 0.30, 0.95))
+
+    def _build_return_distribution(self, expected_mean: float, horizon: str) -> dict:
+        """Build the expected-return payload around ``expected_mean``.
+
+        The quantiles used to be fixed +/-0.01 offsets, which carried no
+        distributional information and were identical for every horizon. They
+        are now derived from an assumed volatility scaled by sqrt(time), which
+        at least widens correctly as the horizon grows.
+
+        `is_percentage` is stated explicitly: values here are decimal
+        fractions (0.02 == 2%), and readers previously had to infer that from
+        the magnitude.
+        """
+        sigma = self.ASSUMED_DAILY_VOLATILITY * math.sqrt(self._horizon_days(horizon))
+
+        # Normal quantiles: z(0.05)=-1.645, z(0.25)=-0.674, z(0.75)=+0.674,
+        # z(0.95)=+1.645
+        return {
+            'mean': float(expected_mean),
+            'median': float(expected_mean),
+            'p05': float(expected_mean - 1.645 * sigma),
+            'p25': float(expected_mean - 0.674 * sigma),
+            'p75': float(expected_mean + 0.674 * sigma),
+            'p95': float(expected_mean + 1.645 * sigma),
+            'sigma': float(sigma),
+            'is_percentage': False,
+        }
+
+    def _map_class_probabilities(self, probas) -> dict:
+        """Map a model's probability vector onto up/flat/down.
+
+        Reads the model's own ``classes_`` rather than assuming the column
+        order is [down, flat, up]. A model trained with a different label
+        order would otherwise have every direction silently inverted.
+        """
+        direction_probabilities = {'down': 0.0, 'flat': 0.0, 'up': 0.0}
+
+        classes = getattr(self.model, 'classes_', None)
+        if classes is not None and len(classes) == len(probas):
+            matched = False
+            for label, probability in zip(classes, probas):
+                key = self.CLASS_LABEL_ALIASES.get(str(label).lower())
+                if key:
+                    direction_probabilities[key] = float(probability)
+                    matched = True
+            if matched:
+                return direction_probabilities
+
+        # No usable classes_: fall back to the documented order, but say so.
+        logger.warning(
+            "Model exposes no recognisable classes_ (%r); assuming [down, flat, up]",
+            classes,
+        )
+        order = ['down', 'flat', 'up']
+        for key, probability in zip(order, probas):
+            direction_probabilities[key] = float(probability)
+        return direction_probabilities
+
+    def _predict_with_model(self, features: dict, feature_engineer: FeatureEngineer, horizon: str) -> dict:
         """
         Generate prediction using trained model.
 
         Args:
             features: Feature dictionary
             feature_engineer: Feature engineer instance
+            horizon: Prediction horizon ('1d', '5d', '20d')
 
         Returns:
             Prediction results
         """
         if self.model is None:
-            return self._predict_with_heuristics(features)
+            return self._predict_with_heuristics(features, horizon)
 
         try:
             # Convert features to array
@@ -105,22 +208,15 @@ class PredictionAgent:
 
             # Get probabilities
             probas = self.model.predict_proba(X)[0]
+            direction_probabilities = self._map_class_probabilities(probas)
 
-            # Map to up/flat/down
-            # Assuming classes: [down, flat, up]
-            direction_probabilities = {
-                'down': float(probas[0]) if len(probas) > 0 else 0.33,
-                'flat': float(probas[1]) if len(probas) > 1 else 0.34,
-                'up': float(probas[2]) if len(probas) > 2 else 0.33
-            }
-
-            # Calculate expected return
-            # Simplified: Use probabilities and typical returns
-            expected_mean = (
+            # Expected return, scaled to the horizon (see _horizon_return_scale)
+            base_mean = (
                 direction_probabilities['up'] * 0.03 +
                 direction_probabilities['flat'] * 0.00 +
                 direction_probabilities['down'] * -0.02
             )
+            expected_mean = base_mean * self._horizon_return_scale(horizon)
 
             # Feature importance (if available)
             if hasattr(self.model, 'feature_importances_'):
@@ -134,27 +230,23 @@ class PredictionAgent:
 
             return {
                 'direction_probabilities': direction_probabilities,
-                'expected_return': {
-                    'mean': expected_mean,
-                    'median': expected_mean,
-                    'p25': expected_mean - 0.01,
-                    'p75': expected_mean + 0.01,
-                    'p95': expected_mean + 0.03
-                },
-                'confidence': float(max(probas)),
-                'key_drivers': key_drivers
+                'expected_return': self._build_return_distribution(expected_mean, horizon),
+                'confidence': self._horizon_adjusted_confidence(float(max(probas)), horizon),
+                'key_drivers': key_drivers,
+                'source': 'model',
             }
 
         except Exception as e:
             logger.error(f"Error in model prediction: {e}")
-            return self._predict_with_heuristics(features)
+            return self._predict_with_heuristics(features, horizon)
 
-    def _predict_with_heuristics(self, features: dict) -> dict:
+    def _predict_with_heuristics(self, features: dict, horizon: str) -> dict:
         """
         Generate prediction using simple heuristics (when no model).
 
         Args:
             features: Feature dictionary
+            horizon: Prediction horizon ('1d', '5d', '20d')
 
         Returns:
             Prediction results
@@ -181,11 +273,11 @@ class PredictionAgent:
             'down': float(bearish_prob / total)
         }
 
-        # Expected return
+        # Expected return, scaled to the horizon
         expected_mean = (
             direction_probabilities['up'] * (impact * 0.05) +
             direction_probabilities['down'] * -(impact * 0.03)
-        )
+        ) * self._horizon_return_scale(horizon)
 
         # Key drivers (heuristic)
         key_drivers = [
@@ -204,15 +296,10 @@ class PredictionAgent:
 
         return {
             'direction_probabilities': direction_probabilities,
-            'expected_return': {
-                'mean': expected_mean,
-                'median': expected_mean,
-                'p25': expected_mean - 0.015,
-                'p75': expected_mean + 0.015,
-                'p95': expected_mean + 0.04
-            },
-            'confidence': float(confidence),
-            'key_drivers': key_drivers
+            'expected_return': self._build_return_distribution(expected_mean, horizon),
+            'confidence': self._horizon_adjusted_confidence(float(confidence), horizon),
+            'key_drivers': key_drivers,
+            'source': 'heuristic',
         }
 
     def generate_prediction(
@@ -315,21 +402,19 @@ class PredictionAgent:
 
             all_predictions = []
 
+            # Horizon coverage for the selected impacts, in one query.
+            covered = self._existing_horizons_by_news(
+                db, {impact.entity_id for impact in impact_scores}
+            )
+
             # Process all impact scores WITHOUT committing
             for impact in impact_scores:
                 try:
-                    news_id_str = str(impact.news_id)
-
-                    # Check which horizons already have predictions
-                    # Note: related_news_ids is JSON array, need to check in Python
-                    all_entity_predictions = db.query(Prediction).filter(
-                        Prediction.entity_id == impact.entity_id
-                    ).all()
-
-                    existing_horizons = set()
-                    for pred in all_entity_predictions:
-                        if pred.related_news_ids and news_id_str in pred.related_news_ids:
-                            existing_horizons.add(pred.horizon)
+                    # Reuse the coverage map built during selection instead of
+                    # reloading every prediction for this entity a second time.
+                    existing_horizons = covered.get(
+                        (impact.entity_id, str(impact.news_id)), set()
+                    )
 
                     # Generate predictions for missing horizons
                     for horizon in self.horizons:
@@ -385,7 +470,6 @@ class PredictionAgent:
             List of ImpactScore objects
         """
         # Get high-impact scores that are recent (last 7 days)
-        from datetime import datetime, timedelta
         # Use UTC to match impact score timestamps
         cutoff_date = datetime.now(UTC) - timedelta(days=7)
 
@@ -405,35 +489,20 @@ class PredictionAgent:
 
         logger.info(f"Found {len(impact_scores)} high-impact scores to check")
 
+        # Build the coverage map once for every candidate entity. This used to
+        # be a query per candidate per horizon - roughly 300 round trips, each
+        # loading every prediction the entity ever had.
+        covered = self._existing_horizons_by_news(
+            db, {impact.entity_id for impact in impact_scores}
+        )
+
         # Filter out those that already have predictions for ALL horizons
         to_predict = []
+        all_horizons = set(self.horizons)
 
         for impact in impact_scores:
-            news_id_str = str(impact.news_id)
-
-            # Count existing predictions for this entity+news combination
-            # Check each horizon separately
-            existing_horizons = set()
-
-            for horizon in self.horizons:
-                # Query predictions with this entity, horizon, and news_id in related_news_ids
-                # SQLite/PostgreSQL JSON handling
-                existing = db.query(Prediction).filter(
-                    Prediction.entity_id == impact.entity_id,
-                    Prediction.horizon == horizon
-                ).all()
-
-                # Check if any prediction includes this news_id
-                for pred in existing:
-                    if pred.related_news_ids:
-                        # related_news_ids can be list or None
-                        news_ids = pred.related_news_ids if isinstance(pred.related_news_ids, list) else []
-                        if news_id_str in news_ids or str(news_id_str) in [str(x) for x in news_ids]:
-                            existing_horizons.add(horizon)
-                            break
-
-            # If not all horizons are covered, add to list
-            missing_horizons = set(self.horizons) - existing_horizons
+            key = (impact.entity_id, str(impact.news_id))
+            missing_horizons = all_horizons - covered.get(key, set())
             if missing_horizons:
                 logger.debug(f"Entity {impact.entity_id} missing predictions for {missing_horizons}")
                 to_predict.append(impact)
@@ -442,6 +511,28 @@ class PredictionAgent:
 
         logger.info(f"Found {len(to_predict)} impact scores needing predictions")
         return to_predict
+
+    def _existing_horizons_by_news(self, db: Session, entity_ids: set) -> dict:
+        """Map (entity_id, news_id) -> set of horizons already predicted.
+
+        related_news_ids is a JSON array, so membership is resolved in Python -
+        but over a single query for all entities rather than one per entity and
+        horizon.
+        """
+        if not entity_ids:
+            return {}
+
+        rows = db.query(
+            Prediction.entity_id,
+            Prediction.horizon,
+            Prediction.related_news_ids,
+        ).filter(Prediction.entity_id.in_(entity_ids)).all()
+
+        covered: dict[tuple, set] = {}
+        for entity_id, horizon, related_news_ids in rows:
+            for news_id in ensure_list(related_news_ids, []):
+                covered.setdefault((entity_id, str(news_id)), set()).add(horizon)
+        return covered
 
     def _generate_prediction_no_commit(
         self,
@@ -490,7 +581,18 @@ class PredictionAgent:
             )
 
             # Generate prediction
-            result = self._predict_with_model(features, feature_engineer)
+            result = self._predict_with_model(features, feature_engineer, horizon)
+
+            # Record which path actually produced this. Labelling a heuristic
+            # as the XGBoost model made the performance monitor and the A/B
+            # tests compare something that never ran.
+            source = result.get('source', 'heuristic')
+            if source == 'model':
+                model_version = self.model_version
+                model_contributions = {self.model_version: 1.0}
+            else:
+                model_version = self.HEURISTIC_MODEL_VERSION
+                model_contributions = {self.HEURISTIC_MODEL_VERSION: 1.0}
 
             # Create prediction record
             prediction = Prediction(
@@ -501,9 +603,9 @@ class PredictionAgent:
                 direction_probabilities=result['direction_probabilities'],
                 expected_return=result['expected_return'],
                 confidence=result['confidence'],
-                model_contributions={'xgboost': 1.0},  # Single model for MVP
+                model_contributions=model_contributions,
                 key_drivers=result['key_drivers'],
-                model_version=self.model_version,
+                model_version=model_version,
                 related_news_ids=[news_id],
                 created_at=datetime.now(UTC)
             )

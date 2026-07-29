@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 
 ## [1.0.5] - 2026-07-29
 
+### Fixed (prediction pipeline and LLM cost)
+- The three horizons produced byte-identical predictions: `horizon` was passed
+  into the generator but never reached the features or the model, so 1d, 5d and
+  20d differed only by their label. Expected return now scales with sqrt(time),
+  the prediction interval widens with the horizon, and confidence decays for
+  longer horizons
+- Heuristic predictions were recorded as `model_version="xgboost_v1.0"` with
+  `model_contributions={'xgboost': 1.0}` even though no trained model exists on
+  disk, so performance monitoring and A/B testing were comparing a heuristic
+  they believed was a model. They are now labelled `heuristic_v1`
+- The model's class order was assumed to be `[down, flat, up]`; `classes_` is
+  read instead, with a warning when it is unusable
+- `expected_return` now states `is_percentage: False` explicitly, instead of
+  leaving every consumer to infer the format from the magnitude
+- `p25`/`p75`/`p95` were fixed offsets carrying no distributional information
+  and were identical across horizons. They are derived from a scaled volatility
+  now, and `p05` was added so the interval is symmetric
+- Three pipeline phases called `get_statistics()` instead of `process_batch()`,
+  so they reported on work they never did: no scenario was ever generated, no
+  ensemble prediction was ever created, and `calibrated_confidence` was never
+  written back onto any prediction
+- Embeddings silently fell back from OpenAI (1536-dim) to a local model
+  (768-dim) into the same column. The producing model is now recorded in
+  `llm_metadata.embedding_model` and the fallback warns explicitly
+
+### Performance (prediction pipeline and LLM cost)
+- Prediction batch selection ran a query per candidate per horizon, each
+  loading every prediction the entity ever had, and then repeated the whole
+  check inside the batch loop - roughly 320 round trips per batch, now two
+- JSON responses are requested through OpenAI's `response_format` and Ollama's
+  `format: "json"`, so a malformed reply no longer wastes an entire call
+- `generate_json` no longer appends a JSON-only instruction that the prompt
+  templates already carry
+- Prompt content is budgeted in tokens and cut on a sentence boundary rather
+  than sliced at a hard-coded character count
+
 ### Fixed (agents, ML and API)
 - Four agents read `prediction.predicted_direction` / `.predicted_return` /
   `.model_id` as if they were columns. They are not, so model performance

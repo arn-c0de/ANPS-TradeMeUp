@@ -1,6 +1,7 @@
 """LLM Service - Unified interface for Ollama, OpenAI, and Anthropic."""
 import json
 import logging
+import re
 from threading import Lock
 from urllib.parse import urlparse
 
@@ -18,6 +19,10 @@ OLLAMA_GENERATE_TIMEOUT = 300    # seconds, local generation can be slow
 logger = logging.getLogger(__name__)
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 
+# Rough characters-per-token ratio used for prompt budgeting.
+CHARS_PER_TOKEN = 4
+
+OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 LOCAL_EMBEDDING_MODEL = "all-mpnet-base-v2"
 LOCAL_EMBEDDING_DEVICE = "cpu"  # CPU only, to avoid GPU memory overflow
 
@@ -195,7 +200,8 @@ class LLMService:
         prompt: str,
         system_prompt: str | None = None,
         temperature: float | None = None,
-        max_tokens: int | None = None
+        max_tokens: int | None = None,
+        json_mode: bool = False,
     ) -> str:
         """
         Generate text using the configured LLM provider.
@@ -205,6 +211,8 @@ class LLMService:
             system_prompt: System prompt (instructions)
             temperature: Sampling temperature (overrides default)
             max_tokens: Max tokens to generate (overrides default)
+            json_mode: Ask the provider to constrain output to valid JSON.
+                Supported natively by OpenAI and Ollama; ignored elsewhere.
 
         Returns:
             Generated text
@@ -214,9 +222,9 @@ class LLMService:
 
         try:
             if self.provider == "ollama":
-                return self._generate_ollama(prompt, system_prompt, temp, tokens)
+                return self._generate_ollama(prompt, system_prompt, temp, tokens, json_mode)
             elif self.provider == "openai":
-                return self._generate_openai(prompt, system_prompt, temp, tokens)
+                return self._generate_openai(prompt, system_prompt, temp, tokens, json_mode)
             elif self.provider == "anthropic":
                 return self._generate_anthropic(prompt, system_prompt, temp, tokens)
             # Falling through returned None, which callers then tried to parse.
@@ -230,7 +238,8 @@ class LLMService:
         prompt: str,
         system_prompt: str | None,
         temperature: float,
-        max_tokens: int
+        max_tokens: int,
+        json_mode: bool = False,
     ) -> str:
         """Generate text using Ollama."""
         url = f"{self.ollama_base_url}/api/generate"
@@ -249,6 +258,10 @@ class LLMService:
                 "num_predict": max_tokens
             }
         }
+        if json_mode:
+            # Constrains decoding to valid JSON, which removes the need to
+            # repair the response with regular expressions afterwards.
+            payload["format"] = "json"
 
         response = requests.post(url, json=payload, timeout=OLLAMA_GENERATE_TIMEOUT)
         response.raise_for_status()
@@ -261,7 +274,8 @@ class LLMService:
         prompt: str,
         system_prompt: str | None,
         temperature: float,
-        max_tokens: int
+        max_tokens: int,
+        json_mode: bool = False,
     ) -> str:
         """Generate text using OpenAI."""
         messages = []
@@ -271,13 +285,19 @@ class LLMService:
 
         messages.append({"role": "user", "content": prompt})
 
+        request_kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if json_mode:
+            # Guarantees syntactically valid JSON, so a malformed reply can no
+            # longer waste a whole call.
+            request_kwargs["response_format"] = {"type": "json_object"}
+
         try:
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
+            response = self.openai_client.chat.completions.create(**request_kwargs)
 
             return response.choices[0].message.content
         except Exception as e:
@@ -331,44 +351,73 @@ class LLMService:
         Returns:
             Parsed JSON as dictionary
         """
-        # Add JSON instruction to prompt
-        json_prompt = f"{prompt}\n\nRespond ONLY with valid JSON, no additional text."
+        json_mode = self.supports_json_mode()
 
-        response = self.generate(json_prompt, system_prompt, temperature)
+        # Only append the instruction when the provider cannot enforce JSON
+        # itself and the prompt does not already ask for it. The templates in
+        # config/prompts already end with such a line, so appending
+        # unconditionally sent the same instruction twice.
+        json_prompt = prompt
+        if not json_mode and not self._asks_for_json(prompt):
+            json_prompt = f"{prompt}\n\nRespond ONLY with valid JSON, no additional text."
 
-        # Try to extract and fix JSON from response
+        response = self.generate(
+            json_prompt, system_prompt, temperature, json_mode=json_mode
+        )
+
+        parsed = self._parse_json_response(response)
+        if parsed is not None:
+            return parsed
+
+        logger.error(f"Failed to parse JSON from response: {response[:500]}")
+        raise ValueError("Could not parse valid JSON from LLM response")
+
+    def supports_json_mode(self) -> bool:
+        """Whether the active provider can constrain output to valid JSON."""
+        return self.provider in {"openai", "ollama"}
+
+    @staticmethod
+    def _asks_for_json(prompt: str) -> bool:
+        """Rough check for a prompt that already demands JSON-only output."""
+        tail = prompt[-400:].lower()
+        return "json" in tail and ("only" in tail or "no additional text" in tail)
+
+    @staticmethod
+    def _parse_json_response(response: str) -> dict | None:
+        """Parse an LLM reply into a dict, repairing common damage.
+
+        Returns None when nothing usable could be recovered.
+        """
+        if not response:
+            return None
+
         try:
-            # Try direct parsing
             return json.loads(response)
         except json.JSONDecodeError as e:
             logger.warning(f"Initial JSON parse failed: {e}. Attempting extraction...")
 
-            # Try to find JSON in code blocks
-            import re
-            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
-            if json_match:
-                try:
-                    return json.loads(json_match.group(1))
-                except json.JSONDecodeError:
-                    pass
+        # JSON wrapped in a markdown code fence
+        fenced = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+        if fenced:
+            try:
+                return json.loads(fenced.group(1))
+            except json.JSONDecodeError:
+                pass
 
-            # Try to find any JSON object
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
+        # Any brace-delimited object, with common damage repaired
+        candidate = re.search(r'\{.*\}', response, re.DOTALL)
+        if candidate:
+            json_str = candidate.group(0)
+            # Trailing commas before a closing brace/bracket
+            json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+            # Missing comma between two quoted properties on separate lines
+            json_str = re.sub(r'"\s*\n\s*"', '",\n"', json_str)
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                pass
 
-                # Try to fix common JSON issues
-                try:
-                    # Remove trailing commas before closing braces/brackets
-                    json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
-                    # Fix missing commas between properties (basic heuristic)
-                    json_str = re.sub(r'"\s*\n\s*"', '",\n"', json_str)
-                    return json.loads(json_str)
-                except json.JSONDecodeError:
-                    pass
-
-            logger.error(f"Failed to parse JSON from response: {response[:500]}")
-            raise ValueError("Could not parse valid JSON from LLM response")
+        return None
 
     def get_embedding(self, text: str) -> list[float]:
         """
@@ -380,22 +429,42 @@ class LLMService:
         Returns:
             Embedding vector
         """
+        return self.get_embedding_with_model(text)[0]
+
+    def get_embedding_with_model(self, text: str) -> tuple[list[float], str]:
+        """Embed ``text`` and report which model produced the vector.
+
+        The two available models live in different vector spaces
+        (text-embedding-3-small is 1536-dimensional, all-mpnet-base-v2 is
+        768). Mixing them in one column makes similarity comparisons
+        meaningless, so the model name travels with the vector and callers
+        should persist it alongside.
+
+        Returns:
+            (embedding vector, model name)
+        """
         # Use OpenAI embeddings if available
         if self.provider == "openai" and hasattr(self, 'openai_client'):
             try:
                 response = self.openai_client.embeddings.create(
-                    model="text-embedding-3-small",
+                    model=OPENAI_EMBEDDING_MODEL,
                     input=text[:8191]  # OpenAI has max input length
                 )
-                return response.data[0].embedding
+                return response.data[0].embedding, OPENAI_EMBEDDING_MODEL
             except Exception as e:
-                logger.warning(f"Failed to get embedding from OpenAI: {e}. Falling back to CPU embeddings.")
+                logger.warning(
+                    "Failed to get embedding from OpenAI (%s). Falling back to %s, "
+                    "which is a DIFFERENT vector space - these embeddings are not "
+                    "comparable with previously stored OpenAI ones.",
+                    e,
+                    LOCAL_EMBEDDING_MODEL,
+                )
 
         # Fallback: use sentence-transformers on CPU
         try:
             model = _get_local_embedding_model()
             embedding = model.encode(text, convert_to_numpy=True, device=LOCAL_EMBEDDING_DEVICE)
-            return embedding.tolist()
+            return embedding.tolist(), LOCAL_EMBEDDING_MODEL
         except ImportError:
             logger.error("sentence-transformers not installed. Run: pip install sentence-transformers")
             raise
@@ -414,7 +483,30 @@ class LLMService:
             Approximate token count
         """
         # Rough approximation: ~4 characters per token
-        return len(text) // 4
+        return len(text) // CHARS_PER_TOKEN
+
+
+def truncate_for_prompt(text: str, max_tokens: int) -> str:
+    """Trim ``text`` to roughly ``max_tokens`` tokens, on a word boundary.
+
+    Callers used to slice by a hard-coded character count, which cut mid-word
+    and gave no indication of the actual budget being spent.
+    """
+    if not text:
+        return ""
+
+    max_chars = max_tokens * CHARS_PER_TOKEN
+    if len(text) <= max_chars:
+        return text
+
+    clipped = text[:max_chars]
+    # Prefer the last sentence end, then the last space, so the model is not
+    # handed a fragment of a word.
+    for boundary in ('. ', '\n', ' '):
+        cut = clipped.rfind(boundary)
+        if cut > max_chars * 0.6:
+            return clipped[:cut + len(boundary)].rstrip()
+    return clipped
 
 
 # Global LLM service instance
