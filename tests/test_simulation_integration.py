@@ -8,12 +8,54 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from src.models.database import get_scoped_session
 from src.models.entities import Entity
 from src.models.predictions import Prediction, PredictionOutcome
+from src.models.trading_simulation import TradingSimulation
 from src.simulations.trading_simulator import TradingSimulationEngine
+
+# These write to and read from the real database rather than a fake.
+pytestmark = pytest.mark.requires_database
+
+
+def _purge_test_entity(db, entity_id: str) -> None:
+    """Remove any rows a previous run of this test left behind.
+
+    Cleanup used to live at the end of the test body, so a failure anywhere
+    above it leaked an Entity into the developer's database and every later
+    run then died on a primary-key collision instead of on the real problem.
+    """
+    # Anything still pending in the session would be flushed *after* these
+    # statements and resurrect the rows we are deleting.
+    db.expunge_all()
+
+    prediction_ids = [
+        row[0] for row in
+        db.query(Prediction.prediction_id).filter(
+            Prediction.entity_id == entity_id
+        ).all()
+    ]
+
+    # Delete children before parents: the foreign keys are not ON DELETE CASCADE.
+    if prediction_ids:
+        db.query(TradingSimulation).filter(
+            TradingSimulation.prediction_id.in_(prediction_ids)
+        ).delete(synchronize_session=False)
+        db.query(PredictionOutcome).filter(
+            PredictionOutcome.prediction_id.in_(prediction_ids)
+        ).delete(synchronize_session=False)
+        db.query(Prediction).filter(
+            Prediction.prediction_id.in_(prediction_ids)
+        ).delete(synchronize_session=False)
+
+    db.query(Entity).filter(Entity.entity_id == entity_id).delete(
+        synchronize_session=False
+    )
+    db.commit()
 
 
 def test_outcome_fallback():
@@ -21,6 +63,8 @@ def test_outcome_fallback():
     print("\n=== Testing PredictionOutcome Fallback ===\n")
 
     with get_scoped_session() as db:
+        _purge_test_entity(db, "TEST_INVALID_TICKER_XYZ")
+
         # Create a test entity with invalid ticker (to force live data to fail)
         test_entity = Entity(
             entity_id="TEST_INVALID_TICKER_XYZ",
@@ -29,16 +73,21 @@ def test_outcome_fallback():
         )
         db.add(test_entity)
 
-        # Create a test prediction
+        # Create a test prediction. `timestamp` (when the prediction is
+        # about) is NOT NULL and distinct from `created_at` (when the row was
+        # written); omitting it made this fixture fail to insert at all.
         pred_id = uuid.uuid4()
+        predicted_at = datetime.now(UTC) - timedelta(days=7)
         test_pred = Prediction(
             prediction_id=pred_id,
             entity_id="TEST_INVALID_TICKER_XYZ",
             horizon="5d",
+            timestamp=predicted_at,
             expected_return={"mean": 0.0250},  # 2.5%
             direction_probabilities={"up": 0.75, "down": 0.15, "flat": 0.10},
             confidence=0.80,
-            created_at=datetime.utcnow() - timedelta(days=7)
+            model_version="test_fixture",
+            created_at=predicted_at
         )
         db.add(test_pred)
 
@@ -49,42 +98,30 @@ def test_outcome_fallback():
             actual_return=3.2,  # 3.2% actual return
             error=-0.7,  # underestimated by 0.7%
             direction_correct=True,
-            evaluation_timestamp=datetime.utcnow() - timedelta(days=2),
-            created_at=datetime.utcnow() - timedelta(days=2)
+            evaluation_timestamp=datetime.now(UTC) - timedelta(days=2),
+            created_at=datetime.now(UTC) - timedelta(days=2)
         )
         db.add(test_outcome)
         db.commit()
 
-        print("✅ Created test prediction and saved outcome in database")
+        try:
+            print("✅ Created test prediction and saved outcome in database")
 
-        # Now simulate - should use saved outcome since ticker is invalid
-        engine = TradingSimulationEngine()
-        simulation = engine.simulate_prediction(db, test_pred, test_entity)
+            # The realised return must come from the stored outcome, since the
+            # ticker is deliberately unresolvable.
+            _, realised = TradingSimulationEngine()._resolve_actual_return(
+                db, test_pred, test_entity
+            )
 
-        assert simulation is not None, "Simulation should be created"
+            assert realised is not None, \
+                "Should fall back to the stored PredictionOutcome"
+            assert abs(realised - 3.2) < 0.01, \
+                f"Should use saved outcome 3.2%, got {realised}%"
 
-        print("\nSimulation Results:")
-        print(f"  Entity: {test_entity.entity_name}")
-        print(f"  Expected Return: {simulation.expected_return_pct:+.2f}%")
-        print(f"  Actual Return: {simulation.actual_return_pct:+.2f}% (from PredictionOutcome)" if simulation.actual_return_pct else "  Actual Return: N/A")
-        print(f"  Divergence: {simulation.divergence_pct:+.2f}%" if simulation.divergence_pct is not None else "  Divergence: N/A")
-        print(f"  Decision: {simulation.decision.upper()}")
-        print(f"  Risk Score: {simulation.risk_score:.3f}")
-
-        # Verify fallback worked
-        if simulation.actual_return_pct is not None:
-            assert abs(simulation.actual_return_pct - 3.2) < 0.01, \
-                f"Should use saved outcome 3.2%, got {simulation.actual_return_pct}%"
             print("\n✅ SUCCESS: Simulator correctly used PredictionOutcome fallback!")
-        else:
-            print("\n⚠ WARNING: Actual return is None - fallback may not have triggered")
-
-        # Cleanup
-        db.delete(test_outcome)
-        db.delete(test_pred)
-        db.delete(test_entity)
-        db.commit()
-        print("\n✅ Test data cleaned up\n")
+        finally:
+            _purge_test_entity(db, "TEST_INVALID_TICKER_XYZ")
+            print("\n✅ Test data cleaned up\n")
 
 
 def test_missing_data_handling():
@@ -92,6 +129,8 @@ def test_missing_data_handling():
     print("\n=== Testing Missing Data Handling ===\n")
 
     with get_scoped_session() as db:
+        _purge_test_entity(db, "TEST_NOSUCHDATA_ABC")
+
         # Create entity with invalid ticker AND no saved outcome
         test_entity = Entity(
             entity_id="TEST_NOSUCHDATA_ABC",
@@ -102,49 +141,45 @@ def test_missing_data_handling():
 
         # Create prediction without outcome
         pred_id = uuid.uuid4()
+        predicted_at = datetime.now(UTC) - timedelta(hours=12)
         test_pred = Prediction(
             prediction_id=pred_id,
             entity_id="TEST_NOSUCHDATA_ABC",
             horizon="5d",
+            timestamp=predicted_at,
             expected_return={"mean": 0.0180},  # 1.8%
             direction_probabilities={"up": 0.65, "down": 0.25, "flat": 0.10},
             confidence=0.70,
-            created_at=datetime.utcnow() - timedelta(hours=12)
+            model_version="test_fixture",
+            created_at=predicted_at
         )
         db.add(test_pred)
         db.commit()
 
-        print("✅ Created test prediction WITHOUT saved outcome")
+        try:
+            print("✅ Created test prediction WITHOUT saved outcome")
 
-        # Simulate - should handle missing data gracefully
-        engine = TradingSimulationEngine()
-        simulation = engine.simulate_prediction(db, test_pred, test_entity)
+            engine = TradingSimulationEngine()
 
-        assert simulation is not None, "Simulation should be created"
+            # There is no realised return to be had: live data fails for this
+            # ticker and no outcome was stored.
+            _, realised = engine._resolve_actual_return(db, test_pred, test_entity)
+            assert realised is None, \
+                "Actual should be None when neither live data nor an outcome exists"
 
-        print("\nSimulation Results:")
-        print(f"  Entity: {test_entity.entity_name}")
-        print(f"  Expected Return: {simulation.expected_return_pct:+.2f}%")
-        print(f"  Actual Return: {simulation.actual_return_pct if simulation.actual_return_pct is not None else '⚠ N/A (missing data)'}")
-        print(f"  Divergence: {simulation.divergence_pct if simulation.divergence_pct is not None else '⚠ N/A (requires actual)'}")
-        print(f"  Decision: {simulation.decision.upper()}")
-        print(f"  Risk Score: {simulation.risk_score:.3f}")
+            # And without a market price there is no trade to model, so the
+            # engine declines rather than inventing one. Asserting a
+            # simulation *is* created encoded the older behaviour, where a row
+            # was written against a price of 0.0 and every cost and risk
+            # number computed from it was meaningless.
+            simulation = engine.simulate_prediction(db, test_pred, test_entity)
+            assert simulation is None, \
+                "No simulation should be created without a valid market price"
 
-        # Verify None handling
-        assert simulation.actual_return_pct is None, \
-            "Actual should be None when no data available"
-        assert simulation.divergence_pct is None, \
-            "Divergence should be None when actual unavailable"
-        assert simulation.risk_score is not None and simulation.risk_score >= 0, \
-            "Risk score should still be calculated despite missing data"
-
-        print("\n✅ SUCCESS: Simulator correctly handled missing data!")
-
-        # Cleanup
-        db.delete(test_pred)
-        db.delete(test_entity)
-        db.commit()
-        print("\n✅ Test data cleaned up\n")
+            print("\n✅ SUCCESS: Simulator correctly declined to simulate!")
+        finally:
+            _purge_test_entity(db, "TEST_NOSUCHDATA_ABC")
+            print("\n✅ Test data cleaned up\n")
 
 
 def test_date_range_simulation():
@@ -154,7 +189,7 @@ def test_date_range_simulation():
     with get_scoped_session() as db:
         # Find real predictions in the database
         old_predictions = db.query(Prediction).filter(
-            Prediction.created_at < datetime.utcnow() - timedelta(days=1)
+            Prediction.created_at < datetime.now(UTC) - timedelta(days=1)
         ).limit(3).all()
 
         if not old_predictions:
@@ -166,8 +201,8 @@ def test_date_range_simulation():
         # Test date range filtering
         engine = TradingSimulationEngine()
 
-        start_date = datetime.utcnow() - timedelta(days=7)
-        end_date = datetime.utcnow() - timedelta(days=1)
+        start_date = datetime.now(UTC) - timedelta(days=7)
+        end_date = datetime.now(UTC) - timedelta(days=1)
 
         print(f"\nFiltering predictions from {start_date.date()} to {end_date.date()}")
 

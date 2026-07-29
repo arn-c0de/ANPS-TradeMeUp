@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
+import pytest
 from sqlalchemy import desc
 
 from src.models.database import get_scoped_session
@@ -15,6 +16,9 @@ from src.models.entities import Entity
 from src.models.predictions import Prediction, PredictionOutcome
 from src.models.trading_simulation import TradingSimulation
 from src.simulations.trading_simulator import TradingSimulationEngine
+
+# These read the live prediction tables rather than a fixture set.
+pytestmark = pytest.mark.requires_database
 
 
 def test_with_latest_predictions():
