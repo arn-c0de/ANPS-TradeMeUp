@@ -3,26 +3,25 @@ You are a financial news analyst. Analyze the following news article and extract
 Article Title: {title}
 Article Content: {content}
 
-Please provide your analysis in JSON format with the following structure:
+Return a JSON object with exactly this shape. The angle brackets describe what
+each field must contain - replace them with values derived from THIS article.
+Do not copy any number from this description; every value must come from your
+own reading of the article above.
 
 {{
-  "summary_short": "One sentence summary of the article",
-  "summary_medium": "3-5 sentence summary covering main points",
+  "summary_short": "<one sentence summarising this article>",
+  "summary_medium": "<3-5 sentences covering the main points>",
   "key_facts": [
-    {{"fact": "Specific fact extracted", "confidence": 0.95}},
-    {{"fact": "Another key fact", "confidence": 0.87}}
+    {{"fact": "<a specific fact stated in the article>", "confidence": <how certain you are this fact is correctly extracted, 0.0-1.0>}}
   ],
   "sentiment": {{
-    "overall": 0.65,
-    "confidence": 0.82,
-    "aspects": {{
-      "earnings": 0.8,
-      "guidance": -0.3
-    }}
+    "overall": <market sentiment of this article, -1.0 to 1.0>,
+    "confidence": <how certain you are of that sentiment, 0.0-1.0>,
+    "aspects": {{"<aspect name>": <sentiment for that aspect, -1.0 to 1.0>}}
   }},
-  "event_type": "earnings",
-  "event_subtype": "beat_with_lower_guidance",
-  "confidence": 0.89
+  "event_type": "<one of the event types listed below>",
+  "event_subtype": "<short free-text refinement of the event type>",
+  "confidence": <overall confidence in this analysis, 0.0-1.0>
 }}
 
 Event Types:
@@ -37,6 +36,15 @@ Event Types:
 - guidance: Forward guidance changes
 - other: Other significant events
 
-Sentiment Scale: -1 (very negative) to +1 (very positive)
+Sentiment scale - judge the likely effect on the share price of the companies
+involved, not the tone of the writing:
+  -1.0  strongly negative (large loss, fraud, collapsed deal, guidance cut)
+  -0.5  clearly negative
+   0.0  genuinely neutral or mixed
+  +0.5  clearly positive
+  +1.0  strongly positive (major beat, successful acquisition, guidance raise)
+
+Use the full range. Bad news must produce a negative number. A neutral or
+procedural article must be near 0.0. Do not default to a mildly positive score.
 
 Respond ONLY with the JSON object, no additional text.
