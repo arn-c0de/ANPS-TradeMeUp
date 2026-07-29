@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from src.gui.components import create_metric_card
 from src.gui.utils.callbacks import safe_callback
+from src.gui.utils.time_format import format_time_ago, format_time_left
 from src.models.analysis import FactVerification, MarketRegime, SurpriseScore
 from src.models.data_quality import DataQualityScore
 from src.models.database import engine
@@ -729,15 +730,7 @@ def get_top_performers(engine, timeframe='24h', limit=10):
 
                         # Calculate time ago
                         if outcome.evaluation_timestamp:
-                            time_diff = now - outcome.evaluation_timestamp
-                            if time_diff.days > 0:
-                                time_ago_str = f"{time_diff.days}d ago"
-                            elif time_diff.seconds > 3600:
-                                time_ago_str = f"{time_diff.seconds // 3600}h ago"
-                            elif time_diff.seconds > 60:
-                                time_ago_str = f"{time_diff.seconds // 60}m ago"
-                            else:
-                                time_ago_str = "just now"
+                            time_ago_str = format_time_ago(now - outcome.evaluation_timestamp)
 
                 # Calculate time remaining
                 if sim.prediction:
@@ -745,14 +738,9 @@ def get_top_performers(engine, timeframe='24h', limit=10):
                     horizon = sim.horizon
                     if horizon in horizon_validity:
                         validity_end = pred_created + horizon_validity[horizon]
-                        time_left = validity_end - now
-
-                        if time_left.days > 0:
-                            time_left_str = f"{time_left.days}d left"
-                        elif time_left.seconds > 3600:
-                            time_left_str = f"{time_left.seconds // 3600}h left"
-                        else:
-                            time_left_str = f"{time_left.seconds // 60}m left"
+                        # An elapsed horizon produced a nonsensical positive
+                        # "N m left" before, because .seconds is never negative.
+                        time_left_str = format_time_left(validity_end - now)
                     else:
                         time_left_str = "N/A"
                 else:

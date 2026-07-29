@@ -1,10 +1,10 @@
 """Trading simulation engine that converts predictions into trade decisions."""
 import json
 import logging
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.models.analysis import MarketRegime
@@ -15,8 +15,18 @@ from src.models.trading_simulation import TradingSimulation
 from src.services.market_data import MarketDataProvider
 from src.services.prediction_performance_service import PredictionPerformanceService
 from src.simulations.exit_strategy import ExitStrategyCalculator
+from src.simulations.penny_stocks import (
+    DEFAULT_MIN_VALID_PRICE_USD,
+    DEFAULT_PENNY_THRESHOLD_USD,
+    DEFAULT_ULTRA_PENNY_THRESHOLD_USD,
+    is_penny_stock,
+    is_ultra_penny_stock,
+    min_valid_price,
+    penny_config,
+)
 from src.simulations.risk_calculations import RiskCalculator, RiskInputs
-from src.utils.json_helpers import clean_numpy_types, ensure_dict, to_python_type
+from src.utils.json_helpers import clean_numpy_types, to_python_type
+from src.utils.prediction_math import get_expected_return_pct, get_predicted_direction
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +104,19 @@ class TradingSimulationEngine:
                 "max_risk_score": 0.65,
                 "max_cost_ratio": 0.70
             },
-            # Minimum valid price (USD). Prices below this are treated as invalid for simulations
-            "min_valid_price_usd": 0.01
+            # Penny-stock handling. This block used to be missing here while a
+            # stray top-level "min_valid_price_usd" sat outside it - a key
+            # nothing reads, since every lookup goes through
+            # penny_stock_handling. Falling back to the shipped config's
+            # values keeps the fallback path behaving like the real one.
+            "penny_stock_handling": {
+                "enabled": True,
+                "price_threshold_usd": DEFAULT_PENNY_THRESHOLD_USD,
+                "ultra_penny_threshold_usd": DEFAULT_ULTRA_PENNY_THRESHOLD_USD,
+                "min_valid_price_usd": DEFAULT_MIN_VALID_PRICE_USD,
+                "cost_method": "per_share_only",
+                "max_cost_bps_cap": 1000,
+            },
         }
 
     def _update_thresholds_from_config(self):
@@ -107,68 +128,12 @@ class TradingSimulationEngine:
         self.MAX_COST_RATIO = thresholds.get("max_cost_ratio", self.MAX_COST_RATIO)
 
     def _get_expected_return_pct(self, prediction: Prediction) -> float:
-        """
-        Extract expected return as a percentage from prediction.
-
-        Handles two storage formats:
-        1. Decimal format (e.g., 0.02 for 2%) - values in range [-0.50, 0.50]
-        2. Percentage format (e.g., 2.0 for 2%) - values outside that range
-
-        The threshold of 0.50 (50%) is chosen because:
-        - Normal stock predictions rarely exceed 50% expected return
-        - Values like 0.02 (2%) are common in decimal format
-        - Values like 5.0 (5%) are common in percentage format
-
-        If expected_return contains an 'is_percentage' key, that is used instead
-        of the heuristic.
-
-        Args:
-            prediction: Prediction object with expected_return dict
-
-        Returns:
-            Expected return as percentage (e.g., 2.0 for 2%)
-        """
-        # Handle case where expected_return might be a JSON string (from SQLite migration)
-        expected_return = ensure_dict(prediction.expected_return, {})
-
-        mean_value = expected_return.get("mean", 0.0)
-        if mean_value is None:
-            return 0.0
-
-        mean_value = float(mean_value)
-
-        # Check for explicit format indicator
-        is_percentage = expected_return.get("is_percentage")
-        if is_percentage is True:
-            return mean_value
-        elif is_percentage is False:
-            return mean_value * 100.0
-
-        # Heuristic: Use threshold of 0.50 (50%) to distinguish formats
-        # Values in [-0.50, 0.50] are likely decimals, otherwise already percentages
-        # This handles edge cases like 1.5 (150% as decimal) correctly
-        if abs(mean_value) <= 0.50:
-            result = mean_value * 100.0
-        else:
-            # Value is already in percentage format OR represents extreme return
-            # Log a warning for large values to help identify data issues
-            if abs(mean_value) > 100:
-                logger.warning(
-                    f"Unusually large expected return value: {mean_value} for prediction "
-                    f"{prediction.prediction_id}. Treating as percentage."
-                )
-            result = mean_value
-
-        return float(result)
+        """Expected return as a percentage (2.0 means +2%)."""
+        return get_expected_return_pct(prediction)
 
     def _get_predicted_direction(self, prediction: Prediction) -> str:
-        # Handle case where probabilities might be a JSON string (from SQLite migration)
-        probabilities = ensure_dict(prediction.direction_probabilities, {})
-
-        if not probabilities:
-            return "flat"
-
-        return max(probabilities, key=probabilities.get)
+        """Most likely direction for this prediction."""
+        return get_predicted_direction(prediction)
 
     def _get_latest_regime(self, db: Session) -> MarketRegime | None:
         return db.query(MarketRegime).order_by(MarketRegime.created_at.desc()).first()
@@ -185,21 +150,11 @@ class TradingSimulationEngine:
 
     def _is_penny_stock(self, price: float) -> bool:
         """Check if a stock qualifies as a penny stock based on configuration."""
-        penny_config = self.config.get("penny_stock_handling", {})
-        if not penny_config.get("enabled", False):
-            return False
-        threshold = penny_config.get("price_threshold_usd", 1.0)
-        min_valid = penny_config.get("min_valid_price_usd", 0.00001)
-        return min_valid < price <= threshold
+        return is_penny_stock(self.config, price)
 
     def _is_ultra_penny_stock(self, price: float) -> bool:
         """Check if a stock qualifies as an ultra-penny stock (< $0.001)."""
-        penny_config = self.config.get("penny_stock_handling", {})
-        if not penny_config.get("enabled", False):
-            return False
-        ultra_threshold = penny_config.get("ultra_penny_threshold_usd", 0.001)
-        min_valid = penny_config.get("min_valid_price_usd", 0.00001)
-        return min_valid < price < ultra_threshold
+        return is_ultra_penny_stock(self.config, price)
 
     def _calculate_dynamic_shares(self, price: float, base_shares: int = None) -> int:
         """
@@ -221,11 +176,11 @@ class TradingSimulationEngine:
         if price <= 0:
             return base_shares
 
-        penny_config = self.config.get("penny_stock_handling", {})
+        penny_cfg = penny_config(self.config)
 
         # Ultra-penny stocks: scale up shares to achieve minimum position value
         if self._is_ultra_penny_stock(price):
-            targets = penny_config.get("position_value_targets", {}).get("ultra_penny", {})
+            targets = penny_cfg.get("position_value_targets", {}).get("ultra_penny", {})
             target_position_value = targets.get("min_position_value_usd", 10.0)
 
             # Calculate shares needed to reach target position value
@@ -241,7 +196,7 @@ class TradingSimulationEngine:
         # Regular penny stocks: use moderate increase
         elif self._is_penny_stock(price):
             # For prices $0.001-$1.00, use modest multiplier
-            multiplier = penny_config.get("penny_share_multiplier", 10)
+            multiplier = penny_cfg.get("penny_share_multiplier", 10)
             shares = base_shares * multiplier
 
             logger.info(f"Penny stock (${price:.4f}): using {shares:,} shares")
@@ -271,8 +226,8 @@ class TradingSimulationEngine:
         Returns:
             Tuple of (total_bps, breakdown_dict with 'cost_method' field)
         """
-        penny_config = self.config.get("penny_stock_handling", {})
-        methods_config = penny_config.get("methods", {})
+        penny_cfg = penny_config(self.config)
+        methods_config = penny_cfg.get("methods", {})
 
         position_value = price * shares
         if position_value <= 0:
@@ -379,7 +334,7 @@ class TradingSimulationEngine:
         # bounded its own total. per_share_only did not, so a $0.0001 share price
         # produced ~1,000,000 bps from the minimum commission alone. Apply the
         # ceiling to every method.
-        max_cost_bps = penny_config.get("max_cost_bps_cap")
+        max_cost_bps = penny_cfg.get("max_cost_bps_cap")
         if max_cost_bps is not None and total_bps > max_cost_bps:
             logger.warning(
                 "Penny stock cost %.1f bps exceeds max_cost_bps_cap %s - capping",
@@ -419,18 +374,19 @@ class TradingSimulationEngine:
         if price <= 0:
             return 0.0, {}
 
-        # FIRST: Check for extremely small prices that are too cheap even for penny stock handling
-        # (e.g., < $0.001) - these are considered invalid/unreliable
-        penny_config = self.config.get("penny_stock_handling", {})
-        min_valid_price = penny_config.get("min_valid_price_usd", 0.001)
-        if price < min_valid_price:
-            logger.warning(f"Price ${price:.6f} below min_valid_price_usd ${min_valid_price} - skipping cost estimation")
+        # FIRST: Check for extremely small prices that are too cheap even for
+        # penny stock handling - these are considered invalid/unreliable.
+        # Same threshold the penny-stock classifiers use, so a price can never
+        # be "too cheap to cost" and "a penny stock" at the same time.
+        floor_price = min_valid_price(self.config)
+        if price < floor_price:
+            logger.warning(f"Price ${price:.6f} below min_valid_price_usd ${floor_price} - skipping cost estimation")
             return 0.0, {}
 
         # SECOND: Check if this is a penny stock (price between min_valid and threshold)
         # and use alternative cost calculation
         if self._is_penny_stock(price):
-            cost_method = penny_config.get("cost_method", "per_share_only")
+            cost_method = penny_config(self.config).get("cost_method", "per_share_only")
             logger.info(f"Penny stock detected (price: ${price:.4f}) - using '{cost_method}' cost method")
             return self._estimate_penny_stock_costs(
                 price, shares, cost_method, predicted_direction, horizon
@@ -510,7 +466,6 @@ class TradingSimulationEngine:
             if participation_pct <= volume_threshold:
                 return impact_config.get("small_order", 6.0)
             elif participation_pct <= volume_threshold * 3:
-                # Scale linearly between small and medium
                 return impact_config.get("medium_order", 12.0)
             else:
                 # Large order - exponential penalty
@@ -696,6 +651,16 @@ class TradingSimulationEngine:
         existing.position_value_usd = 0.0
         existing.cost_breakdown = {}
         existing.risk_breakdown = {}
+        # Exit levels were derived from a price we just rejected. Leaving them
+        # in place showed a stale stop loss / take profit next to a cleared row.
+        existing.stop_loss_price = None
+        existing.stop_loss_pct = None
+        existing.stop_loss_type = None
+        existing.trailing_stop_price = None
+        existing.take_profit_price = None
+        existing.take_profit_pct = None
+        existing.risk_reward_ratio = None
+        existing.exit_strategy = {}
         existing.simulation_metadata = {"note": "skipped - invalid/too-small market price", "market_price": price}
         existing.created_at = datetime.now(UTC)
         return existing
@@ -705,13 +670,20 @@ class TradingSimulationEngine:
         db: Session,
         prediction: Prediction,
         entity: Entity,
+        existing: TradingSimulation | None = None,
     ) -> TradingSimulation | None:
+        """Create or update the simulation for one prediction.
+
+        Args:
+            existing: The stored simulation, when the caller has already looked
+                it up. Saves a redundant query in batch runs; looked up here
+                when omitted.
+        """
         if not prediction or not entity:
             return None
 
-        existing = db.query(TradingSimulation).filter(
-            TradingSimulation.prediction_id == prediction.prediction_id
-        ).first()
+        if existing is None:
+            existing = self._find_simulation(db, prediction.prediction_id)
 
         predicted_direction = self._get_predicted_direction(prediction)
         expected_return_pct = self._get_expected_return_pct(prediction)
@@ -934,16 +906,63 @@ class TradingSimulationEngine:
         db.add(simulation)
         return simulation
 
+    @staticmethod
+    def _empty_stats() -> dict:
+        return {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
+
+    def _simulate_all(self, db: Session, predictions: list[Prediction]) -> dict:
+        """Simulate every prediction in ``predictions``, tallying the outcome.
+
+        One prediction failing never aborts the batch; it is counted as an
+        error and processing continues.
+        """
+        stats = self._empty_stats()
+
+        for prediction in predictions:
+            try:
+                entity = db.query(Entity).filter(
+                    Entity.entity_id == prediction.entity_id
+                ).first()
+                if not entity:
+                    logger.debug(
+                        "No entity %s for prediction %s",
+                        prediction.entity_id,
+                        prediction.prediction_id,
+                    )
+                    stats["skipped"] += 1
+                    continue
+
+                # Looked up once and handed down, so simulate_prediction does
+                # not repeat the same query.
+                existing = self._find_simulation(db, prediction.prediction_id)
+
+                simulation = self.simulate_prediction(db, prediction, entity, existing=existing)
+                if not simulation:
+                    logger.debug("Simulation skipped for prediction %s", prediction.prediction_id)
+                    stats["skipped"] += 1
+                    continue
+
+                stats["processed"] += 1
+                stats["updated" if existing else "created"] += 1
+            except Exception as e:
+                logger.error(
+                    f"Error simulating prediction {prediction.prediction_id}: {e}",
+                    exc_info=True,
+                )
+                stats["errors"] += 1
+
+        return stats
+
+    @staticmethod
+    def _find_simulation(db: Session, prediction_id) -> TradingSimulation | None:
+        """Return the stored simulation for a prediction, if any."""
+        return db.query(TradingSimulation).filter(
+            TradingSimulation.prediction_id == prediction_id
+        ).first()
+
     def process_batch(self, limit: int = 50, lookback_days: int = 7) -> dict:
         """Simulate trades for recent predictions."""
         cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
-        stats = {
-            "processed": 0,
-            "created": 0,
-            "updated": 0,
-            "skipped": 0,
-            "errors": 0,
-        }
 
         with get_scoped_session() as db:
             predictions = db.query(Prediction).filter(
@@ -951,50 +970,25 @@ class TradingSimulationEngine:
             ).order_by(Prediction.created_at.desc()).limit(limit).all()
 
             if not predictions:
-                return stats
+                return self._empty_stats()
 
-            for prediction in predictions:
-                try:
-                    entity = db.query(Entity).filter(
-                        Entity.entity_id == prediction.entity_id
-                    ).first()
-                    if not entity:
-                        stats["skipped"] += 1
-                        continue
-
-                    existing = db.query(TradingSimulation).filter(
-                        TradingSimulation.prediction_id == prediction.prediction_id
-                    ).first()
-
-                    simulation = self.simulate_prediction(db, prediction, entity)
-                    if not simulation:
-                        stats["skipped"] += 1
-                        continue
-
-                    stats["processed"] += 1
-                    if existing:
-                        stats["updated"] += 1
-                    else:
-                        stats["created"] += 1
-                except Exception as e:
-                    logger.error(f"Error simulating prediction {prediction.prediction_id}: {e}")
-                    stats["errors"] += 1
-
-        return stats
+            return self._simulate_all(db, predictions)
 
     def get_statistics(self) -> dict:
         """Get simulation statistics."""
         with get_scoped_session() as db:
-            total = db.query(TradingSimulation).count()
-            buys = db.query(TradingSimulation).filter(TradingSimulation.decision == "buy").count()
-            sells = db.query(TradingSimulation).filter(TradingSimulation.decision == "sell").count()
-            holds = db.query(TradingSimulation).filter(TradingSimulation.decision == "hold").count()
+            # One grouped scan instead of four full-table COUNTs.
+            counts = dict(
+                db.query(TradingSimulation.decision, func.count())
+                .group_by(TradingSimulation.decision)
+                .all()
+            )
 
             return {
-                "total_simulations": total,
-                "buys": buys,
-                "sells": sells,
-                "holds": holds,
+                "total_simulations": sum(counts.values()),
+                "buys": counts.get("buy", 0),
+                "sells": counts.get("sell", 0),
+                "holds": counts.get("hold", 0),
             }
 
     def delete_simulation(self, simulation_id: str) -> bool:
@@ -1058,14 +1052,6 @@ class TradingSimulationEngine:
         limit: int = 100,
     ) -> dict:
         """Create simulations from specific predictions or filters."""
-        stats = {
-            "processed": 0,
-            "created": 0,
-            "updated": 0,
-            "skipped": 0,
-            "errors": 0,
-        }
-
         with get_scoped_session() as db:
             query = db.query(Prediction)
 
@@ -1092,39 +1078,7 @@ class TradingSimulationEngine:
 
             if not predictions:
                 logger.warning("No predictions found matching the filters")
-                return stats
+                return self._empty_stats()
 
-            for prediction in predictions:
-                try:
-                    entity = db.query(Entity).filter(
-                        Entity.entity_id == prediction.entity_id
-                    ).first()
-                    if not entity:
-                        logger.warning(f"Entity not found for prediction {prediction.prediction_id}, entity_id: {prediction.entity_id}")
-                        stats["skipped"] += 1
-                        continue
-
-                    existing = db.query(TradingSimulation).filter(
-                        TradingSimulation.prediction_id == prediction.prediction_id
-                    ).first()
-
-                    simulation = self.simulate_prediction(db, prediction, entity)
-                    if not simulation:
-                        logger.debug(f"Simulation skipped for prediction {prediction.prediction_id}")
-                        stats["skipped"] += 1
-                        continue
-
-                    stats["processed"] += 1
-                    if existing:
-                        stats["updated"] += 1
-                        logger.debug(f"Updated simulation for prediction {prediction.prediction_id}")
-                    else:
-                        stats["created"] += 1
-                        logger.debug(f"Created simulation for prediction {prediction.prediction_id}")
-                except Exception as e:
-                    logger.error(f"Error simulating prediction {prediction.prediction_id}: {e}", exc_info=True)
-                    stats["errors"] += 1
-
-            db.commit()
-
-        return stats
+            # get_scoped_session() commits on clean exit, so no commit here.
+            return self._simulate_all(db, predictions)

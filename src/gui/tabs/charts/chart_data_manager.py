@@ -13,7 +13,7 @@ from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
-from src.services.market_data import MarketDataProvider
+from src.services.market_data import market_data
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,8 @@ class ChartDataManager:
 
     def __init__(self):
         """Initialize ChartDataManager with market data provider."""
-        self.market_data = MarketDataProvider()
+        # Shared provider: a private instance would bypass the global rate limit.
+        self.market_data = market_data
         self._cache: dict[str, pd.DataFrame] = {}
         self._cache_metadata: dict[str, dict] = {}
         self._lock = threading.Lock()

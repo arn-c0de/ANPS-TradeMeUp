@@ -1,9 +1,10 @@
 """Exit strategy calculations for stop loss and take profit levels."""
 import logging
-from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, Optional, Tuple
+from datetime import UTC, datetime
 
-import numpy as np
+import pandas as pd
+
+from src.simulations.penny_stocks import is_penny_stock, is_ultra_penny_stock
 
 logger = logging.getLogger(__name__)
 
@@ -439,13 +440,17 @@ class ExitStrategyCalculator:
         self,
         entry_price: float,
         direction: str,
-        stop_loss_pct: float,
+        stop_loss_pct: float | None,
     ) -> float | None:
         """
-        Calculate initial trailing stop price.
-        
-        The trailing stop activates after reaching profit threshold and
-        trails the price by a specified distance.
+        Calculate the initial trailing stop price.
+
+        The trailing stop only starts trailing once the position reaches
+        ``activation_profit_pct``; until then the hard stop loss governs. The
+        initial level is therefore anchored at the activation price minus the
+        trail distance, never tighter than the stop loss itself - a trailing
+        stop placed inside the stop loss would always trigger first and make
+        the configured stop loss unreachable.
         """
         trailing_config = self.sl_tp_config.get("trailing_stop", {})
 
@@ -453,36 +458,32 @@ class ExitStrategyCalculator:
             return None
 
         trail_distance_pct = trailing_config.get("trail_distance_pct", 1.5)
-        trail_distance = entry_price * (trail_distance_pct / 100)
+        activation_profit_pct = trailing_config.get("activation_profit_pct", 0.0)
 
-        # Initial trailing stop is same as regular stop loss
-        # It will adjust dynamically as price moves favorably
-        if direction == "up":
-            trailing_stop = entry_price - trail_distance
-        elif direction == "down":
-            trailing_stop = entry_price + trail_distance
-        else:
-            trailing_stop = entry_price - trail_distance
+        # Distance from entry at which the trail first sits, expressed as a
+        # signed percentage move against the position.
+        offset_pct = trail_distance_pct - activation_profit_pct
+
+        # Never place the trail beyond the hard stop: that would widen risk.
+        if stop_loss_pct is not None:
+            offset_pct = min(offset_pct, stop_loss_pct)
+
+        offset = entry_price * (offset_pct / 100)
+
+        if direction == "down":
+            trailing_stop = entry_price + offset
+        else:  # up or flat - both are modelled as long positions
+            trailing_stop = entry_price - offset
 
         return max(trailing_stop, entry_price * 0.01)
 
     def _is_penny_stock(self, price: float) -> bool:
         """Check if stock is a penny stock (< $1.00)."""
-        penny_config = self.config.get("penny_stock_handling", {})
-        if not penny_config.get("enabled", False):
-            return False
-        threshold = penny_config.get("price_threshold_usd", 1.0)
-        min_valid = penny_config.get("min_valid_price_usd", 0.00001)
-        return min_valid < price <= threshold
+        return is_penny_stock(self.config, price)
 
     def _is_ultra_penny_stock(self, price: float) -> bool:
         """Check if stock is ultra-penny (< $0.001)."""
-        penny_config = self.config.get("penny_stock_handling", {})
-        if not penny_config.get("enabled", False):
-            return False
-        ultra_threshold = penny_config.get("ultra_penny_threshold_usd", 0.001)
-        min_valid = penny_config.get("min_valid_price_usd", 0.00001)
-        return min_valid < price < ultra_threshold
+        return is_ultra_penny_stock(self.config, price)
 
     def _get_empty_exit_strategy(self) -> dict:
         """Return empty exit strategy when calculation is not possible."""
@@ -496,11 +497,3 @@ class ExitStrategyCalculator:
             "method": "none",
             "exit_strategy_metadata": {}
         }
-
-
-# Import pandas here to avoid circular imports
-try:
-    import pandas as pd
-except ImportError:
-    logger.warning("pandas not available, ATR calculation will be limited")
-    pd = None

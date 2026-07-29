@@ -6,7 +6,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Application Version
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 
 
 class Settings(BaseSettings):

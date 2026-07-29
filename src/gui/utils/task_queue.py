@@ -3,16 +3,16 @@ Task Queue Manager for GUI Actions
 Handles asynchronous task execution with queuing to prevent server overload
 """
 
+import itertools
 import logging
 import queue
 import threading
-import time
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +41,13 @@ class Task:
     result: Any = None
     error: Exception | None = None
     priority: int = 0  # Higher = more important
+    sequence: int = 0  # Tie-breaker so equal priorities stay FIFO
 
     def __lt__(self, other):
-        """For priority queue sorting"""
-        return self.priority > other.priority  # Higher priority first
+        """Ordering for the priority queue: highest priority first, then FIFO."""
+        if self.priority != other.priority:
+            return self.priority > other.priority
+        return self.sequence < other.sequence
 
 
 class TaskQueueManager:
@@ -64,8 +67,21 @@ class TaskQueueManager:
         self.max_concurrent_tasks = max_concurrent_tasks
         self.max_queue_size = max_queue_size
 
-        # Queue for pending tasks (FIFO per task type)
-        self.queues: dict[str, queue.Queue] = defaultdict(lambda: queue.Queue(maxsize=max_queue_size))
+        # Caps tasks in flight across all task types. Without it the limit was
+        # documented but never applied: one worker per task type meant N task
+        # types ran N tasks at once, which is the overload this class exists
+        # to prevent.
+        self._execution_slots = threading.Semaphore(max_concurrent_tasks)
+
+        # One queue per task type. PriorityQueue, not Queue: Task declares an
+        # ordering by priority, and a plain FIFO silently ignored it.
+        self.queues: dict[str, queue.PriorityQueue] = defaultdict(
+            lambda: queue.PriorityQueue(maxsize=max_queue_size)
+        )
+        self.queues_lock = threading.Lock()
+
+        # Monotonic counter making equal-priority tasks run in submission order
+        self._sequence = itertools.count()
 
         # Currently running tasks
         self.running_tasks: dict[str, Task] = {}
@@ -105,8 +121,13 @@ class TaskQueueManager:
         """Stop the task queue manager and wait for running tasks"""
         self._running = False
 
-        # Cancel all pending tasks
-        for task_type, q in self.queues.items():
+        # Cancel all pending tasks. Snapshot the queues first: add_task may
+        # insert a new task type concurrently, and iterating the live dict
+        # would raise "dictionary changed size during iteration".
+        with self.queues_lock:
+            queues = list(self.queues.values())
+
+        for q in queues:
             while not q.empty():
                 try:
                     task = q.get_nowait()
@@ -153,11 +174,13 @@ class TaskQueueManager:
             function=function,
             args=args,
             kwargs=kwargs,
-            priority=priority
+            priority=priority,
+            sequence=next(self._sequence),
         )
 
         # Add to appropriate queue
-        q = self.queues[task_type]
+        with self.queues_lock:
+            q = self.queues[task_type]
 
         # Try to add task to queue
         try:
@@ -192,7 +215,8 @@ class TaskQueueManager:
             task_type: Type of tasks this worker handles
         """
         logger.info(f"Worker started for task type: {task_type}")
-        q = self.queues[task_type]
+        with self.queues_lock:
+            q = self.queues[task_type]
 
         while self._running:
             try:
@@ -218,6 +242,8 @@ class TaskQueueManager:
         Args:
             task: Task to execute
         """
+        self._execution_slots.acquire()
+
         task.status = TaskStatus.RUNNING
         task.started_at = datetime.now()
 
@@ -253,6 +279,8 @@ class TaskQueueManager:
             logger.error(f"Task {task.task_id} failed: {e}", exc_info=True)
 
         finally:
+            self._execution_slots.release()
+
             # Move to history
             with self.running_tasks_lock:
                 self.running_tasks.pop(task.task_id, None)
@@ -307,7 +335,8 @@ class TaskQueueManager:
 
     def get_queue_stats(self) -> dict[str, Any]:
         """Get current queue statistics"""
-        queue_sizes = {task_type: q.qsize() for task_type, q in self.queues.items()}
+        with self.queues_lock:
+            queue_sizes = {task_type: q.qsize() for task_type, q in self.queues.items()}
 
         with self.stats_lock:
             stats_copy = self.stats.copy()
@@ -324,7 +353,10 @@ class TaskQueueManager:
 
     def cancel_task(self, task_id: str) -> bool:
         """Cancel a pending task (can't cancel running tasks)"""
-        for task_type, q in self.queues.items():
+        with self.queues_lock:
+            queues = list(self.queues.values())
+
+        for q in queues:
             # Search through queue
             temp_tasks = []
             found = False

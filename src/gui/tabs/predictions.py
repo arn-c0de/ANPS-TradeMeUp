@@ -20,6 +20,7 @@ from src.gui.helpers.prediction_details_popup import (
 )
 from src.gui.utils.callbacks import safe_callback
 from src.gui.utils.task_queue import add_gui_task, get_task_queue
+from src.gui.utils.time_format import format_time_ago
 from src.models.analysis import FactVerification, ImpactScore, SurpriseScore
 from src.models.database import engine as _engine
 from src.models.entities import Entity
@@ -340,13 +341,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
 
                     # Format last update time
                     if outcome.evaluation_timestamp:
-                        time_ago = datetime.now(UTC) - outcome.evaluation_timestamp
-                        if time_ago.days > 0:
-                            time_str = f"{time_ago.days}d ago"
-                        elif time_ago.seconds > 3600:
-                            time_str = f"{time_ago.seconds // 3600}h ago"
-                        else:
-                            time_str = f"{time_ago.seconds // 60}m ago"
+                        time_str = format_time_ago(datetime.now(UTC) - outcome.evaluation_timestamp)
                         update_info = html.Small(f"({time_str})", className="text-muted", style={"fontSize": "0.7rem"})
                     else:
                         update_info = ""

@@ -1,7 +1,7 @@
 """LLM Service - Unified interface for Ollama, OpenAI, and Anthropic."""
 import json
 import logging
-from typing import Dict, List, Optional
+from threading import Lock
 from urllib.parse import urlparse
 
 import requests
@@ -17,6 +17,37 @@ OLLAMA_GENERATE_TIMEOUT = 300    # seconds, local generation can be slow
 
 logger = logging.getLogger(__name__)
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+LOCAL_EMBEDDING_MODEL = "all-mpnet-base-v2"
+LOCAL_EMBEDDING_DEVICE = "cpu"  # CPU only, to avoid GPU memory overflow
+
+_local_embedding_model = None
+_local_embedding_lock = Lock()
+
+
+def _get_local_embedding_model():
+    """Load the local sentence-transformer once and reuse it.
+
+    Constructing SentenceTransformer reads a few hundred MB from disk, so
+    building it per call turned every embedding into a model load.
+    """
+    global _local_embedding_model
+
+    if _local_embedding_model is None:
+        with _local_embedding_lock:
+            if _local_embedding_model is None:
+                from sentence_transformers import SentenceTransformer
+
+                logger.info(
+                    "Loading SentenceTransformer %s on %s",
+                    LOCAL_EMBEDDING_MODEL,
+                    LOCAL_EMBEDDING_DEVICE,
+                )
+                _local_embedding_model = SentenceTransformer(
+                    LOCAL_EMBEDDING_MODEL
+                ).to(LOCAL_EMBEDDING_DEVICE)
+
+    return _local_embedding_model
 
 
 def normalize_openai_base_url(base_url: str | None) -> str:
@@ -188,6 +219,8 @@ class LLMService:
                 return self._generate_openai(prompt, system_prompt, temp, tokens)
             elif self.provider == "anthropic":
                 return self._generate_anthropic(prompt, system_prompt, temp, tokens)
+            # Falling through returned None, which callers then tried to parse.
+            raise ValueError(f"Unknown LLM provider: {self.provider}")
         except Exception as e:
             logger.error(f"Error generating text with {self.provider}: {e}")
             raise
@@ -360,16 +393,8 @@ class LLMService:
 
         # Fallback: use sentence-transformers on CPU
         try:
-            import torch
-            from sentence_transformers import SentenceTransformer
-
-            # Force CPU to avoid GPU memory overflow
-            device = "cpu"
-            logger.info(f"Loading SentenceTransformer on {device} device")
-
-            model = SentenceTransformer('all-mpnet-base-v2')
-            model = model.to(device)
-            embedding = model.encode(text, convert_to_numpy=True, device=device)
+            model = _get_local_embedding_model()
+            embedding = model.encode(text, convert_to_numpy=True, device=LOCAL_EMBEDDING_DEVICE)
             return embedding.tolist()
         except ImportError:
             logger.error("sentence-transformers not installed. Run: pip install sentence-transformers")

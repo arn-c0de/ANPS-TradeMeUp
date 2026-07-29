@@ -4,8 +4,7 @@ Tracks and validates predictions against actual market data
 """
 import logging
 import warnings
-from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -23,7 +22,7 @@ import uuid
 
 from src.models.entities import Entity
 from src.models.predictions import Prediction, PredictionOutcome
-from src.utils.json_helpers import ensure_dict
+from src.utils.prediction_math import get_expected_return_pct, get_predicted_direction
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +77,11 @@ class PredictionPerformanceService:
         Returns:
             Dict with performance metrics or None
         """
+        # Bound before the try block: the except handler logs it, and an
+        # AttributeError on `entity` would otherwise raise NameError there
+        # and hide the original failure.
+        ticker = getattr(entity, "entity_id", None)
         try:
-            # Get ticker/symbol from entity
-            ticker = entity.entity_id
             if not ticker:
                 logger.debug("No ticker found for entity")
                 return None
@@ -131,26 +132,38 @@ class PredictionPerformanceService:
 
             logger.debug(f"Got {len(hist_data)} historical data points for {ticker}")
 
-            # Find price at or near prediction time
-            prediction_date = prediction.created_at.replace(tzinfo=None)
+            # Find price at or near prediction time. Both sides are compared as
+            # naive UTC: converting first (rather than dropping tzinfo) keeps a
+            # prediction made late in the day from matching the wrong session.
+            prediction_date = created_at.astimezone(UTC).replace(tzinfo=None)
+
+            # Work on a local index instead of assigning to hist_data.index:
+            # the frame comes from a shared cache, and localizing it in place
+            # made every later call fail on an already-naive index.
+            hist_index = hist_data.index
+            if getattr(hist_index, "tz", None) is not None:
+                hist_index = hist_index.tz_convert("UTC").tz_localize(None)
 
             # Get closest available date (market might be closed on prediction date)
-            hist_data.index = hist_data.index.tz_localize(None)  # Remove timezone
-            closest_idx = hist_data.index.get_indexer([prediction_date], method='nearest')[0]
+            closest_idx = hist_index.get_indexer([prediction_date], method='nearest')[0]
 
             if closest_idx < 0 or closest_idx >= len(hist_data):
                 logger.warning(f"❌ Could not find historical price near prediction date {prediction_date} for {ticker} - Insufficient historical data")
                 return None
 
             prediction_price = hist_data.iloc[closest_idx]['Close']
-            prediction_actual_date = hist_data.index[closest_idx]
+            prediction_actual_date = hist_index[closest_idx]
+
+            if not prediction_price or prediction_price <= 0:
+                logger.warning(f"❌ Non-positive reference price for {ticker}: {prediction_price}")
+                return None
 
             # Calculate returns
             total_return = ((current_price - prediction_price) / prediction_price) * 100
 
             # Get 24h performance
-            if len(hist_data) >= 2:
-                yesterday_price = hist_data.iloc[-2]['Close']
+            yesterday_price = hist_data.iloc[-2]['Close'] if len(hist_data) >= 2 else None
+            if yesterday_price and yesterday_price > 0:
                 return_24h = ((current_price - yesterday_price) / yesterday_price) * 100
             else:
                 return_24h = 0.0
@@ -169,6 +182,8 @@ class PredictionPerformanceService:
             else:  # flat
                 strategy_result = "⚪ FLAT predicted" if abs(total_return) < 1 else "❌ FLAT wrong"
 
+            since_prediction = hist_data.iloc[closest_idx:]
+
             return {
                 'ticker': ticker,
                 'current_price': current_price,
@@ -176,6 +191,7 @@ class PredictionPerformanceService:
                 'prediction_date': prediction_actual_date,
                 'total_return_pct': total_return,
                 'return_24h_pct': return_24h,
+                'expected_return_pct': get_expected_return_pct(prediction),
                 'predicted_direction': predicted_direction,
                 'actual_direction': actual_direction,
                 'is_correct': is_correct,
@@ -183,9 +199,9 @@ class PredictionPerformanceService:
                 'days_since_prediction': days_since_prediction,
                 'timestamp': datetime.now(UTC),
                 # Additional data
-                'high_since_prediction': hist_data.iloc[closest_idx:]['High'].max() if len(hist_data) > closest_idx else current_price,
-                'low_since_prediction': hist_data.iloc[closest_idx:]['Low'].min() if len(hist_data) > closest_idx else current_price,
-                'volatility': hist_data.iloc[closest_idx:]['Close'].pct_change().std() * 100 if len(hist_data) > closest_idx else 0,
+                'high_since_prediction': since_prediction['High'].max(),
+                'low_since_prediction': since_prediction['Low'].min(),
+                'volatility': since_prediction['Close'].pct_change().std() * 100,
             }
 
         except Exception as e:
@@ -195,11 +211,7 @@ class PredictionPerformanceService:
 
     def _get_predicted_direction(self, prediction: Prediction) -> str:
         """Get the predicted direction from prediction probabilities"""
-        probs = ensure_dict(prediction.direction_probabilities, {})
-        if not probs:
-            return 'unknown'
-
-        return max(probs, key=probs.get)
+        return get_predicted_direction(prediction, default='unknown')
 
     def _get_actual_direction(self, return_pct: float, threshold: float = 1.0) -> str:
         """
@@ -344,6 +356,17 @@ class PredictionPerformanceService:
             else:
                 actual_return_value = float(actual_return_value)
 
+            # Prediction error is |predicted - actual|. Storing |actual| instead
+            # reported a large error for every accurate prediction of a big move.
+            expected_return_value = _convert_to_python_type(
+                performance_data.get('expected_return_pct')
+            )
+            error_value = (
+                abs(float(expected_return_value) - actual_return_value)
+                if expected_return_value is not None
+                else abs(actual_return_value)
+            )
+
             logger.info(f"💾 Saving to DB: prediction_id={prediction_id}, actual_return={actual_return_value}, is_correct={is_correct_value}")
 
             # Check if outcome already exists
@@ -360,7 +383,7 @@ class PredictionPerformanceService:
                     .where(PredictionOutcome.prediction_id == prediction_id)
                     .values(
                         actual_return=actual_return_value,
-                        error=abs(actual_return_value),
+                        error=error_value,
                         direction_correct=is_correct_value,
                         within_confidence_interval=True,
                         sharpe_contribution=0.0,
@@ -375,7 +398,7 @@ class PredictionPerformanceService:
                     outcome_id=uuid.uuid4(),
                     prediction_id=prediction_id,
                     actual_return=actual_return_value,
-                    error=abs(actual_return_value),
+                    error=error_value,
                     direction_correct=is_correct_value,
                     within_confidence_interval=True,  # TODO: implement proper check
                     sharpe_contribution=0,  # TODO: calculate

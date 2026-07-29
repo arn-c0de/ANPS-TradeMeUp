@@ -4,8 +4,9 @@ Redis-based caching layer for expensive database queries
 """
 import json
 import logging
+import threading
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import redis
 
@@ -143,8 +144,35 @@ class DatabaseCache:
             return {'enabled': True, 'error': str(e)}
 
 
-# Global cache instance
-db_cache = DatabaseCache(enabled=True)
+_db_cache: DatabaseCache | None = None
+_db_cache_lock = threading.Lock()
+
+
+def get_db_cache() -> DatabaseCache:
+    """Return the shared cache, connecting to Redis on first use.
+
+    Deliberately lazy: connecting at import time stalled every process that
+    merely imports this module for up to socket_connect_timeout seconds when
+    Redis is unreachable, including test collection.
+    """
+    global _db_cache
+
+    if _db_cache is None:
+        with _db_cache_lock:
+            if _db_cache is None:
+                _db_cache = DatabaseCache(enabled=True)
+
+    return _db_cache
+
+
+class _LazyCacheProxy:
+    """Module-level ``db_cache`` name that resolves on first attribute access."""
+
+    def __getattr__(self, name):
+        return getattr(get_db_cache(), name)
+
+
+db_cache = _LazyCacheProxy()
 
 
 def cached_query(key_prefix: str, ttl: int = 60):

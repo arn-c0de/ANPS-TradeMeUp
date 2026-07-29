@@ -83,8 +83,12 @@ class AutoPredictionProcessor:
                 performance = self.performance_service.get_prediction_performance(pred, entity)
 
                 if performance:
-                    # Force current timestamp for batch updates
-                    performance['timestamp'] = datetime.now()
+                    # Force current timestamp for batch updates. Must be
+                    # timezone-aware: evaluation_timestamp is a tz-aware column
+                    # and the GUI subtracts it from datetime.now(UTC), which
+                    # raises on a naive value (and is off by the local offset
+                    # wherever it does not).
+                    performance['timestamp'] = datetime.now(UTC)
 
                     # Save to database
                     self.performance_service.save_prediction_performance(

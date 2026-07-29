@@ -14,13 +14,12 @@ from src.gui.tabs.charts.live_charts import (
     create_multi_line_chart,
     create_price_indicator_card,
 )
-from src.services.market_data import MarketDataProvider
+from src.services.market_data import market_data
 
 from .data import _calculate_stats, _fetch_chart_data
 from .utils import _build_chart_figure, _build_stats_card
 
 # Initialize market data provider
-market_data = MarketDataProvider()
 
 
 def get_stock_chart_components(

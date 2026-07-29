@@ -17,10 +17,9 @@ from src.gui.tabs.charts.live_charts import (
     create_multi_line_chart,
     create_price_indicator_card,
 )
-from src.gui.tabs.charts.market_data import MarketDataProvider
+from src.gui.tabs.charts.market_data import market_data
 
 # Initialize market data provider
-market_data = MarketDataProvider()
 
 
 def create_layout():

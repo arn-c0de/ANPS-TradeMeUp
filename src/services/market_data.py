@@ -19,27 +19,19 @@ import logging as yf_logging
 yf_logging.getLogger('yfinance').setLevel(yf_logging.ERROR)
 
 import logging
+import threading
 import time
-from datetime import datetime, timedelta
-from functools import lru_cache
-from typing import Dict, List, Optional
+from datetime import datetime
 
 import pandas as pd
 import yfinance as yf
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
-
-# Retry decorator for network failures
-def retry_on_network_error(func):
-    """Decorator to retry on network-related errors"""
-    return retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
-        reraise=True
-    )(func)
+# Historical bars change at most once per trading day, but an unbounded cache
+# would pin a stale snapshot for the whole process lifetime.
+HISTORICAL_CACHE_TTL = 300  # seconds
+HISTORICAL_CACHE_MAX_ENTRIES = 32
 
 
 class MarketDataProvider:
@@ -47,10 +39,15 @@ class MarketDataProvider:
 
     def __init__(self):
         self.cache = {}
-        self.cache_timeout = 60  # seconds
-        self.cache_max_age = 3600  # 1 hour max for fallback
+        self.cache_timeout = 60  # seconds a live quote counts as fresh
+        self.cache_max_age = 3600  # 1 hour max for fallback when a fetch fails
 
-        # Rate limiting to avoid yfinance "Too Many Requests" errors
+        # Historical data cache: (symbol, period, interval) -> (fetched_at, DataFrame)
+        self._historical_cache: dict[tuple[str, str, str], tuple[float, pd.DataFrame]] = {}
+
+        # Rate limiting to avoid yfinance "Too Many Requests" errors.
+        # Callbacks run on Dash worker threads, so the counters need a lock.
+        self._rate_limit_lock = threading.Lock()
         self._last_request_time = {}
         self._min_request_interval = 0.1  # 100ms between requests per ticker
         self._global_last_request = time.time()
@@ -85,43 +82,65 @@ class MarketDataProvider:
 
     def _rate_limit(self, symbol: str = None):
         """Apply rate limiting to avoid yfinance throttling
-        
+
         Args:
             symbol: Optional ticker symbol for per-ticker rate limiting
         """
-        current_time = time.time()
+        with self._rate_limit_lock:
+            # Global rate limit (all requests)
+            wait = self._global_min_interval - (time.time() - self._global_last_request)
+            if wait > 0:
+                time.sleep(wait)
+            self._global_last_request = time.time()
 
-        # Global rate limit (all requests)
-        time_since_last_global = current_time - self._global_last_request
-        if time_since_last_global < self._global_min_interval:
-            time.sleep(self._global_min_interval - time_since_last_global)
-        self._global_last_request = time.time()
+            # Per-ticker rate limit (if symbol provided).
+            # Re-read the clock here: the global sleep above already consumed
+            # part of the per-ticker interval.
+            if symbol:
+                last_seen = self._last_request_time.get(symbol)
+                if last_seen is not None:
+                    wait = self._min_request_interval - (time.time() - last_seen)
+                    if wait > 0:
+                        time.sleep(wait)
+                self._last_request_time[symbol] = time.time()
 
-        # Per-ticker rate limit (if symbol provided)
-        if symbol:
-            if symbol in self._last_request_time:
-                time_since_last = current_time - self._last_request_time[symbol]
-                if time_since_last < self._min_request_interval:
-                    time.sleep(self._min_request_interval - time_since_last)
-            self._last_request_time[symbol] = time.time()
-
-    def _get_cached_data(self, symbol: str) -> dict | None:
+    def _get_cached_data(self, symbol: str, max_age: float | None = None) -> dict | None:
         """
-        Get cached data if available and not too old
-        
+        Get cached quote if available and not older than ``max_age``.
+
         Args:
             symbol: Stock ticker
-            
+            max_age: Maximum acceptable age in seconds. Defaults to
+                ``cache_max_age``, the stale-fallback window used when a live
+                fetch fails.
+
         Returns:
             Cached data dict or None
         """
-        if symbol in self.cache:
-            cached_data = self.cache[symbol]
-            age = (datetime.now() - cached_data.get('timestamp', datetime.min)).seconds
-            if age < self.cache_max_age:
-                logger.info(f"Returning cached data for {symbol} (age: {age}s)")
-                return cached_data
+        cached_data = self.cache.get(symbol)
+        if not cached_data:
+            return None
+
+        cached_at = cached_data.get('timestamp')
+        if cached_at is None:
+            return None
+
+        # total_seconds(), not .seconds: timedelta.seconds drops whole days,
+        # so a 25-hour-old quote would otherwise report an age of 1 hour.
+        age = (datetime.now() - cached_at).total_seconds()
+        limit = self.cache_max_age if max_age is None else max_age
+        if age < limit:
+            logger.debug(f"Returning cached data for {symbol} (age: {age:.0f}s)")
+            return cached_data
         return None
+
+    @staticmethod
+    def _coerce_price(value) -> float:
+        """yfinance returns None for fields it has no value for; treat those as 0."""
+        try:
+            return float(value) if value is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
 
     def get_live_price(self, symbol: str) -> dict | None:
         """
@@ -137,8 +156,9 @@ class MarketDataProvider:
         if not symbol or len(symbol) > 10 or symbol.startswith('$'):
             return None
 
-        # Check cache first to avoid unnecessary API calls
-        cached = self._get_cached_data(symbol)
+        # Serve from cache only while the quote is still fresh. Older entries
+        # stay around as a fallback for when the fetch below fails.
+        cached = self._get_cached_data(symbol, max_age=self.cache_timeout)
         if cached:
             return cached
 
@@ -153,18 +173,24 @@ class MarketDataProvider:
             if not info or not isinstance(info, dict):
                 return self._get_cached_data(symbol)
 
+            # A present-but-None field defeats dict.get()'s default, so every
+            # numeric field goes through _coerce_price. Callers compare these
+            # against thresholds and would raise on None.
             data = {
                 'symbol': symbol,
-                'price': info.get('currentPrice', info.get('regularMarketPrice', 0)),
-                'change': info.get('regularMarketChange', 0),
-                'change_percent': info.get('regularMarketChangePercent', 0),
-                'volume': info.get('volume', 0),
-                'market_cap': info.get('marketCap', 0),
-                'high': info.get('dayHigh', 0),
-                'low': info.get('dayLow', 0),
-                'open': info.get('open', 0),
-                'previous_close': info.get('previousClose', 0),
-                'name': info.get('longName', symbol),
+                'price': self._coerce_price(
+                    info.get('currentPrice') if info.get('currentPrice') is not None
+                    else info.get('regularMarketPrice')
+                ),
+                'change': self._coerce_price(info.get('regularMarketChange')),
+                'change_percent': self._coerce_price(info.get('regularMarketChangePercent')),
+                'volume': self._coerce_price(info.get('volume')),
+                'market_cap': self._coerce_price(info.get('marketCap')),
+                'high': self._coerce_price(info.get('dayHigh')),
+                'low': self._coerce_price(info.get('dayLow')),
+                'open': self._coerce_price(info.get('open')),
+                'previous_close': self._coerce_price(info.get('previousClose')),
+                'name': info.get('longName') or symbol,
                 'timestamp': datetime.now()
             }
             # Cache successful data
@@ -180,7 +206,26 @@ class MarketDataProvider:
                 logger.debug(f"Error fetching price for {symbol}: {e}")
             return self._get_cached_data(symbol)
 
-    @lru_cache(maxsize=32)
+    def _get_cached_history(self, key: tuple[str, str, str]) -> pd.DataFrame | None:
+        """Return a private copy of a cached history frame, or None if expired."""
+        entry = self._historical_cache.get(key)
+        if not entry:
+            return None
+        fetched_at, df = entry
+        if time.time() - fetched_at >= HISTORICAL_CACHE_TTL:
+            self._historical_cache.pop(key, None)
+            return None
+        # Hand out a copy: callers localize the index or add columns in place,
+        # and mutating the cached frame would corrupt every later reader.
+        return df.copy()
+
+    def _store_history(self, key: tuple[str, str, str], df: pd.DataFrame) -> None:
+        """Cache a history frame, evicting the oldest entry when full."""
+        if len(self._historical_cache) >= HISTORICAL_CACHE_MAX_ENTRIES:
+            oldest = min(self._historical_cache, key=lambda k: self._historical_cache[k][0])
+            self._historical_cache.pop(oldest, None)
+        self._historical_cache[key] = (time.time(), df.copy())
+
     def get_historical_data(
         self,
         symbol: str,
@@ -189,18 +234,23 @@ class MarketDataProvider:
     ) -> pd.DataFrame | None:
         """
         Get historical OHLCV data
-        
+
         Args:
             symbol: Stock ticker
             period: Data period (1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max)
             interval: Data interval (1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo)
-            
+
         Returns:
             DataFrame with OHLCV data
         """
         # Skip obviously invalid tickers
         if not symbol or len(symbol) > 10 or symbol.startswith('$'):
             return None
+
+        key = (symbol, period, interval)
+        cached = self._get_cached_history(key)
+        if cached is not None:
+            return cached
 
         # Apply rate limiting before making API call
         self._rate_limit(symbol)
@@ -213,6 +263,7 @@ class MarketDataProvider:
             if df is None or df.empty:
                 return None
 
+            self._store_history(key, df)
             return df
         except Exception as e:
             # Check for rate limiting error
@@ -224,7 +275,6 @@ class MarketDataProvider:
                 logger.debug(f"Error fetching historical data for {symbol}: {e}")
             return None
 
-    @lru_cache(maxsize=32)
     def get_intraday_data(self, symbol: str, days: int = 1) -> pd.DataFrame | None:
         """
         Get intraday data with 1-minute intervals
@@ -236,9 +286,19 @@ class MarketDataProvider:
         Returns:
             DataFrame with intraday data
         """
+        key = (symbol, f"{days}d", "1m")
+        cached = self._get_cached_history(key)
+        if cached is not None:
+            return cached
+
+        self._rate_limit(symbol)
+
         try:
             ticker = yf.Ticker(symbol)
             df = ticker.history(period=f"{days}d", interval="1m")
+            if df is None or df.empty:
+                return None
+            self._store_history(key, df)
             return df
         except Exception as e:
             logger.error(f"Error fetching intraday data for {symbol}: {e}")
@@ -330,32 +390,8 @@ class MarketDataProvider:
 
         return index_data
 
-    def search_symbol(self, query: str) -> list[dict]:
-        """
-        Search for stock symbols
-        
-        Args:
-            query: Search query
-            
-        Returns:
-            List of matching symbols with info
-        """
-        try:
-            # This is a simple implementation
-            # For production, use a proper symbol search API
-            ticker = yf.Ticker(query.upper())
-            info = ticker.info
 
-            return [{
-                'symbol': query.upper(),
-                'name': info.get('longName', query),
-                'exchange': info.get('exchange', 'Unknown'),
-                'type': info.get('quoteType', 'EQUITY')
-            }]
-        except Exception as e:
-            logger.error(f"Error searching symbol {query}: {e}")
-            return []
-
-
-# Global instance
+# Shared instance. Import this rather than constructing MarketDataProvider():
+# separate instances keep separate rate-limit counters and caches, which is
+# what triggers yfinance's "Too Many Requests" in the first place.
 market_data = MarketDataProvider()

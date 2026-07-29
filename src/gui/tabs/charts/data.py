@@ -7,10 +7,9 @@ from typing import Dict, Optional
 import pandas as pd
 
 from src.gui.tabs.charts.chart_data_manager import get_chart_data_manager
-from src.services.market_data import MarketDataProvider
+from src.services.market_data import market_data
 
 # Initialize market data provider
-market_data = MarketDataProvider()
 
 
 def _fetch_chart_data(symbol: str, timeframe: str, loaded_data: pd.DataFrame | None = None) -> pd.DataFrame | None:

@@ -34,10 +34,9 @@ from src.gui.tabs.charts.overlay_utils import (
     save_overlays_to_db,
 )
 from src.models.database import engine as _engine
-from src.services.market_data import MarketDataProvider
+from src.services.market_data import market_data
 
 # Initialize market data provider
-market_data = MarketDataProvider()
 
 logger = logging.getLogger(__name__)
 
