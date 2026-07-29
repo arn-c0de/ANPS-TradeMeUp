@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from src.models.predictions import Prediction, PredictionOutcome
-from src.utils.prediction_math import FLAT_RETURN_TOLERANCE_PCT
+from src.utils.prediction_math import direction_was_correct
 
 logger = logging.getLogger(__name__)
 
@@ -169,18 +169,7 @@ class ABTestingAgent:
             if not outcome or outcome.actual_return is None:
                 continue
 
-            actual_return = outcome.actual_return
-            predicted_dir = pred.predicted_direction
-
-            is_correct = False
-            if predicted_dir == 'up' and actual_return > 0:
-                is_correct = True
-            elif predicted_dir == 'down' and actual_return < 0:
-                is_correct = True
-            # actual_return is a percentage, so the tolerance is 1%, not 0.01%
-            elif predicted_dir == 'flat' and abs(actual_return) < FLAT_RETURN_TOLERANCE_PCT:
-                is_correct = True
-
+            is_correct = direction_was_correct(pred, outcome.actual_return)
             if is_correct:
                 correct += 1
             accuracies.append(1 if is_correct else 0)

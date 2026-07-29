@@ -22,7 +22,11 @@ import uuid
 
 from src.models.entities import Entity
 from src.models.predictions import Prediction, PredictionOutcome
-from src.utils.prediction_math import get_expected_return_pct, get_predicted_direction
+from src.utils.prediction_math import (
+    get_actual_direction,
+    get_expected_return_pct,
+    get_predicted_direction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,8 +173,8 @@ class PredictionPerformanceService:
                 return_24h = 0.0
 
             # Determine if prediction was correct
-            predicted_direction = self._get_predicted_direction(prediction)
-            actual_direction = self._get_actual_direction(total_return)
+            predicted_direction = get_predicted_direction(prediction, default='unknown')
+            actual_direction = get_actual_direction(total_return)
 
             is_correct = predicted_direction == actual_direction
 
@@ -180,7 +184,9 @@ class PredictionPerformanceService:
             elif predicted_direction == 'down':
                 strategy_result = "✅ SELL/SHORT worked" if total_return < 0 else "❌ SELL/SHORT failed"
             else:  # flat
-                strategy_result = "⚪ FLAT predicted" if abs(total_return) < 1 else "❌ FLAT wrong"
+                strategy_result = (
+                    "⚪ FLAT predicted" if actual_direction == 'flat' else "❌ FLAT wrong"
+                )
 
             since_prediction = hist_data.iloc[closest_idx:]
 
@@ -208,25 +214,6 @@ class PredictionPerformanceService:
             logger.error(f"Error calculating prediction performance for {ticker}: {type(e).__name__}: {e}")
             logger.debug("Full traceback:", exc_info=True)
             return None
-
-    def _get_predicted_direction(self, prediction: Prediction) -> str:
-        """Get the predicted direction from prediction probabilities"""
-        return get_predicted_direction(prediction, default='unknown')
-
-    def _get_actual_direction(self, return_pct: float, threshold: float = 1.0) -> str:
-        """
-        Determine actual direction based on return percentage
-        
-        Args:
-            return_pct: Return percentage
-            threshold: Threshold for flat direction (default 1%)
-        """
-        if return_pct > threshold:
-            return 'up'
-        elif return_pct < -threshold:
-            return 'down'
-        else:
-            return 'flat'
 
     def get_batch_performance(
         self,
@@ -428,8 +415,6 @@ class PredictionPerformanceService:
         Returns:
             Dict with performance metrics
         """
-        from sqlalchemy.orm import Session
-
         with Session(engine) as db:
             try:
                 # Get prediction and entity

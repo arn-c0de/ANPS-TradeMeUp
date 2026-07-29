@@ -44,6 +44,38 @@ def get_predicted_direction(prediction, default: str = "flat") -> str:
     return max(usable, key=usable.get)
 
 
+def get_actual_direction(actual_return_pct: float) -> str:
+    """Classify a realised move into 'up' / 'down' / 'flat'.
+
+    The flat band is :data:`FLAT_RETURN_TOLERANCE_PCT` wide, so this is the
+    exact counterpart of :func:`get_predicted_direction`.
+    """
+    if actual_return_pct > FLAT_RETURN_TOLERANCE_PCT:
+        return "up"
+    if actual_return_pct < -FLAT_RETURN_TOLERANCE_PCT:
+        return "down"
+    return "flat"
+
+
+def direction_was_correct(prediction, actual_return_pct: float | None) -> bool:
+    """Whether the predicted direction matched the realised move.
+
+    A missing return counts as incorrect: an unresolved prediction cannot be
+    scored as a hit. ``actual_return_pct`` is a percentage (2.0 means +2%), so
+    the flat band is compared against :data:`FLAT_RETURN_TOLERANCE_PCT`.
+    """
+    if actual_return_pct is None:
+        return False
+
+    predicted = get_predicted_direction(prediction)
+
+    if predicted == "up":
+        return actual_return_pct > 0
+    if predicted == "down":
+        return actual_return_pct < 0
+    return abs(actual_return_pct) < FLAT_RETURN_TOLERANCE_PCT
+
+
 def get_expected_return_pct(prediction) -> float:
     """Return the predicted return as a percentage (2.0 means +2%).
 

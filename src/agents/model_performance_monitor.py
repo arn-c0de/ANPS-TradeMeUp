@@ -6,11 +6,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from src.models.predictions import Prediction, PredictionOutcome
-from src.utils.prediction_math import (
-    FLAT_RETURN_TOLERANCE_PCT,
-    get_expected_return_pct,
-    get_predicted_direction,
-)
+from src.utils.prediction_math import direction_was_correct, get_expected_return_pct
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +60,6 @@ class ModelPerformanceMonitor:
 
         # Calculate metrics
         correct_predictions = 0
-        total_predictions = len(predictions)
         returns = []
         squared_errors = []
 
@@ -77,7 +72,7 @@ class ModelPerformanceMonitor:
 
             actual_return = outcome.actual_return
 
-            if self._direction_was_correct(pred, actual_return):
+            if direction_was_correct(pred, actual_return):
                 correct_predictions += 1
 
             # Return prediction error, both sides in percent
@@ -85,7 +80,10 @@ class ModelPerformanceMonitor:
             squared_errors.append((predicted_return - actual_return) ** 2)
             returns.append(actual_return)
 
-        # Calculate metrics
+        # Divide by the number actually scored. Using len(predictions) counted
+        # every prediction still lacking an outcome as a miss, biasing accuracy
+        # downward by however much data was outstanding.
+        total_predictions = len(returns)
         accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0.0
         rmse = np.sqrt(np.mean(squared_errors)) if squared_errors else 0.0
         mean_return = np.mean(returns) if returns else 0.0
@@ -215,7 +213,7 @@ class ModelPerformanceMonitor:
                     continue
 
                 scored += 1
-                if self._direction_was_correct(pred, outcome.actual_return):
+                if direction_was_correct(pred, outcome.actual_return):
                     correct += 1
 
             by_horizon[horizon] = {
@@ -242,17 +240,6 @@ class ModelPerformanceMonitor:
             PredictionOutcome.prediction_id.in_(prediction_ids)
         ).all()
         return {row.prediction_id: row for row in rows}
-
-    @staticmethod
-    def _direction_was_correct(prediction: Prediction, actual_return_pct: float) -> bool:
-        """Whether the predicted direction matched the realised move."""
-        predicted_dir = get_predicted_direction(prediction)
-
-        if predicted_dir == 'up':
-            return actual_return_pct > 0
-        if predicted_dir == 'down':
-            return actual_return_pct < 0
-        return abs(actual_return_pct) < FLAT_RETURN_TOLERANCE_PCT
 
     def process_batch(self, limit: int = 5) -> dict:
         """

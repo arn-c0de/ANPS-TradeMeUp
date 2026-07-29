@@ -6,7 +6,7 @@ prediction information. It can be used by multiple tabs (predictions, simulation
 """
 
 import logging
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import dash_bootstrap_components as dbc
 from dash import html
@@ -22,6 +22,7 @@ from src.models.trading_simulation import TradingSimulation
 from src.services.prediction_performance_service import prediction_performance_service
 from src.utils.json_helpers import ensure_dict as _ensure_dict
 from src.utils.json_helpers import ensure_list as _ensure_list
+from src.utils.prediction_math import get_actual_direction
 
 logger = logging.getLogger(__name__)
 
@@ -177,13 +178,11 @@ def _format_saved_performance(pred, entity, outcome, load_live_prices=False):
         actual_return_pct = outcome.actual_return or 0
         logger.info(f"   Using saved return: {actual_return_pct:+.2f}%")
 
-    # Recalculate actual direction from current return
-    if actual_return_pct > 0.001:
-        actual_direction = "up"
-    elif actual_return_pct < -0.001:
-        actual_direction = "down"
-    else:
-        actual_direction = "flat"
+    # Recalculate actual direction from current return. Shared with the agents
+    # and the performance service so the popup cannot disagree with the numbers
+    # shown elsewhere - it used a 0.001% flat band, which made a correct "flat"
+    # prediction essentially unreachable.
+    actual_direction = get_actual_direction(actual_return_pct)
 
     # Recalculate if prediction is correct
     is_correct = (predicted_direction == actual_direction)
