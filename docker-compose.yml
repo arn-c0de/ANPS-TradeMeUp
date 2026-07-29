@@ -7,7 +7,7 @@ x-app-env: &app-env
   API_V1_PREFIX: ${API_V1_PREFIX:-/api/v1}
   CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://localhost:8050","http://localhost:8000"]}
   DATABASE_URL: postgresql://${POSTGRES_USER:-trademeup_user}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-trademeup}
-  REDIS_URL: ${REDIS_URL:-redis://localhost:6379/0}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
   LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
   OLLAMA_MODEL: ${OLLAMA_MODEL:-llama2}
@@ -65,6 +65,27 @@ services:
       retries: 10
     restart: unless-stopped
 
+  redis:
+    image: redis:8-alpine
+    container_name: trademeup_redis
+    # Cache only: bounded memory, evict the coldest keys rather than erroring,
+    # and no persistence to restore - a cold cache just refills itself.
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory ${REDIS_MAXMEMORY:-256mb}
+      --maxmemory-policy allkeys-lru
+    ports:
+      # Loopback only: the cache must not be reachable from the network.
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   api:
     <<: *app-common
     container_name: trademeup_api
@@ -72,6 +93,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     ports:
       - "${BIND_HOST:-127.0.0.1}:8000:8000"
     healthcheck:
@@ -87,6 +110,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
       api:
         condition: service_healthy
     ports:
@@ -99,6 +124,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
       api:
         condition: service_healthy
     profiles:

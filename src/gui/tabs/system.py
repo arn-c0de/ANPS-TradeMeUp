@@ -5,7 +5,7 @@ import json
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, dcc, html
-from sqlalchemy import func, text
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.gui.utils.callbacks import safe_callback
@@ -23,8 +23,13 @@ from src.models.predictions import Prediction
 from src.models.processed_news import ProcessedNews
 from src.models.raw_news import RawNews
 from src.models.system_logs import SystemLog
+from src.utils.cache import cached_query
 
 # ── constants ─────────────────────────────────────────────────────────────────
+# The stats panels refresh on the shared 5-second interval. A slightly longer
+# TTL collapses that polling - across every open tab - into one query round.
+DB_STATS_TTL = 10
+
 _SOURCES = ["all", "pipeline", "agent", "simulation", "ingestion", "api", "gui", "system"]
 _LEVELS  = ["all", "ERROR", "WARNING", "SUCCESS", "INFO", "DEBUG"]
 _COUNTS  = [50, 100, 250, 500]
@@ -274,21 +279,32 @@ def get_agent_status():
     ], bordered=True, hover=True, className="table-dark")
 
 
+@cached_query(key_prefix="system:table_counts", ttl=DB_STATS_TTL)
+def _table_counts(engine) -> dict:
+    """Row counts per pipeline table, labelled for display.
+
+    Cached because the panel refreshes on the 5-second interval and every one
+    of these is a full COUNT(*) - previously ten sequential scans per tick,
+    per open browser tab.
+    """
+    with Session(engine) as db:
+        return {
+            "📰 Raw News":           db.query(func.count(RawNews.news_id)).scalar() or 0,
+            "✅ Quality Scores":     db.query(func.count(DataQualityScore.news_id)).scalar() or 0,
+            "🧠 Processed News":     db.query(func.count(ProcessedNews.news_id)).scalar() or 0,
+            "🏢 Entities":           db.query(func.count(Entity.entity_id)).scalar() or 0,
+            "⚡ Impact Scores":      db.query(func.count(ImpactScore.score_id)).scalar() or 0,
+            "🎯 Surprise Scores":    db.query(func.count(SurpriseScore.surprise_id)).scalar() or 0,
+            "🔍 Fact Verifications": db.query(func.count(FactVerification.verification_id)).scalar() or 0,
+            "🌡️ Market Regimes":     db.query(func.count(MarketRegime.regime_id)).scalar() or 0,
+            "📉 Signal Decay":       db.query(func.count(SignalDecayModel.news_id)).scalar() or 0,
+            "🔮 Predictions":        db.query(func.count(Prediction.prediction_id)).scalar() or 0,
+        }
+
+
 def get_db_statistics(engine):
     try:
-        with Session(engine) as db:
-            stats = {
-                "📰 Raw News":           db.query(func.count(RawNews.news_id)).scalar() or 0,
-                "✅ Quality Scores":     db.query(func.count(DataQualityScore.news_id)).scalar() or 0,
-                "🧠 Processed News":     db.query(func.count(ProcessedNews.news_id)).scalar() or 0,
-                "🏢 Entities":           db.query(func.count(Entity.entity_id)).scalar() or 0,
-                "⚡ Impact Scores":      db.query(func.count(ImpactScore.score_id)).scalar() or 0,
-                "🎯 Surprise Scores":    db.query(func.count(SurpriseScore.surprise_id)).scalar() or 0,
-                "🔍 Fact Verifications": db.query(func.count(FactVerification.verification_id)).scalar() or 0,
-                "🌡️ Market Regimes":     db.query(func.count(MarketRegime.regime_id)).scalar() or 0,
-                "📉 Signal Decay":       db.query(func.count(SignalDecayModel.news_id)).scalar() or 0,
-                "🔮 Predictions":        db.query(func.count(Prediction.prediction_id)).scalar() or 0,
-            }
+        stats = _table_counts(engine)
         return html.Div([
             html.Div([
                 html.Strong(f"{k}: "),
@@ -303,12 +319,22 @@ def get_db_statistics(engine):
         ])
 
 
+@cached_query(key_prefix="system:pipeline_progress", ttl=DB_STATS_TTL)
+def _pipeline_progress(engine) -> dict:
+    """How much of the ingested news has made it through NLP."""
+    with Session(engine) as db:
+        return {
+            "total_news": db.query(func.count(RawNews.news_id)).scalar() or 0,
+            "processed": db.query(func.count(ProcessedNews.news_id)).scalar() or 0,
+        }
+
+
 def get_pipeline_stats(engine):
     try:
-        with Session(engine) as db:
-            total_news = db.query(func.count(RawNews.news_id)).scalar() or 0
-            processed  = db.query(func.count(ProcessedNews.news_id)).scalar() or 0
-            rate = (processed / total_news * 100) if total_news > 0 else 0
+        counts = _pipeline_progress(engine)
+        total_news = counts["total_news"]
+        processed = counts["processed"]
+        rate = (processed / total_news * 100) if total_news > 0 else 0
         return html.Div([
             html.Div([
                 html.H4(f"{rate:.1f}%", className="text-success"),

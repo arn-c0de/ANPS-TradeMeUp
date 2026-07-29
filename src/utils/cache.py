@@ -2,28 +2,36 @@
 Database Query Caching Utilities
 Redis-based caching layer for expensive database queries
 """
+import hashlib
 import json
 import logging
 import threading
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable
+from typing import Any
 
 import redis
 
+from src.utils.redact import redact_url
+
 logger = logging.getLogger(__name__)
+
+# Redis is optional. Keep the probe short so a missing server costs a moment
+# at first use rather than stalling every request behind it.
+REDIS_CONNECT_TIMEOUT = 5
 
 
 class DatabaseCache:
     """Redis cache for database queries with automatic fallback"""
 
-    def __init__(self, host='localhost', port=6379, db=0, enabled=True):
+    def __init__(self, url: str | None = None, enabled: bool = True):
         """
         Initialize cache
 
         Args:
-            host: Redis host
-            port: Redis port
-            db: Redis database number
+            url: Redis connection URL. Defaults to ``settings.redis_url``, which
+                is what docker-compose sets - the previous hardcoded
+                ``localhost:6379`` could never reach the Redis container.
             enabled: Enable/disable caching (for testing)
         """
         self.enabled = enabled
@@ -33,19 +41,23 @@ class DatabaseCache:
             self.redis = None
             return
 
+        if url is None:
+            from src.config.settings import settings
+            url = settings.redis_url
+
         try:
-            self.redis = redis.Redis(
-                host=host,
-                port=port,
-                db=db,
+            self.redis = redis.Redis.from_url(
+                url,
                 decode_responses=True,
-                socket_connect_timeout=5,
-                socket_keepalive=True
+                socket_connect_timeout=REDIS_CONNECT_TIMEOUT,
+                socket_keepalive=True,
             )
             # Test connection
             self.redis.ping()
-            logger.info(f"Redis cache connected: {host}:{port}/{db}")
+            logger.info("Redis cache connected: %s", redact_url(url))
         except Exception as e:
+            # Caching is an optimisation, never a requirement: fall back to
+            # querying the database directly.
             logger.warning(f"Redis unavailable, caching disabled: {e}")
             self.enabled = False
             self.redis = None
@@ -175,9 +187,42 @@ class _LazyCacheProxy:
 db_cache = _LazyCacheProxy()
 
 
+# Arguments that identify a query and can be written into a key verbatim.
+_KEY_SAFE_TYPES = (str, int, float, bool, type(None))
+
+# Connections and sessions select the same data for every caller, so they carry
+# no identity for the cache key and are deliberately ignored.
+_IGNORED_ARG_TYPES = ("Session", "Engine", "Connection", "scoped_session")
+
+
+def _key_fragment(value: Any) -> str | None:
+    """Render one argument for the cache key.
+
+    Returns None for arguments that carry no identity (database handles), and
+    a stable hash for anything structured. Silently dropping a structured
+    argument - as the previous version did - made two different queries share
+    one cache entry.
+    """
+    if isinstance(value, _KEY_SAFE_TYPES):
+        return repr(value)
+
+    if type(value).__name__ in _IGNORED_ARG_TYPES:
+        return None
+
+    try:
+        blob = json.dumps(value, sort_keys=True, default=repr)
+    except Exception:
+        blob = repr(value)
+    return "#" + hashlib.blake2b(blob.encode(), digest_size=8).hexdigest()
+
+
 def cached_query(key_prefix: str, ttl: int = 60):
     """
-    Decorator for caching database queries
+    Decorator for caching database queries.
+
+    The decorated function must return JSON-compatible data: results round-trip
+    through JSON, so a Dash component or a plotly Figure will not survive.
+    Fetch plain data here and render it outside the cache.
 
     Usage:
         @cached_query(key_prefix="stats:metrics", ttl=30)
@@ -195,28 +240,25 @@ def cached_query(key_prefix: str, ttl: int = 60):
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Build cache key from function name and arguments
-            # Note: Only use hashable arguments for key
+            # Every argument that identifies the query goes into the key.
             key_parts = [key_prefix, func.__name__]
 
-            # Add simple args to key (skip complex objects like engine)
             for arg in args:
-                if isinstance(arg, (str, int, float, bool)):
-                    key_parts.append(str(arg))
+                fragment = _key_fragment(arg)
+                if fragment is not None:
+                    key_parts.append(fragment)
 
-            # Add simple kwargs to key
-            for k, v in sorted(kwargs.items()):
-                if isinstance(v, (str, int, float, bool)):
-                    key_parts.append(f"{k}={v}")
+            for name, value in sorted(kwargs.items()):
+                fragment = _key_fragment(value)
+                if fragment is not None:
+                    key_parts.append(f"{name}={fragment}")
 
             cache_key = ":".join(key_parts)
 
-            # Try cache first
             cached = db_cache.get(cache_key)
             if cached is not None:
                 return cached
 
-            # Cache miss - execute function
             result = func(*args, **kwargs)
 
             # Store in cache (only if result is not None)

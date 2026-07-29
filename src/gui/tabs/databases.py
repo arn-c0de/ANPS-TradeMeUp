@@ -2,11 +2,12 @@
 
 import base64
 import json
+import logging
 import re
 import socket
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 import dash
@@ -31,12 +32,19 @@ from src.models.predictions import BacktestResult, MarketData, Prediction, Predi
 from src.models.processed_news import ProcessedNews
 from src.models.raw_news import RawNews
 from src.models.trading_simulation import TradingSimulation
+from src.utils.cache import cached_query
+
+logger = logging.getLogger(__name__)
 
 # ── constants ────────────────────────────────────────────────────────────────
 HISTORY_FILE = Path(__file__).resolve().parents[3] / "data" / "db_history.json"
 EXPORT_FORMAT = "TradeMeUp-DB-Export"
 EXPORT_FORMAT_VERSION = "1.0"
 PAGE_SIZE = 20
+
+# Table stats are a COUNT(*) per table; cache them briefly so tab switches do
+# not re-run the whole set. The refresh button invalidates the entry.
+DB_STATS_TTL = 10
 
 # Security limits
 _MAX_IMPORT_BYTES = 200 * 1024 * 1024   # 200 MB decoded
@@ -135,25 +143,49 @@ def _record_event(event_type: str, stats: dict, notes: str = "", source_file: st
 
 
 # ── database query helpers ────────────────────────────────────────────────────
-def _get_db_stats() -> dict:
+@cached_query(key_prefix="databases:table_stats", ttl=DB_STATS_TTL)
+def _query_db_stats() -> dict:
+    """Row count per managed table, plus the on-disk database size.
+
+    One COUNT(*) per table plus a pg_database_size() call, so it is cached for
+    the moment it takes a user to switch back to this tab. The explicit refresh
+    button clears the entry first - see _refresh_stats.
+    """
     stats = {}
-    try:
-        with Session(_engine) as db:
-            for tbl, model in _MODEL_MAP.items():
-                try:
-                    stats[tbl] = db.query(func.count()).select_from(model).scalar() or 0
-                except Exception:
-                    stats[tbl] = "?"
+    with Session(_engine) as db:
+        for tbl, model in _MODEL_MAP.items():
             try:
-                row = db.execute(text(
-                    "SELECT pg_size_pretty(pg_database_size(current_database()))"
-                )).fetchone()
-                stats["_db_size"] = row[0] if row else "N/A"
+                stats[tbl] = db.query(func.count()).select_from(model).scalar() or 0
             except Exception:
-                stats["_db_size"] = "N/A"
-    except Exception as e:
-        stats["_error"] = str(e)
+                stats[tbl] = "?"
+        try:
+            row = db.execute(text(
+                "SELECT pg_size_pretty(pg_database_size(current_database()))"
+            )).fetchone()
+            stats["_db_size"] = row[0] if row else "N/A"
+        except Exception:
+            stats["_db_size"] = "N/A"
     return stats
+
+
+def _get_db_stats() -> dict:
+    """Table stats, or {'_error': ...} if the database is unreachable.
+
+    The failure path stays outside the cache so a transient outage is not
+    served back for the whole TTL.
+    """
+    try:
+        return _query_db_stats()
+    except Exception as e:
+        return {"_error": str(e)}
+
+
+def _invalidate_db_stats() -> None:
+    """Drop the cached table stats after anything writes to the database."""
+    try:
+        _query_db_stats.cache_invalidate()
+    except Exception as e:  # never let a cache problem break a delete/import
+        logger.debug(f"Could not invalidate db stats cache: {e}")
 
 
 def _get_news_page(page: int) -> tuple[list, int]:
@@ -256,6 +288,7 @@ def _get_simulations_page(page: int) -> tuple[list, int]:
 
 
 def _delete_simulation(sim_id: str) -> int:
+    _invalidate_db_stats()
     try:
         with Session(_engine) as db:
             n = db.execute(text(
@@ -269,6 +302,7 @@ def _delete_simulation(sim_id: str) -> int:
 
 def _delete_news_cascade(news_id: str, also_delete_predictions: bool) -> tuple[int, int]:
     """Delete a news article and all related records. Returns (news_deleted, predictions_deleted)."""
+    _invalidate_db_stats()
     pred_count = 0
     try:
         with Session(_engine) as db:
@@ -303,6 +337,7 @@ def _delete_news_cascade(news_id: str, also_delete_predictions: bool) -> tuple[i
 
 
 def _delete_prediction(pred_id: str) -> int:
+    _invalidate_db_stats()
     try:
         with Session(_engine) as db:
             db.execute(text(
@@ -505,6 +540,7 @@ def _execute_import(obj: dict, mode: str,
                     custom_start: str | None = None,
                     custom_end: str | None = None) -> dict:
     """mode: 'merge' or 'replace'. Returns result stats dict."""
+    _invalidate_db_stats()
     data = obj.get("data", {})
     if not isinstance(data, dict):
         return {"results": {}, "errors": ["Malformed import file."]}
@@ -943,6 +979,10 @@ def register_callbacks(app) -> None:
         prevent_initial_call=False,
     )
     def _refresh_stats(active_tab, _n):
+        # An explicit refresh click must re-query, not re-serve the cache.
+        if dash.callback_context.triggered_id == "db-refresh-stats":
+            _query_db_stats.cache_invalidate()
+
         stats = _get_db_stats()
         if "_error" in stats:
             return dbc.Alert(f"DB error: {stats['_error']}", color="danger")
