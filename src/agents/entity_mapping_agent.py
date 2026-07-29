@@ -7,6 +7,7 @@ OPTIMIZED VERSION:
 - ✅ Proper error handling with rollback
 - ✅ No session state leaks between batches
 """
+import json
 import logging
 import re
 import warnings
@@ -24,6 +25,55 @@ from src.models.raw_news import RawNews
 from src.services.llm_service import llm_service, truncate_for_prompt
 
 logger = logging.getLogger(__name__)
+
+# Values the extractor emits when it has no ticker to offer. They arrive as
+# ordinary strings, so "None" was being validated as if it were a symbol.
+_NULL_TICKER_STRINGS = frozenset({'NONE', 'NULL', 'N/A', 'NA', 'UNKNOWN', '-', ''})
+
+# A ticker is 1-5 letters, optionally followed by an exchange suffix such as
+# .DE or .PA, and optionally a share-class marker such as BRK-B.
+_TICKER_PATTERN = re.compile(r'^[A-Z]{1,5}(?:[.-][A-Z]{1,4})?$')
+
+
+def normalize_ticker_symbol(value: str | None) -> str | None:
+    """Return ``value`` as a well-formed ticker, or None if it is not one.
+
+    Filters out the placeholder strings the extractor uses for "no ticker"
+    before any of them reach a market-data lookup.
+    """
+    if not value or not isinstance(value, str):
+        return None
+
+    symbol = value.strip().upper()
+    if symbol in _NULL_TICKER_STRINGS:
+        return None
+
+    return symbol if _TICKER_PATTERN.match(symbol) else None
+
+
+def _load_known_tickers() -> frozenset:
+    """Tickers from the bundled index constituents.
+
+    These are verifiable without a network call, which keeps the common case
+    working when the market-data provider is unreachable.
+    """
+    path = Path("config/index_constituents.json")
+    if not path.exists():
+        return frozenset()
+
+    try:
+        with open(path, encoding='utf-8') as handle:
+            data = json.load(handle)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Could not read %s: %s", path, exc)
+        return frozenset()
+
+    tickers = set()
+    for index in data.values():
+        if isinstance(index, dict):
+            tickers.update(index.get('top_stocks', []))
+    return frozenset(t.upper() for t in tickers if isinstance(t, str))
+
 
 # Prompt budget for the extraction call, in approximate tokens. Entity
 # extraction needs enough of the article to see who is being discussed, but
@@ -84,6 +134,13 @@ class EntityMappingAgent:
     }
 
     # Non-tradeable entities to exclude (government agencies, crypto, etc.)
+    # Consecutive transport failures before ticker verification is treated as
+    # unavailable for the rest of the batch.
+    MAX_TRANSPORT_FAILURES = 3
+
+    # Symbols verifiable without a network call.
+    KNOWN_TICKERS = _load_known_tickers()
+
     EXCLUDE_ENTITIES = {
         # Government/Regulatory
         'SEC', 'sec', 'Securities and Exchange Commission',
@@ -205,8 +262,14 @@ class EntityMappingAgent:
         else:
             self.prompt_template = self._get_fallback_prompt()
 
-        # Cache for ticker lookups (shared across batches)
+        # Cache for ticker lookups (shared across batches). Holds negative
+        # results too, so a name that could not be resolved is not looked up
+        # again for every article that mentions it.
         self._ticker_cache = {}
+
+        # Circuit breaker around the market-data provider. Reset per batch.
+        self._transport_failures = 0
+        self._market_data_unreachable = False
 
     def _get_fallback_prompt(self) -> str:
         """Fallback prompt if file not found."""
@@ -287,34 +350,57 @@ Respond ONLY with JSON."""
         if company_name in self._ticker_cache:
             return self._ticker_cache[company_name]
 
-        try:
-            # Try searching with company name directly
-            ticker_obj = yf.Ticker(company_name)
-            info = ticker_obj.info
-
-            if info and 'symbol' in info:
-                symbol = info['symbol']
+        # A company name is only worth trying as a symbol if it is shaped like
+        # one. Passing arbitrary prose to the provider produced one doomed
+        # request per entity and, once it started failing, nothing else.
+        for name in (company_name,
+                     company_name.replace(' Inc.', '').replace(' Corp.', '')
+                                 .replace(' LLC', '').replace(',', '').strip()):
+            symbol = normalize_ticker_symbol(name)
+            if not symbol:
+                continue
+            if symbol in self.KNOWN_TICKERS or self._verify_ticker_online(symbol):
                 self._ticker_cache[company_name] = symbol
                 logger.debug(f"Found ticker '{symbol}' for company '{company_name}'")
                 return symbol
-        except Exception:
-            pass
-
-        # Try with cleaned name
-        try:
-            clean_name = company_name.replace(' Inc.', '').replace(' Corp.', '').replace(' LLC', '').replace(',', '').strip()
-            if clean_name != company_name:
-                ticker_obj = yf.Ticker(clean_name)
-                info = ticker_obj.info
-                if info and 'symbol' in info:
-                    symbol = info['symbol']
-                    self._ticker_cache[company_name] = symbol
-                    logger.debug(f"Found ticker '{symbol}' for cleaned company name '{clean_name}'")
-                    return symbol
-        except Exception:
-            pass
 
         return None
+
+    def _verify_ticker_online(self, symbol: str) -> bool | None:
+        """Ask the market-data provider whether ``symbol`` exists.
+
+        Returns True (exists), False (definitively unknown), or None when the
+        provider could not be reached at all. That third case is the whole
+        point of this method: treating an unreachable provider as "unknown
+        ticker" silently discarded every entity in the batch.
+        """
+        if self._market_data_unreachable:
+            return None
+
+        try:
+            info = yf.Ticker(symbol).info
+        except Exception as exc:
+            self._transport_failures += 1
+            if self._transport_failures >= self.MAX_TRANSPORT_FAILURES:
+                # Stop hammering a provider that is plainly not answering.
+                # Without this, every entity paid several multi-second
+                # timeouts before being wrongly rejected.
+                self._market_data_unreachable = True
+                logger.error(
+                    "Market data provider unreachable (%s: %s). Ticker verification "
+                    "is disabled for the rest of this batch; entities will be kept "
+                    "with unverified tickers rather than discarded.",
+                    type(exc).__name__,
+                    str(exc)[:120],
+                )
+            return None
+
+        if info and info.get('symbol'):
+            return True
+
+        # A reachable provider that returns nothing usable is a real "no such
+        # ticker" answer.
+        return False
 
     def _normalize_ticker(self, company_name: str, suggested_ticker: str | None = None) -> str | None:
         """
@@ -327,38 +413,49 @@ Respond ONLY with JSON."""
         Returns:
             Validated ticker or None
         """
-        # Check cache
+        # Check cache (negative results are cached as None, so a name that
+        # already failed does not pay for another round of lookups)
         if company_name in self._ticker_cache:
             return self._ticker_cache[company_name]
 
-        # Try suggested ticker first
-        if suggested_ticker:
-            try:
-                ticker = yf.Ticker(suggested_ticker)
-                info = ticker.info
-                if info and 'symbol' in info:
-                    self._ticker_cache[company_name] = suggested_ticker
-                    return suggested_ticker
-            except Exception:
-                pass
+        candidate = normalize_ticker_symbol(suggested_ticker)
 
-        # Try company name as ticker
-        try:
-            # Remove common suffixes
-            clean_name = company_name.replace(' Inc.', '').replace(' Corp.', '').replace(',', '').strip()
+        # Offline fast path: index constituents are known-good, so the common
+        # case needs no network call and cannot be broken by an outage.
+        if candidate and candidate in self.KNOWN_TICKERS:
+            self._ticker_cache[company_name] = candidate
+            return candidate
 
-            # Try as ticker
-            ticker = yf.Ticker(clean_name)
-            info = ticker.info
-            if info and 'symbol' in info:
-                symbol = info['symbol']
-                self._ticker_cache[company_name] = symbol
-                return symbol
-        except Exception:
-            pass
+        if candidate:
+            verified = self._verify_ticker_online(candidate)
+            if verified:
+                self._ticker_cache[company_name] = candidate
+                return candidate
+            if verified is None:
+                # Provider unreachable. The symbol is well-formed and came
+                # from the extractor, so keep it rather than lose the entity;
+                # anything bogus drops out later when no price can be fetched.
+                logger.warning(
+                    "Could not verify ticker '%s' for '%s' (market data unreachable) - "
+                    "keeping it unverified",
+                    candidate,
+                    company_name,
+                )
+                self._ticker_cache[company_name] = candidate
+                return candidate
 
-        # Couldn't validate
+        # Suggested ticker was missing or definitively wrong: try the company
+        # name itself as a symbol.
+        clean_name = normalize_ticker_symbol(
+            company_name.replace(' Inc.', '').replace(' Corp.', '').replace(',', '').strip()
+        )
+        if clean_name and clean_name != candidate:
+            if clean_name in self.KNOWN_TICKERS or self._verify_ticker_online(clean_name):
+                self._ticker_cache[company_name] = clean_name
+                return clean_name
+
         logger.debug(f"Could not validate ticker for: {company_name}")
+        self._ticker_cache[company_name] = None
         return None
 
     def process_batch(self, limit: int = 20, offset: int = 0) -> dict:
@@ -376,6 +473,11 @@ Respond ONLY with JSON."""
         Returns:
             Statistics dictionary
         """
+        # Give the provider a fresh chance each batch: an outage during one
+        # batch should not disable verification for the life of the process.
+        self._transport_failures = 0
+        self._market_data_unreachable = False
+
         # Use scoped session for isolation
         with get_scoped_session() as db:
             # Find processed articles without entity mappings
