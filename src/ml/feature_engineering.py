@@ -1,14 +1,14 @@
 """Feature engineering for prediction models."""
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
-import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
 from src.models.analysis import ImpactScore, MarketRegime, SurpriseScore
-from src.models.predictions import MarketData
 from src.models.processed_news import ProcessedNews
+from src.services.market_data import market_data
+from src.utils.prediction_math import FLAT_RETURN_TOLERANCE_PCT
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,9 @@ class FeatureEngineer:
 
     # Cap on rows pulled into a training dataset (MVP limit).
     MAX_TRAINING_SAMPLES = 100
+
+    # History window fetched per ticker when labelling training samples.
+    TRAINING_HISTORY_PERIOD = "1y"
 
     def __init__(self, db: Session):
         """
@@ -190,16 +193,10 @@ class FeatureEngineer:
         Returns:
             DataFrame with features and targets
         """
-        logger.warning(
-            "create_training_dataset produces SYNTHETIC targets: target_return is "
-            "random noise, not a realised forward return. A model trained on this "
-            "dataset learns nothing. Implement the forward-return lookup before "
-            "using it for anything but plumbing tests."
-        )
         logger.info(f"Creating training dataset from {start_date} to {end_date}")
 
-        # This is a simplified version - in production would be more complex
         data = []
+        skipped_no_label = 0
 
         # Get all impact scores in date range
         impact_scores = self.db.query(ImpactScore).filter(
@@ -216,9 +213,24 @@ class FeatureEngineer:
                 len(impact_scores),
             )
 
+        # One price history per ticker for the whole build, rather than one
+        # lookup per sample.
+        price_history: dict[str, pd.DataFrame | None] = {}
+
         for impact in impact_scores[:self.MAX_TRAINING_SAMPLES]:
             try:
-                # Extract features
+                # Label first: a sample without a realised outcome is not
+                # training data, and computing features for it is wasted work.
+                target_return = self._forward_return(
+                    ticker=impact.entity_id,
+                    as_of_date=impact.created_at,
+                    horizon_days=horizon_days,
+                    price_history=price_history,
+                )
+                if target_return is None:
+                    skipped_no_label += 1
+                    continue
+
                 features = self.extract_features_for_prediction(
                     entity_id=impact.entity_id,
                     news_id=str(impact.news_id),
@@ -230,12 +242,9 @@ class FeatureEngineer:
                 features['entity_id'] = impact.entity_id
                 features['timestamp'] = impact.created_at
 
-                # TODO: Calculate the realised forward return over horizon_days
-                # from MarketData. Until then this is random noise, flagged by
-                # the warning at the top of this method and by is_synthetic_target
-                # so no caller mistakes it for a real label.
-                features['target_return'] = np.random.randn() * 0.02
-                features['is_synthetic_target'] = 1
+                # Realised return over the horizon, as a decimal fraction
+                features['target_return'] = target_return
+                features['target_direction'] = self._return_to_direction(target_return)
 
                 data.append(features)
 
@@ -244,9 +253,99 @@ class FeatureEngineer:
                 continue
 
         df = pd.DataFrame(data)
-        logger.info(f"Created dataset with {len(df)} samples")
+        logger.info(
+            "Created dataset with %d samples (%d skipped: no realised %dd outcome yet)",
+            len(df),
+            skipped_no_label,
+            horizon_days,
+        )
 
         return df
+
+    def _return_to_direction(self, return_fraction: float) -> str:
+        """Bucket a realised return into the up/flat/down label space.
+
+        The band matches FLAT_RETURN_TOLERANCE_PCT used when scoring
+        predictions, so training labels and evaluation agree on what "flat"
+        means.
+        """
+        threshold = FLAT_RETURN_TOLERANCE_PCT / 100.0
+        if return_fraction > threshold:
+            return 'up'
+        if return_fraction < -threshold:
+            return 'down'
+        return 'flat'
+
+    def _get_price_history(
+        self,
+        ticker: str,
+        price_history: dict,
+    ) -> pd.DataFrame | None:
+        """Fetch (and memoise) a ticker's daily bars with a naive UTC index."""
+        if ticker in price_history:
+            return price_history[ticker]
+
+        frame = None
+        try:
+            raw = market_data.get_historical_data(
+                ticker, period=self.TRAINING_HISTORY_PERIOD, interval="1d"
+            )
+            if raw is not None and not raw.empty:
+                # get_historical_data hands back a copy, so localizing the
+                # index here cannot corrupt the shared cache.
+                index = raw.index
+                if getattr(index, "tz", None) is not None:
+                    raw.index = index.tz_convert("UTC").tz_localize(None)
+                frame = raw
+        except Exception as e:
+            logger.debug(f"No price history for {ticker}: {e}")
+
+        price_history[ticker] = frame
+        return frame
+
+    def _forward_return(
+        self,
+        ticker: str,
+        as_of_date: datetime,
+        horizon_days: int,
+        price_history: dict,
+    ) -> float | None:
+        """Realised return from ``as_of_date`` over ``horizon_days`` sessions.
+
+        No look-ahead: ``searchsorted(side='left')`` picks the first bar at or
+        after the news timestamp, so the entry close always lies in the future
+        relative to the news. News during a session is entered at that
+        session's close; news after the close is entered at the next session's.
+
+        Returns None when the ticker has no usable history, or when the
+        horizon has not elapsed yet - an unlabelled sample is dropped rather
+        than guessed at.
+        """
+        history = self._get_price_history(ticker, price_history)
+        if history is None or 'Close' not in history.columns:
+            return None
+
+        as_of = as_of_date
+        if getattr(as_of, "tzinfo", None) is not None:
+            as_of = as_of.astimezone(UTC).replace(tzinfo=None)
+
+        # First session at or after the news, so the entry price is one the
+        # trade could actually have been filled at.
+        entry_positions = history.index.searchsorted(as_of, side='left')
+        entry_index = int(entry_positions)
+        exit_index = entry_index + horizon_days
+
+        # exit_index out of range means the horizon has not completed yet
+        if entry_index >= len(history) or exit_index >= len(history):
+            return None
+
+        entry_price = history.iloc[entry_index]['Close']
+        exit_price = history.iloc[exit_index]['Close']
+
+        if not entry_price or entry_price <= 0 or exit_price is None:
+            return None
+
+        return float((exit_price - entry_price) / entry_price)
 
     def get_feature_names(self) -> list[str]:
         """Get list of feature names for models."""

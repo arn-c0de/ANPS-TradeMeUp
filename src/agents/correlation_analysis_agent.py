@@ -58,14 +58,16 @@ class CorrelationAnalysisAgent:
 
         cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
-        # Fetch price data for both entities
+        # Fetch price data for both entities. The column is `ticker`;
+        # filtering on a non-existent `entity_id` raised AttributeError and
+        # made every correlation calculation fail.
         data_1 = db.query(MarketData).filter(
-            MarketData.entity_id == entity_1,
+            MarketData.ticker == entity_1,
             MarketData.timestamp >= cutoff
         ).order_by(MarketData.timestamp).all()
 
         data_2 = db.query(MarketData).filter(
-            MarketData.entity_id == entity_2,
+            MarketData.ticker == entity_2,
             MarketData.timestamp >= cutoff
         ).order_by(MarketData.timestamp).all()
 
@@ -73,15 +75,10 @@ class CorrelationAnalysisAgent:
             logger.warning(f"Insufficient data for correlation: {entity_1}, {entity_2}")
             return None
 
-        # Calculate returns
-        returns_1 = [
-            (data_1[i].close - data_1[i-1].close) / data_1[i-1].close
-            for i in range(1, len(data_1))
-        ]
-        returns_2 = [
-            (data_2[i].close - data_2[i-1].close) / data_2[i-1].close
-            for i in range(1, len(data_2))
-        ]
+        # Calculate returns, skipping bars with a non-positive close so a bad
+        # tick cannot raise ZeroDivisionError mid-series.
+        returns_1 = self._close_to_returns(data_1)
+        returns_2 = self._close_to_returns(data_2)
 
         # Align data (take minimum length)
         min_len = min(len(returns_1), len(returns_2))
@@ -94,11 +91,24 @@ class CorrelationAnalysisAgent:
         # Calculate correlation
         try:
             correlation = np.corrcoef(returns_1, returns_2)[0, 1]
+            if np.isnan(correlation):
+                # A constant series has zero variance, so corrcoef is undefined
+                logger.debug(f"Undefined correlation for {entity_1}/{entity_2} (flat series)")
+                return None
             self._correlation_cache[cache_key] = float(correlation)
             return float(correlation)
         except Exception as e:
             logger.error(f"Error calculating correlation: {e}")
             return None
+
+    @staticmethod
+    def _close_to_returns(bars: list) -> list[float]:
+        """Convert a series of bars into simple close-to-close returns."""
+        returns = []
+        for previous, current in zip(bars, bars[1:]):
+            if previous.close and previous.close > 0 and current.close is not None:
+                returns.append((current.close - previous.close) / previous.close)
+        return returns
 
     def analyze_entity_relationships(
         self,

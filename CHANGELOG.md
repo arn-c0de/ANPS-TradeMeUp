@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 
 ## [1.0.5] - 2026-07-29
 
+### Added
+- `scripts/train_prediction_model.py` trains the direction classifier the
+  prediction agent has always tried to load. Chronological train/test split,
+  reports accuracy against a majority-class baseline, and warns when the model
+  fails to beat it
+
+### Fixed (training labels and correlation)
+- Training samples were labelled with `np.random.randn()`. Labels are now the
+  realised forward return over the requested horizon, taken from the first
+  session at or after the news so no future information leaks in. Samples whose
+  horizon has not elapsed are dropped rather than fabricated
+- `correlation_analysis_agent` filtered on `MarketData.entity_id`, a column
+  that does not exist (it is `ticker`), so every correlation raised
+  AttributeError. A zero close in the series could also raise ZeroDivisionError,
+  and a flat series produced a silent NaN correlation
+
 ### Fixed (prediction pipeline and LLM cost)
 - The three horizons produced byte-identical predictions: `horizon` was passed
   into the generator but never reached the features or the model, so 1d, 5d and
