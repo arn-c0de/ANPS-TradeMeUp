@@ -16,7 +16,6 @@ from dash import Input, Output, State, dcc, html
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session, joinedload
 
-from src.gui.components import create_metric_card
 from src.gui.utils.callbacks import safe_callback
 from src.gui.utils.time_format import format_time_ago, format_time_left
 from src.models.analysis import FactVerification, MarketRegime, SurpriseScore
@@ -458,7 +457,9 @@ def get_market_regime(engine):
     """Get current market regime"""
     try:
         with Session(engine) as db:
-            regime = db.query(MarketRegime).order_by(desc(MarketRegime.created_at)).first()
+            # timestamp, not created_at: the rest of the pipeline picks the
+            # current regime by effective time, and the index is on timestamp.
+            regime = db.query(MarketRegime).order_by(desc(MarketRegime.timestamp)).first()
 
             if not regime:
                 return html.Div([

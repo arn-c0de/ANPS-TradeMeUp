@@ -136,7 +136,10 @@ class TradingSimulationEngine:
         return get_predicted_direction(prediction)
 
     def _get_latest_regime(self, db: Session) -> MarketRegime | None:
-        return db.query(MarketRegime).order_by(MarketRegime.created_at.desc()).first()
+        # Order by timestamp, the regime's own effective time and the indexed
+        # column. created_at is the insert time; ordering by it could pick a
+        # different regime than the rest of the pipeline sees.
+        return db.query(MarketRegime).order_by(MarketRegime.timestamp.desc()).first()
 
     def _regime_liquidity_stress(self, regime: MarketRegime | None) -> float:
         if not regime or not isinstance(regime.regime, dict):

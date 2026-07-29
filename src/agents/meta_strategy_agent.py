@@ -1,15 +1,13 @@
 """Agent 7: Meta-Strategy Agent - Ensemble predictions from multiple models."""
 import logging
-from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from datetime import UTC, datetime, timedelta
 
-import numpy as np
 from sqlalchemy.orm import Session
 
 from src.models.database import SessionLocal
 from src.models.entities import Entity
 from src.models.predictions import Prediction
-from src.utils.json_helpers import ensure_dict
+from src.utils.prediction_math import FLAT_RETURN_TOLERANCE_PCT, get_predicted_direction
 
 logger = logging.getLogger(__name__)
 
@@ -112,17 +110,19 @@ class MetaStrategyAgent:
     def _check_accuracy(self, prediction: Prediction, outcome) -> bool:
         """Check if prediction was correct."""
         # Extract predicted direction from direction_probabilities
-        probs = ensure_dict(prediction.direction_probabilities, {})
-        predicted_dir = max(probs, key=probs.get) if probs else 'flat'
+        predicted_dir = get_predicted_direction(prediction)
 
         actual_return = outcome.actual_return
+        if actual_return is None:
+            return False
 
         if predicted_dir == 'up':
             return actual_return > 0
         elif predicted_dir == 'down':
             return actual_return < 0
         else:
-            return abs(actual_return) < 0.01
+            # actual_return is a percentage, so the tolerance is 1%, not 0.01%
+            return abs(actual_return) < FLAT_RETURN_TOLERANCE_PCT
 
     def create_ensemble_prediction(
         self,

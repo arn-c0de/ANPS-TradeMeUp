@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 
 ## [1.0.5] - 2026-07-29
 
+### Fixed (agents, ML and API)
+- Four agents read `prediction.predicted_direction` / `.predicted_return` /
+  `.model_id` as if they were columns. They are not, so model performance
+  monitoring, A/B testing, confidence calibration, and the ensemble strategy
+  all raised `AttributeError` on their first row. The two derived values are
+  now properties on the model; `model_id` call sites use `model_version`
+- `Prediction.model_id` was also used inside SQLAlchemy query filters, where
+  it compared a Python object instead of emitting SQL
+- A "flat" prediction was scored correct only within 0.01%, not 1%, because
+  `actual_return` is stored as a percentage - flat was effectively never right
+- `actual_return` of NULL was compared against zero without a guard
+- Accuracy divided by all fetched predictions, counting those without a usable
+  outcome as wrong
+- Impact score could exceed its documented 0-1 range: `regime_sensitivity`
+  reaches 2.73 but was divided by 2.0, and `sector_sensitivity` was fed in
+  unnormalized. Components are now scaled by their true maxima and the result
+  is clamped
+- Training datasets label rows with random noise (documented TODO); this is now
+  logged as a warning and marked with an `is_synthetic_target` column instead of
+  passing silently
+- Latest market regime was selected by `created_at` in two places and by the
+  indexed `timestamp` column in four others, so consumers could disagree about
+  the current regime
+- `_get_source_authority` crashed on a null source and could match its own
+  'default' sentinel
+
+### Performance
+- `calibrate_confidence` re-scanned 90 days of history for every prediction in
+  a batch; the calibration is now computed once per batch
+- Removed N+1 queries in the calibration, A/B testing, and performance-monitor
+  agents, and in the news and predictions API list endpoints
+- `/predictions/statistics/summary` loaded every prediction row into memory to
+  read one JSONB field
+
 ### Fixed
 - Prediction performance calculation localized the timezone of a shared cached
   DataFrame in place, so every repeat calculation for the same ticker failed and

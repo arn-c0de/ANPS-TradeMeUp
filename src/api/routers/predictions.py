@@ -1,6 +1,5 @@
 """API endpoints for predictions."""
-from datetime import UTC, datetime, timedelta, timezone
-from typing import List, Optional
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
@@ -70,24 +69,31 @@ def list_predictions(
     # Order by timestamp desc and limit
     predictions = query.order_by(Prediction.timestamp.desc()).limit(limit).all()
 
-    # Enrich with entity names
-    results = []
-    for pred in predictions:
-        entity = db.query(Entity).filter(Entity.entity_id == pred.entity_id).first()
-        result = PredictionResponse(
+    # Resolve entity names in one query. Looking each one up inside the loop
+    # issued up to `limit` extra round trips per request.
+    entity_ids = {pred.entity_id for pred in predictions}
+    entity_names = dict(
+        db.query(Entity.entity_id, Entity.entity_name)
+        .filter(Entity.entity_id.in_(entity_ids))
+        .all()
+    ) if entity_ids else {}
+
+    return [
+        PredictionResponse(
             prediction_id=str(pred.prediction_id),
             entity_id=pred.entity_id,
-            entity_name=entity.entity_name if entity else None,
+            entity_name=entity_names.get(pred.entity_id),
             timestamp=pred.timestamp,
             horizon=pred.horizon,
-            direction_probabilities=pred.direction_probabilities,
-            expected_return=pred.expected_return,
+            # ensure_dict: JSONB columns can come back as strings on rows
+            # carried over from the SQLite era, which would fail validation.
+            direction_probabilities=ensure_dict(pred.direction_probabilities, {}),
+            expected_return=ensure_dict(pred.expected_return, {}),
             confidence=pred.confidence,
             model_version=pred.model_version
         )
-        results.append(result)
-
-    return results
+        for pred in predictions
+    ]
 
 
 @router.get("/{prediction_id}", response_model=PredictionResponse)
@@ -111,8 +117,8 @@ def get_prediction(
         entity_name=entity.entity_name if entity else None,
         timestamp=prediction.timestamp,
         horizon=prediction.horizon,
-        direction_probabilities=prediction.direction_probabilities,
-        expected_return=prediction.expected_return,
+        direction_probabilities=ensure_dict(prediction.direction_probabilities, {}),
+        expected_return=ensure_dict(prediction.expected_return, {}),
         confidence=prediction.confidence,
         model_version=prediction.model_version
     )
@@ -125,12 +131,18 @@ def get_statistics(db: Session = Depends(get_db)):
 
     total = db.query(Prediction).count()
 
-    # Count bullish/bearish
-    # Note: This is SQLite-compatible, for PostgreSQL use jsonb operators
-    predictions = db.query(Prediction).all()
+    # Count bullish/bearish. Only the probabilities column is loaded: fetching
+    # whole Prediction objects pulled every row of the table (with its JSONB
+    # payloads) into memory just to read one field.
+    probability_rows = db.query(Prediction.direction_probabilities).all()
 
-    bullish = sum(1 for p in predictions if ensure_dict(p.direction_probabilities, {}).get('up', 0) > 0.5)
-    bearish = sum(1 for p in predictions if ensure_dict(p.direction_probabilities, {}).get('down', 0) > 0.5)
+    bullish = bearish = 0
+    for (raw_probabilities,) in probability_rows:
+        probabilities = ensure_dict(raw_probabilities, {})
+        if probabilities.get('up', 0) > 0.5:
+            bullish += 1
+        elif probabilities.get('down', 0) > 0.5:
+            bearish += 1
 
     # Average confidence
     avg_confidence = db.query(func.avg(Prediction.confidence)).scalar()

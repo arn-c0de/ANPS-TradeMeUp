@@ -1,23 +1,23 @@
 """Feature engineering for prediction models."""
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
 from src.models.analysis import ImpactScore, MarketRegime, SurpriseScore
-from src.models.entities import NewsEntityMapping
 from src.models.predictions import MarketData
 from src.models.processed_news import ProcessedNews
-from src.models.raw_news import RawNews
 
 logger = logging.getLogger(__name__)
 
 
 class FeatureEngineer:
     """Feature engineering for ML models."""
+
+    # Cap on rows pulled into a training dataset (MVP limit).
+    MAX_TRAINING_SAMPLES = 100
 
     def __init__(self, db: Session):
         """
@@ -120,7 +120,7 @@ class FeatureEngineer:
             ).order_by(MarketRegime.timestamp.desc()).first()
 
             if regime:
-                reg_data = regime.regime
+                reg_data = regime.regime or {}
                 features['regime_volatility_high'] = 1 if reg_data.get('volatility') == 'high' else 0
                 features['regime_trend_bear'] = 1 if reg_data.get('trend') == 'bear' else 0
                 features['regime_risk_off'] = 1 if reg_data.get('risk_appetite') == 'risk_off' else 0
@@ -190,6 +190,12 @@ class FeatureEngineer:
         Returns:
             DataFrame with features and targets
         """
+        logger.warning(
+            "create_training_dataset produces SYNTHETIC targets: target_return is "
+            "random noise, not a realised forward return. A model trained on this "
+            "dataset learns nothing. Implement the forward-return lookup before "
+            "using it for anything but plumbing tests."
+        )
         logger.info(f"Creating training dataset from {start_date} to {end_date}")
 
         # This is a simplified version - in production would be more complex
@@ -203,7 +209,14 @@ class FeatureEngineer:
 
         logger.info(f"Found {len(impact_scores)} impact scores to process")
 
-        for impact in impact_scores[:100]:  # Limit for MVP
+        if len(impact_scores) > self.MAX_TRAINING_SAMPLES:
+            logger.warning(
+                "Truncating to the first %d of %d impact scores (MVP limit)",
+                self.MAX_TRAINING_SAMPLES,
+                len(impact_scores),
+            )
+
+        for impact in impact_scores[:self.MAX_TRAINING_SAMPLES]:
             try:
                 # Extract features
                 features = self.extract_features_for_prediction(
@@ -217,9 +230,12 @@ class FeatureEngineer:
                 features['entity_id'] = impact.entity_id
                 features['timestamp'] = impact.created_at
 
-                # TODO: Calculate target (forward return)
-                # For MVP, use synthetic target
-                features['target_return'] = np.random.randn() * 0.02  # Placeholder
+                # TODO: Calculate the realised forward return over horizon_days
+                # from MarketData. Until then this is random noise, flagged by
+                # the warning at the top of this method and by is_synthetic_target
+                # so no caller mistakes it for a real label.
+                features['target_return'] = np.random.randn() * 0.02
+                features['is_synthetic_target'] = 1
 
                 data.append(features)
 

@@ -1,14 +1,13 @@
 """Agent 6.5: Confidence Calibration Agent - Calibrate prediction confidence scores."""
 import logging
-from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, List
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.models.database import SessionLocal
 from src.models.predictions import Prediction, PredictionOutcome
+from src.utils.prediction_math import FLAT_RETURN_TOLERANCE_PCT
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +62,21 @@ class ConfidenceCalibrationAgent:
             bin_counts = {i: [] for i in range(len(bins) - 1)}
             bin_accuracies = {i: [] for i in range(len(bins) - 1)}
 
+            # Fetch every outcome up front. Querying inside the loop added one
+            # round trip per prediction on top of the join that already
+            # selected them.
+            outcomes = {
+                row.prediction_id: row
+                for row in db.query(PredictionOutcome).filter(
+                    PredictionOutcome.prediction_id.in_(
+                        [pred.prediction_id for pred in predictions]
+                    )
+                ).all()
+            }
+
             for pred in predictions:
                 confidence = pred.confidence
-                outcome = db.query(PredictionOutcome).filter(
-                    PredictionOutcome.prediction_id == pred.prediction_id
-                ).first()
+                outcome = outcomes.get(pred.prediction_id)
 
                 if not outcome:
                     continue
@@ -121,26 +130,38 @@ class ConfidenceCalibrationAgent:
         predicted_direction = prediction.predicted_direction
         actual_return = outcome.actual_return
 
+        if actual_return is None:
+            return False
+
         if predicted_direction == 'up':
             return actual_return > 0
         elif predicted_direction == 'down':
             return actual_return < 0
         else:  # flat
-            return abs(actual_return) < 0.01
+            # actual_return is a percentage, so the tolerance is 1%, not 0.01%
+            return abs(actual_return) < FLAT_RETURN_TOLERANCE_PCT
 
-    def calibrate_confidence(self, raw_confidence: float, model_id: str = 'default') -> float:
+    def calibrate_confidence(
+        self,
+        raw_confidence: float,
+        model_id: str = 'default',
+        calibration: dict | None = None,
+    ) -> float:
         """
         Calibrate a raw confidence score.
 
         Args:
             raw_confidence: Uncalibrated confidence
             model_id: Model identifier
+            calibration: Pre-computed output of :meth:`calculate_calibration_error`.
+                Pass it when calibrating many predictions - recomputing it per
+                prediction re-scans 90 days of history every single time.
 
         Returns:
             Calibrated confidence
         """
-        # Get historical calibration data
-        calibration = self.calculate_calibration_error(lookback_days=90)
+        if calibration is None:
+            calibration = self.calculate_calibration_error(lookback_days=90)
 
         if 'error' in calibration:
             # No calibration available, return raw
@@ -190,10 +211,17 @@ class ConfidenceCalibrationAgent:
             raw_confidences = []
             calibrated_confidences = []
 
+            # Computed once for the whole batch. Calling calibrate_confidence
+            # without it re-ran a 90-day scan (plus its own per-row lookups)
+            # for every prediction in the batch.
+            calibration = self.calculate_calibration_error(lookback_days=90)
+
             for pred in predictions:
                 try:
                     raw_conf = pred.confidence
-                    calibrated_conf = self.calibrate_confidence(raw_conf, pred.model_id)
+                    calibrated_conf = self.calibrate_confidence(
+                        raw_conf, pred.model_version, calibration=calibration
+                    )
 
                     raw_confidences.append(raw_conf)
                     calibrated_confidences.append(calibrated_conf)

@@ -1,13 +1,16 @@
 """Agent 12.5: Model Performance Monitor - Track and analyze model performance."""
 import logging
-from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.models.predictions import Prediction, PredictionOutcome
+from src.utils.prediction_math import (
+    FLAT_RETURN_TOLERANCE_PCT,
+    get_expected_return_pct,
+    get_predicted_direction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,29 +68,21 @@ class ModelPerformanceMonitor:
         returns = []
         squared_errors = []
 
-        for pred in predictions:
-            outcome = self.db.query(PredictionOutcome).filter(
-                PredictionOutcome.prediction_id == pred.prediction_id
-            ).first()
+        outcomes = self._outcomes_by_prediction(predictions)
 
-            if not outcome:
+        for pred in predictions:
+            outcome = outcomes.get(pred.prediction_id)
+            if not outcome or outcome.actual_return is None:
                 continue
 
-            # Direction accuracy
-            predicted_dir = pred.predicted_direction
             actual_return = outcome.actual_return
 
-            if predicted_dir == 'up' and actual_return > 0:
-                correct_predictions += 1
-            elif predicted_dir == 'down' and actual_return < 0:
-                correct_predictions += 1
-            elif predicted_dir == 'flat' and abs(actual_return) < 0.01:
+            if self._direction_was_correct(pred, actual_return):
                 correct_predictions += 1
 
-            # Return prediction error
-            predicted_return = pred.predicted_return
-            error = (predicted_return - actual_return) ** 2
-            squared_errors.append(error)
+            # Return prediction error, both sides in percent
+            predicted_return = get_expected_return_pct(pred)
+            squared_errors.append((predicted_return - actual_return) ** 2)
             returns.append(actual_return)
 
         # Calculate metrics
@@ -210,29 +205,54 @@ class ModelPerformanceMonitor:
                 by_horizon[horizon] = {'error': 'insufficient_data'}
                 continue
 
+            outcomes = self._outcomes_by_prediction(predictions)
+
+            scored = 0
             correct = 0
             for pred in predictions:
-                outcome = self.db.query(PredictionOutcome).filter(
-                    PredictionOutcome.prediction_id == pred.prediction_id
-                ).first()
+                outcome = outcomes.get(pred.prediction_id)
+                if not outcome or outcome.actual_return is None:
+                    continue
 
-                if outcome:
-                    predicted_dir = pred.predicted_direction
-                    actual_return = outcome.actual_return
-
-                    if predicted_dir == 'up' and actual_return > 0:
-                        correct += 1
-                    elif predicted_dir == 'down' and actual_return < 0:
-                        correct += 1
-                    elif predicted_dir == 'flat' and abs(actual_return) < 0.01:
-                        correct += 1
+                scored += 1
+                if self._direction_was_correct(pred, outcome.actual_return):
+                    correct += 1
 
             by_horizon[horizon] = {
-                'accuracy': correct / len(predictions),
-                'sample_count': len(predictions)
+                # Divide by the number actually scored, not by every prediction
+                # fetched: predictions without a usable outcome would otherwise
+                # be counted as wrong.
+                'accuracy': correct / scored if scored else 0.0,
+                'sample_count': scored
             }
 
         return by_horizon
+
+    def _outcomes_by_prediction(self, predictions: list[Prediction]) -> dict:
+        """Fetch all outcomes for ``predictions`` in a single query.
+
+        Looking each outcome up inside the loop issued one query per
+        prediction, on top of the join that already selected them.
+        """
+        if not predictions:
+            return {}
+
+        prediction_ids = [pred.prediction_id for pred in predictions]
+        rows = self.db.query(PredictionOutcome).filter(
+            PredictionOutcome.prediction_id.in_(prediction_ids)
+        ).all()
+        return {row.prediction_id: row for row in rows}
+
+    @staticmethod
+    def _direction_was_correct(prediction: Prediction, actual_return_pct: float) -> bool:
+        """Whether the predicted direction matched the realised move."""
+        predicted_dir = get_predicted_direction(prediction)
+
+        if predicted_dir == 'up':
+            return actual_return_pct > 0
+        if predicted_dir == 'down':
+            return actual_return_pct < 0
+        return abs(actual_return_pct) < FLAT_RETURN_TOLERANCE_PCT
 
     def process_batch(self, limit: int = 5) -> dict:
         """

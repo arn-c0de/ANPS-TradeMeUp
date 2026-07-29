@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 # rarely exceed that, while decimal-format values cluster well below it.
 DECIMAL_FORMAT_LIMIT = 0.50
 
+# A "flat" prediction counts as correct when the realised move stays inside
+# this band. Percent, matching how actual_return is stored. Several agents
+# used a bare 0.01 here, which reads as 0.01% and made "flat" effectively
+# impossible to get right.
+FLAT_RETURN_TOLERANCE_PCT = 1.0
+
 
 def get_predicted_direction(prediction, default: str = "flat") -> str:
     """Return the most likely direction ('up' / 'down' / 'flat').

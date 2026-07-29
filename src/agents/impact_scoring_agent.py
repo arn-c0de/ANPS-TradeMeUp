@@ -11,7 +11,6 @@ import logging
 import math
 import uuid
 from datetime import UTC, datetime, timezone
-from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -95,6 +94,18 @@ class ImpactScoringAgent:
         'liquidity_adjustment': 0.05
     }
 
+    # Upper bounds of the multiplier-style components, used to map them into
+    # 0-1 before the weighted sum. The regime multipliers compound, so the
+    # maximum is their product (1.5 * 1.3 * 1.4 = 2.73) - not 2.0, which is
+    # what the score was previously divided by.
+    MAX_REGIME_SENSITIVITY = (
+        REGIME_MULTIPLIERS['high_volatility']
+        * REGIME_MULTIPLIERS['bear_market']
+        * REGIME_MULTIPLIERS['risk_off']
+    )
+    MAX_SECTOR_SENSITIVITY = max(SECTOR_SENSITIVITY.values())
+    MAX_SURPRISE_FACTOR = 2.0
+
     def __init__(self):
         """
         Initialize impact scoring agent.
@@ -104,10 +115,18 @@ class ImpactScoringAgent:
         """
         pass  # No db parameter!
 
-    def _get_source_authority(self, source: str) -> float:
+    def _get_source_authority(self, source: str | None) -> float:
         """Get authority score for news source."""
+        if not source:
+            return self.SOURCE_AUTHORITY['default']
+
+        source_lower = source.lower()
         for known_source, score in self.SOURCE_AUTHORITY.items():
-            if known_source.lower() in source.lower():
+            # Skip the 'default' entry: it is the fallback, not a source name,
+            # and a source containing the word "default" would match it.
+            if known_source == 'default':
+                continue
+            if known_source.lower() in source_lower:
                 return score
         return self.SOURCE_AUTHORITY['default']
 
@@ -515,18 +534,22 @@ class ImpactScoringAgent:
 
             time_decay = self._calculate_time_decay(news.published_at)
 
-            # Calculate weighted impact score
+            # Weighted impact score. Every term must land in 0-1 for the
+            # weights to mean what they say: regime_sensitivity was divided by
+            # 2.0 although it reaches 2.73, and sector_sensitivity (up to 1.2)
+            # was fed in unnormalized, so the sum could exceed 1.0.
             impact_base = (
                 self.WEIGHTS['news_importance'] * news_importance +
-                self.WEIGHTS['regime_sensitivity'] * (regime_sensitivity / 2.0) +  # Normalize to 0-1
-                self.WEIGHTS['sector_sensitivity'] * sector_sensitivity +
+                self.WEIGHTS['regime_sensitivity'] * (regime_sensitivity / self.MAX_REGIME_SENSITIVITY) +
+                self.WEIGHTS['sector_sensitivity'] * (sector_sensitivity / self.MAX_SECTOR_SENSITIVITY) +
                 self.WEIGHTS['historical_reaction'] * historical_reaction +
-                self.WEIGHTS['surprise_factor'] * (surprise_factor / 2.0) +  # Normalize to 0-1
+                self.WEIGHTS['surprise_factor'] * (surprise_factor / self.MAX_SURPRISE_FACTOR) +
                 self.WEIGHTS['liquidity_adjustment'] * liquidity_adjustment
             )
 
-            # Apply time decay
-            impact_score = impact_base * time_decay
+            # Apply time decay, then clamp: impact_score is documented and
+            # consumed as a 0-1 score.
+            impact_score = min(1.0, max(0.0, impact_base * time_decay))
 
             # Determine time horizon
             if processed.event_type in ['earnings', 'guidance']:

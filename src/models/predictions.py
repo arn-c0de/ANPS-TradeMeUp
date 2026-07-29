@@ -49,6 +49,29 @@ class Prediction(Base):
         Index('idx_predictions_horizon', 'horizon', 'created_at'),  # For filtering by horizon + date
     )
 
+    # Derived, read-only views of the JSONB payloads. Several agents already
+    # read `prediction.predicted_direction` / `.predicted_return` / `.model_id`
+    # as if they were columns; they are not, so those paths raised
+    # AttributeError on the first row. Deriving them here keeps every consumer
+    # on one interpretation of the stored JSON.
+
+    @property
+    def predicted_direction(self) -> str:
+        """Most likely direction ('up' / 'down' / 'flat')."""
+        from src.utils.prediction_math import get_predicted_direction
+        return get_predicted_direction(self)
+
+    @property
+    def predicted_return(self) -> float:
+        """Expected return as a percentage (2.0 means +2%)."""
+        from src.utils.prediction_math import get_expected_return_pct
+        return get_expected_return_pct(self)
+
+    # Deliberately no `model_id` alias: the column is `model_version`, and a
+    # property would only work on instances. `Prediction.model_id == x` inside
+    # a query filter would silently compare a property object instead of
+    # emitting SQL. Call sites use model_version directly.
+
     def __repr__(self):
         return f"<Prediction(id={self.prediction_id}, entity={self.entity_id}, horizon={self.horizon})>"
 

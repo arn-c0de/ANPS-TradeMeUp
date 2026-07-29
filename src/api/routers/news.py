@@ -1,6 +1,5 @@
 """API endpoints for news."""
 from datetime import datetime
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
@@ -76,28 +75,33 @@ def list_news(
     # Order by date desc and limit
     news_items = query.order_by(RawNews.published_at.desc()).limit(limit).all()
 
-    # Build response
+    # Fetch quality and processed data for the whole page in two queries.
+    # Doing it inside the loop cost two extra round trips per article, so a
+    # 100-item page issued 201 queries.
+    news_ids = [news.news_id for news in news_items]
+    quality_scores = dict(
+        db.query(DataQualityScore.news_id, DataQualityScore.quality_score)
+        .filter(DataQualityScore.news_id.in_(news_ids))
+        .all()
+    ) if news_ids else {}
+    processed_by_id = {
+        row.news_id: row
+        for row in db.query(ProcessedNews).filter(ProcessedNews.news_id.in_(news_ids)).all()
+    } if news_ids else {}
+
     results = []
     for news in news_items:
-        quality = db.query(DataQualityScore).filter(
-            DataQualityScore.news_id == news.news_id
-        ).first()
-
-        processed = db.query(ProcessedNews).filter(
-            ProcessedNews.news_id == news.news_id
-        ).first()
-
-        result = NewsResponse(
+        processed = processed_by_id.get(news.news_id)
+        results.append(NewsResponse(
             news_id=str(news.news_id),
             source=news.source,
             title=news.title,
             published_at=news.published_at,
             url=news.url,
-            quality_score=quality.quality_score if quality else None,
+            quality_score=quality_scores.get(news.news_id),
             event_type=processed.event_type if processed else None,
             sentiment=processed.sentiment if processed else None
-        )
-        results.append(result)
+        ))
 
     return results
 

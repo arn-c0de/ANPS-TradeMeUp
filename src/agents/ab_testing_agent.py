@@ -1,13 +1,11 @@
 """Agent 13: A/B Testing Framework - Test and compare model variants."""
 import logging
-from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from datetime import UTC, datetime, timedelta
 
-import numpy as np
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.models.predictions import Prediction, PredictionOutcome
+from src.utils.prediction_math import FLAT_RETURN_TOLERANCE_PCT
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +91,7 @@ class ABTestingAgent:
             PredictionOutcome,
             Prediction.prediction_id == PredictionOutcome.prediction_id
         ).filter(
-            Prediction.model_id == model_a,
+            Prediction.model_version == model_a,
             Prediction.created_at >= cutoff
         ).all()
 
@@ -101,7 +99,7 @@ class ABTestingAgent:
             PredictionOutcome,
             Prediction.prediction_id == PredictionOutcome.prediction_id
         ).filter(
-            Prediction.model_id == model_b,
+            Prediction.model_version == model_b,
             Prediction.created_at >= cutoff
         ).all()
 
@@ -154,34 +152,45 @@ class ABTestingAgent:
         correct = 0
         accuracies = []
 
-        for pred in predictions:
-            outcome = self.db.query(PredictionOutcome).filter(
-                PredictionOutcome.prediction_id == pred.prediction_id
-            ).first()
+        # Fetch every outcome in one query rather than one per prediction.
+        outcomes = {}
+        if predictions:
+            outcomes = {
+                row.prediction_id: row
+                for row in self.db.query(PredictionOutcome).filter(
+                    PredictionOutcome.prediction_id.in_(
+                        [pred.prediction_id for pred in predictions]
+                    )
+                ).all()
+            }
 
-            if not outcome:
+        for pred in predictions:
+            outcome = outcomes.get(pred.prediction_id)
+            if not outcome or outcome.actual_return is None:
                 continue
 
-            predicted_dir = pred.predicted_direction
             actual_return = outcome.actual_return
+            predicted_dir = pred.predicted_direction
 
             is_correct = False
             if predicted_dir == 'up' and actual_return > 0:
                 is_correct = True
             elif predicted_dir == 'down' and actual_return < 0:
                 is_correct = True
-            elif predicted_dir == 'flat' and abs(actual_return) < 0.01:
+            # actual_return is a percentage, so the tolerance is 1%, not 0.01%
+            elif predicted_dir == 'flat' and abs(actual_return) < FLAT_RETURN_TOLERANCE_PCT:
                 is_correct = True
 
             if is_correct:
                 correct += 1
-                accuracies.append(1)
-            else:
-                accuracies.append(0)
+            accuracies.append(1 if is_correct else 0)
 
+        # Divide by the number actually scored. Using len(predictions) counted
+        # every prediction lacking a usable outcome as a miss, biasing both
+        # variants' accuracy downward by however much data was missing.
         return {
-            'accuracy': correct / len(predictions) if predictions else 0.0,
-            'sample_size': len(predictions),
+            'accuracy': correct / len(accuracies) if accuracies else 0.0,
+            'sample_size': len(accuracies),
             'accuracies': accuracies
         }
 
@@ -287,7 +296,7 @@ class ABTestingAgent:
         """
         # Get unique model pairs
         model_pairs = self.db.query(
-            Prediction.model_id
+            Prediction.model_version
         ).distinct().limit(limit).all()
 
         if len(model_pairs) < 2:
