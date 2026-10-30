@@ -67,7 +67,7 @@ def _parse_sentiment_overall(sentiment_value):
         parsed = sentiment_value if isinstance(sentiment_value, dict) else json.loads(sentiment_value)
         if 'overall' in parsed:
             return parsed['overall']
-    except Exception:
+    except (TypeError, ValueError):
         pass
     return None
 

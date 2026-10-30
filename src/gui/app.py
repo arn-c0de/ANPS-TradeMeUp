@@ -3,6 +3,7 @@ ANPS-TradeMeUp Dashboard - Main Application
 Multi-tab dashboard for monitoring news, predictions, and system health
 """
 
+import logging
 import os
 
 import dash
@@ -34,8 +35,9 @@ silence_third_party_warnings()
 try:
     from src.utils.db_log_handler import attach_db_handler as _attach_db_handler
     _attach_db_handler(source="gui")
-except Exception:
-    pass
+except Exception as e:
+    # Only the type: the message of a connection error can carry the DB URL.
+    logging.getLogger(__name__).warning("DB log handler not attached (%s)", type(e).__name__)
 
 # Initialize Dash app with Bootstrap dark theme
 app = dash.Dash(

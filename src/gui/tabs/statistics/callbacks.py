@@ -96,7 +96,7 @@ def register_callbacks(app):
                 h = int(custom_hours)
                 if 0 < h <= 8760:
                     return (now_dt - timedelta(hours=h)).date(), now, f"custom-{h}h"
-            except Exception:
+            except (TypeError, ValueError):
                 pass
         elif trigger_id in ("quick-all", "stats-reset-filter"):
             return None, None, "all"
@@ -226,7 +226,7 @@ def register_callbacks(app):
                     scroll_count = int(scroll_trigger_value) if scroll_trigger_value else 0
                     if scroll_count > (current_limit // 50):
                         current_limit = current_limit + 50
-                except Exception:
+                except (TypeError, ValueError):
                     pass
             if "search-input" in trigger_id or "date-range" in trigger_id or "active-filter" in trigger_id:
                 current_limit = 50
@@ -259,7 +259,7 @@ def register_callbacks(app):
                     scroll_count = int(scroll_trigger_value) if scroll_trigger_value else 0
                     if scroll_count > (current_limit // 50):
                         current_limit = current_limit + 50
-                except Exception:
+                except (TypeError, ValueError):
                     pass
             if "search-input" in trigger_id or "date-range" in trigger_id or "active-filter" in trigger_id:
                 current_limit = 50

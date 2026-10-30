@@ -24,8 +24,9 @@ async def lifespan(app: FastAPI):
     try:
         from src.utils.db_log_handler import attach_db_handler
         attach_db_handler(source="api")
-    except Exception:
-        pass
+    except Exception as e:
+        # Only the type: the message of a connection error can carry the DB URL.
+        logger.warning("DB log handler not attached (%s)", type(e).__name__)
 
     logger.info("Starting ANPS-TradeMeUp API...")
     logger.info(f"Environment: {settings.app_env}")
