@@ -3,6 +3,7 @@ import logging
 from datetime import UTC, datetime
 
 from langdetect import LangDetectException, detect
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.models.data_quality import DataQualityScore
@@ -104,10 +105,10 @@ class DataQualityAgent:
         Returns:
             UUID of duplicate article if found, None otherwise
         """
-        duplicate = db.query(RawNews).filter(
+        duplicate = db.scalar(select(RawNews).where(
             RawNews.content_hash == content_hash,
             RawNews.news_id != news_id
-        ).first()
+        ).limit(1))
 
         if duplicate:
             logger.info(f"Duplicate detected by hash: {news_id} -> {duplicate.news_id}")
@@ -127,10 +128,10 @@ class DataQualityAgent:
         Returns:
             UUID of duplicate article if found, None otherwise
         """
-        duplicate = db.query(RawNews).filter(
+        duplicate = db.scalar(select(RawNews).where(
             RawNews.url == url,
             RawNews.news_id != news_id
-        ).first()
+        ).limit(1))
 
         if duplicate:
             logger.info(f"Duplicate detected by URL: {news_id} -> {duplicate.news_id}")
@@ -186,9 +187,9 @@ class DataQualityAgent:
             Dictionary with validation results
         """
         # Fetch article
-        article = db.query(RawNews).filter(
+        article = db.scalar(select(RawNews).where(
             RawNews.news_id == news_id
-        ).first()
+        ).limit(1))
 
         if not article:
             raise ValueError(f"Article {news_id} not found")
@@ -286,9 +287,9 @@ class DataQualityAgent:
         result = self.validate_article(db, news_id)
 
         # Check if record exists
-        existing = db.query(DataQualityScore).filter(
+        existing = db.scalar(select(DataQualityScore).where(
             DataQualityScore.news_id == result['news_id']
-        ).first()
+        ).limit(1))
 
         if existing:
             # Update existing
@@ -359,14 +360,14 @@ class DataQualityAgent:
 
         with get_scoped_session() as db:
             # Find articles without quality scores (newest first)
-            articles = db.query(RawNews).outerjoin(
+            articles = db.scalars(select(RawNews).outerjoin(
                 DataQualityScore,
                 RawNews.news_id == DataQualityScore.news_id
-            ).filter(
+            ).where(
                 DataQualityScore.news_id.is_(None)
             ).order_by(
                 RawNews.published_at.desc()
-            ).limit(limit).all()
+            ).limit(limit)).all()
 
             logger.info(f"Processing {len(articles)} articles for quality assessment")
 
@@ -410,25 +411,25 @@ class DataQualityAgent:
         from src.models.database import get_scoped_session
 
         with get_scoped_session() as db:
-            total_assessed = db.query(DataQualityScore).count()
+            total_assessed = db.scalar(select(func.count()).select_from(DataQualityScore))
 
             # Count by quality tiers
-            high_quality = db.query(DataQualityScore).filter(
+            high_quality = db.scalar(select(func.count()).select_from(DataQualityScore).where(
                 DataQualityScore.quality_score >= 0.8
-            ).count()
+            ))
 
-            medium_quality = db.query(DataQualityScore).filter(
+            medium_quality = db.scalar(select(func.count()).select_from(DataQualityScore).where(
                 DataQualityScore.quality_score >= 0.6,
                 DataQualityScore.quality_score < 0.8
-            ).count()
+            ))
 
-            low_quality = db.query(DataQualityScore).filter(
+            low_quality = db.scalar(select(func.count()).select_from(DataQualityScore).where(
                 DataQualityScore.quality_score < 0.6
-            ).count()
+            ))
 
-            duplicates = db.query(DataQualityScore).filter(
+            duplicates = db.scalar(select(func.count()).select_from(DataQualityScore).where(
                 DataQualityScore.duplicate_of.isnot(None)
-            ).count()
+            ))
 
             return {
                 'total_assessed': total_assessed,

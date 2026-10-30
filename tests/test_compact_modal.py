@@ -18,6 +18,8 @@ def test_compact_modal():
     logger.info("="*80)
 
     try:
+        from sqlalchemy import select
+
         from src.gui.tabs.predictions import get_prediction_details
         from src.models.database import engine, get_scoped_session
         from src.models.predictions import Prediction
@@ -25,15 +27,15 @@ def test_compact_modal():
 
         with get_scoped_session() as db:
             # Get a prediction that has a simulation
-            prediction = db.query(Prediction).join(
+            prediction = db.scalar(select(Prediction).join(
                 TradingSimulation,
                 Prediction.prediction_id == TradingSimulation.prediction_id
-            ).first()
+            ).limit(1))
 
             if not prediction:
                 logger.warning("⚠ No predictions with simulations found")
                 # Try to get any prediction
-                prediction = db.query(Prediction).first()
+                prediction = db.scalar(select(Prediction).limit(1))
                 if not prediction:
                     logger.error("✗ No predictions found at all")
                     return False

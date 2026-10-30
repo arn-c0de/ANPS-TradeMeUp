@@ -13,7 +13,7 @@ from uuid import UUID
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, dcc, html
-from sqlalchemy import func, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from src.config.settings import VERSION
@@ -155,7 +155,7 @@ def _query_db_stats() -> dict:
     with Session(_engine) as db:
         for tbl, model in _MODEL_MAP.items():
             try:
-                stats[tbl] = db.query(func.count()).select_from(model).scalar() or 0
+                stats[tbl] = db.scalar(select(func.count()).select_from(model)) or 0
             except Exception:
                 stats[tbl] = "?"
         try:
@@ -192,20 +192,21 @@ def _get_news_page(page: int) -> tuple[list, int]:
     offset = page * PAGE_SIZE
     try:
         with Session(_engine) as db:
-            total = db.query(func.count()).select_from(RawNews).scalar() or 0
+            total = db.scalar(select(func.count()).select_from(RawNews)) or 0
             rows = (
-                db.query(RawNews)
-                .order_by(RawNews.published_at.desc())
-                .offset(offset)
-                .limit(PAGE_SIZE)
-                .all()
+                db.scalars(
+                    select(RawNews)
+                    .order_by(RawNews.published_at.desc())
+                    .offset(offset)
+                    .limit(PAGE_SIZE)
+                ).all()
             )
             news_ids = [str(r.news_id) for r in rows]
             processed_set = set()
             if news_ids:
-                processed = db.query(ProcessedNews.news_id).filter(
+                processed = db.execute(select(ProcessedNews.news_id).where(
                     ProcessedNews.news_id.in_(news_ids)
-                ).all()
+                )).all()
                 processed_set = {str(p[0]) for p in processed}
             pred_counts = {}
             if news_ids:
@@ -234,13 +235,14 @@ def _get_predictions_page(page: int) -> tuple[list, int]:
     offset = page * PAGE_SIZE
     try:
         with Session(_engine) as db:
-            total = db.query(func.count()).select_from(Prediction).scalar() or 0
+            total = db.scalar(select(func.count()).select_from(Prediction)) or 0
             rows = (
-                db.query(Prediction)
-                .order_by(Prediction.created_at.desc())
-                .offset(offset)
-                .limit(PAGE_SIZE)
-                .all()
+                db.scalars(
+                    select(Prediction)
+                    .order_by(Prediction.created_at.desc())
+                    .offset(offset)
+                    .limit(PAGE_SIZE)
+                ).all()
             )
             data = []
             for r in rows:
@@ -262,13 +264,14 @@ def _get_simulations_page(page: int) -> tuple[list, int]:
     offset = page * PAGE_SIZE
     try:
         with Session(_engine) as db:
-            total = db.query(func.count()).select_from(TradingSimulation).scalar() or 0
+            total = db.scalar(select(func.count()).select_from(TradingSimulation)) or 0
             rows = (
-                db.query(TradingSimulation)
-                .order_by(TradingSimulation.created_at.desc())
-                .offset(offset)
-                .limit(PAGE_SIZE)
-                .all()
+                db.scalars(
+                    select(TradingSimulation)
+                    .order_by(TradingSimulation.created_at.desc())
+                    .offset(offset)
+                    .limit(PAGE_SIZE)
+                ).all()
             )
             data = []
             for r in rows:
@@ -400,12 +403,12 @@ def _export_db(selected_tables: list,
                 if tbl not in selected_tables:
                     continue
                 model = _MODEL_MAP[tbl]
-                q = db.query(model)
+                stmt = select(model)
                 date_col_name = _DATE_COLS.get(tbl)
                 if start_dt and date_col_name and hasattr(model, date_col_name):
                     date_col = getattr(model, date_col_name)
-                    q = q.filter(date_col >= start_dt, date_col <= end_dt)
-                rows = q.all()
+                    stmt = stmt.where(date_col >= start_dt, date_col <= end_dt)
+                rows = db.scalars(stmt).all()
                 data[tbl] = [_serialize_row(r) for r in rows]
                 stats[tbl] = len(data[tbl])
     except Exception as e:
@@ -575,7 +578,7 @@ def _execute_import(obj: dict, mode: str,
             with Session(_engine) as db:
                 for tbl in reversed(_TABLE_ORDER_EXPORT):
                     if tbl in data and tbl in _MODEL_MAP:
-                        db.query(_MODEL_MAP[tbl]).delete()
+                        db.execute(delete(_MODEL_MAP[tbl]))
                 db.commit()
         except Exception:
             return {"results": {}, "errors": ["Failed to clear existing data before replace."]}

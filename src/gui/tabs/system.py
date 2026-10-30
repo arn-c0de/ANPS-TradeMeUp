@@ -5,7 +5,7 @@ import json
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, dcc, html
-from sqlalchemy import func
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from src.gui.utils.callbacks import safe_callback
@@ -181,14 +181,14 @@ def create_layout():
 def _query_logs(source: str, level: str, count: int, search: str) -> list:
     try:
         with Session(_engine) as db:
-            q = db.query(SystemLog).order_by(SystemLog.timestamp.desc())
+            stmt = select(SystemLog).order_by(SystemLog.timestamp.desc())
             if source and source != "all":
-                q = q.filter(SystemLog.source == source)
+                stmt = stmt.where(SystemLog.source == source)
             if level and level != "all":
-                q = q.filter(SystemLog.level == level)
+                stmt = stmt.where(SystemLog.level == level)
             if search:
-                q = q.filter(SystemLog.message.ilike(f"%{search}%"))
-            rows = q.limit(count).all()
+                stmt = stmt.where(SystemLog.message.ilike(f"%{search}%"))
+            rows = db.scalars(stmt.limit(count)).all()
             return [{
                 "log_id":    r.log_id,
                 "timestamp": r.timestamp.strftime("%Y-%m-%d %H:%M:%S") if r.timestamp else "",
@@ -289,16 +289,16 @@ def _table_counts(engine) -> dict:
     """
     with Session(engine) as db:
         return {
-            "📰 Raw News":           db.query(func.count(RawNews.news_id)).scalar() or 0,
-            "✅ Quality Scores":     db.query(func.count(DataQualityScore.news_id)).scalar() or 0,
-            "🧠 Processed News":     db.query(func.count(ProcessedNews.news_id)).scalar() or 0,
-            "🏢 Entities":           db.query(func.count(Entity.entity_id)).scalar() or 0,
-            "⚡ Impact Scores":      db.query(func.count(ImpactScore.score_id)).scalar() or 0,
-            "🎯 Surprise Scores":    db.query(func.count(SurpriseScore.surprise_id)).scalar() or 0,
-            "🔍 Fact Verifications": db.query(func.count(FactVerification.verification_id)).scalar() or 0,
-            "🌡️ Market Regimes":     db.query(func.count(MarketRegime.regime_id)).scalar() or 0,
-            "📉 Signal Decay":       db.query(func.count(SignalDecayModel.news_id)).scalar() or 0,
-            "🔮 Predictions":        db.query(func.count(Prediction.prediction_id)).scalar() or 0,
+            "📰 Raw News":           db.scalar(select(func.count(RawNews.news_id))) or 0,
+            "✅ Quality Scores":     db.scalar(select(func.count(DataQualityScore.news_id))) or 0,
+            "🧠 Processed News":     db.scalar(select(func.count(ProcessedNews.news_id))) or 0,
+            "🏢 Entities":           db.scalar(select(func.count(Entity.entity_id))) or 0,
+            "⚡ Impact Scores":      db.scalar(select(func.count(ImpactScore.score_id))) or 0,
+            "🎯 Surprise Scores":    db.scalar(select(func.count(SurpriseScore.surprise_id))) or 0,
+            "🔍 Fact Verifications": db.scalar(select(func.count(FactVerification.verification_id))) or 0,
+            "🌡️ Market Regimes":     db.scalar(select(func.count(MarketRegime.regime_id))) or 0,
+            "📉 Signal Decay":       db.scalar(select(func.count(SignalDecayModel.news_id))) or 0,
+            "🔮 Predictions":        db.scalar(select(func.count(Prediction.prediction_id))) or 0,
         }
 
 
@@ -324,8 +324,8 @@ def _pipeline_progress(engine) -> dict:
     """How much of the ingested news has made it through NLP."""
     with Session(engine) as db:
         return {
-            "total_news": db.query(func.count(RawNews.news_id)).scalar() or 0,
-            "processed": db.query(func.count(ProcessedNews.news_id)).scalar() or 0,
+            "total_news": db.scalar(select(func.count(RawNews.news_id))) or 0,
+            "processed": db.scalar(select(func.count(ProcessedNews.news_id))) or 0,
         }
 
 
@@ -434,7 +434,7 @@ def register_callbacks(app):
             return dash.no_update
         try:
             with Session(_engine) as db:
-                deleted = db.query(SystemLog).delete()
+                deleted = db.execute(delete(SystemLog)).rowcount
                 db.commit()
             return dbc.Alert(f"Cleared {deleted:,} log entries.",
                              color="success", dismissable=True, duration=4000)

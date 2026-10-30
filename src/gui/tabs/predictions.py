@@ -10,7 +10,7 @@ import dash
 import dash_bootstrap_components as dbc
 from dash import ALL, Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
-from sqlalchemy import desc
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, joinedload
 
 from src.gui.helpers.prediction_details_popup import get_prediction_details
@@ -199,7 +199,7 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     db.expire_all()
 
                 # Use eager loading to fetch entity and outcome in single query (fixes N+1 problem)
-                query = db.query(Prediction).options(
+                stmt = select(Prediction).options(
                     joinedload(Prediction.entity),
                     joinedload(Prediction.outcome)
                 ).join(
@@ -207,11 +207,11 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                 ).order_by(desc(Prediction.created_at))
 
                 # Filter by selected horizon
-                query = query.filter(Prediction.horizon == horizon)
+                stmt = stmt.where(Prediction.horizon == horizon)
 
             # Apply filters
             if entity_filter:
-                query = query.filter(Prediction.entity_id.in_(entity_filter))
+                stmt = stmt.where(Prediction.entity_id.in_(entity_filter))
 
             if date_range and len(date_range) == 2:
                 start, end = date_range
@@ -221,19 +221,19 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                         start = datetime.fromisoformat(start).date()
                     # Start of day (timezone-aware for PostgreSQL)
                     start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=UTC)
-                    query = query.filter(Prediction.created_at >= start_dt)
+                    stmt = stmt.where(Prediction.created_at >= start_dt)
                 if end:
                     # Convert string to date if needed
                     if isinstance(end, str):
                         end = datetime.fromisoformat(end).date()
                     # End of day (timezone-aware for PostgreSQL)
                     end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=UTC)
-                    query = query.filter(Prediction.created_at <= end_dt)
+                    stmt = stmt.where(Prediction.created_at <= end_dt)
 
             if min_confidence > 0:
-                query = query.filter(Prediction.confidence >= min_confidence / 100)
+                stmt = stmt.where(Prediction.confidence >= min_confidence / 100)
 
-            predictions = query.limit(200).all()
+            predictions = db.scalars(stmt.limit(200)).unique().all()
 
             # Filter by surprise score if needed
             if surprise_filter and surprise_filter != 'all':
@@ -245,9 +245,9 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                         # Ensure all IDs are strings (SQLAlchemy IN expects a list/tuple of scalars)
                         news_ids = [str(n) for n in news_ids]
                         # Check surprise scores for related news
-                        surprise_scores = db.query(SurpriseScore).filter(
+                        surprise_scores = db.scalars(select(SurpriseScore).where(
                             SurpriseScore.news_id.in_(news_ids)
-                        ).all()
+                        )).all()
 
                         if surprise_scores:
                             # Get average surprise score (use surprise_normalized field)
@@ -267,9 +267,9 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
             try:
                 if predictions:
                     prediction_ids = [pred.prediction_id for pred in predictions]
-                    simulations = db.query(TradingSimulation).filter(
+                    simulations = db.scalars(select(TradingSimulation).where(
                         TradingSimulation.prediction_id.in_(prediction_ids)
-                    ).order_by(desc(TradingSimulation.created_at)).all()
+                    ).order_by(desc(TradingSimulation.created_at))).all()
 
                     for simulation in simulations:
                         pred_key = str(simulation.prediction_id)
@@ -447,9 +447,9 @@ def get_entity_options(engine):
         with Session(engine) as db:
             # Get all entities that have predictions (regardless of entity_type)
             # This includes companies, ETFs, indices, etc.
-            entities = db.query(Entity).join(
+            entities = db.scalars(select(Entity).join(
                 Prediction, Entity.entity_id == Prediction.entity_id
-            ).distinct().order_by(Entity.entity_name).all()
+            ).distinct().order_by(Entity.entity_name)).all()
 
             return [
                 {'label': f"{e.entity_name} ({e.entity_id})", 'value': e.entity_id}
@@ -727,9 +727,9 @@ def register_callbacks(app):
             try:
                 with Session(_engine) as db:
                     # Get the prediction to find entity_id
-                    pred = db.query(Prediction).filter(
+                    pred = db.scalar(select(Prediction).where(
                         Prediction.prediction_id == prediction_id
-                    ).first()
+                    ).limit(1))
 
                     if pred and pred.entity_id:
                         logger.info(f"📊 Batch-updating all predictions for {pred.entity_id}")

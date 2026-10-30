@@ -2,6 +2,7 @@
 Quick test to check if callbacks are working
 """
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.database import SessionLocal
@@ -13,14 +14,14 @@ with Session(engine) as db:
     from src.models.entities import Entity
     from src.models.predictions import Prediction
 
-    pred = db.query(Prediction).first()
+    pred = db.scalar(select(Prediction).limit(1))
     if pred:
         print(f"✓ Found prediction: {pred.prediction_id}")
         print(f"  Entity: {pred.entity_id}")
         print(f"  Created: {pred.created_at}")
         print(f"  Horizon: {pred.horizon}")
 
-        entity = db.query(Entity).filter(Entity.entity_id == pred.entity_id).first()
+        entity = db.scalar(select(Entity).where(Entity.entity_id == pred.entity_id).limit(1))
         if entity:
             print(f"  Entity name: {entity.entity_name}")
 

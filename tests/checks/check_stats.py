@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+from sqlalchemy import func, select
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.models.analysis import FactVerification, ImpactScore, SurpriseScore
@@ -17,37 +19,37 @@ db = SessionLocal()
 print("=" * 60)
 print("DATABASE STATISTICS")
 print("=" * 60)
-print(f"RawNews Total:              {db.query(RawNews).count()}")
-print(f"RawNews with quality_score: {db.query(RawNews).filter(RawNews.quality_score.is_not(None)).count()}")
-print(f"ProcessedNews:              {db.query(ProcessedNews).count()}")
-print(f"Entities:                   {db.query(Entity).count()}")
-print(f"EntityMappings:             {db.query(NewsEntityMapping).count()}")
-print(f"SurpriseScores:             {db.query(SurpriseScore).count()}")
-print(f"ImpactScores:               {db.query(ImpactScore).count()}")
-print(f"FactVerifications:          {db.query(FactVerification).count()}")
-print(f"Predictions:                {db.query(Prediction).count()}")
+print(f"RawNews Total:              {db.scalar(select(func.count()).select_from(RawNews))}")
+print(f"RawNews with quality_score: {db.scalar(select(func.count()).select_from(RawNews).where(RawNews.quality_score.is_not(None)))}")
+print(f"ProcessedNews:              {db.scalar(select(func.count()).select_from(ProcessedNews))}")
+print(f"Entities:                   {db.scalar(select(func.count()).select_from(Entity))}")
+print(f"EntityMappings:             {db.scalar(select(func.count()).select_from(NewsEntityMapping))}")
+print(f"SurpriseScores:             {db.scalar(select(func.count()).select_from(SurpriseScore))}")
+print(f"ImpactScores:               {db.scalar(select(func.count()).select_from(ImpactScore))}")
+print(f"FactVerifications:          {db.scalar(select(func.count()).select_from(FactVerification))}")
+print(f"Predictions:                {db.scalar(select(func.count()).select_from(Prediction))}")
 print("=" * 60)
 
 # Check what's blocking the pipeline
-unprocessed = db.query(RawNews).filter(
+unprocessed = db.scalar(select(func.count()).select_from(select(RawNews).where(
     RawNews.quality_score.is_not(None)
 ).outerjoin(
     ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-).filter(ProcessedNews.news_id.is_(None)).count()
+).where(ProcessedNews.news_id.is_(None)).subquery()))
 
 print(f"\nArticles needing NLP processing: {unprocessed}")
 
 # Check ProcessedNews without entities
-processed_without_entities = db.query(ProcessedNews).outerjoin(
+processed_without_entities = db.scalar(select(func.count()).select_from(select(ProcessedNews).outerjoin(
     NewsEntityMapping, ProcessedNews.news_id == NewsEntityMapping.news_id
-).filter(NewsEntityMapping.news_id.is_(None)).count()
+).where(NewsEntityMapping.news_id.is_(None)).subquery()))
 
 print(f"ProcessedNews without entities: {processed_without_entities}")
 
 # Check ProcessedNews without fact verification
-processed_without_facts = db.query(ProcessedNews).outerjoin(
+processed_without_facts = db.scalar(select(func.count()).select_from(select(ProcessedNews).outerjoin(
     FactVerification, ProcessedNews.news_id == FactVerification.news_id
-).filter(FactVerification.news_id.is_(None)).count()
+).where(FactVerification.news_id.is_(None)).subquery()))
 
 print(f"ProcessedNews without fact checks: {processed_without_facts}")
 

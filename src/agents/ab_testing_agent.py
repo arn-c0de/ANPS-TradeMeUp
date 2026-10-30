@@ -2,6 +2,7 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.predictions import Prediction, PredictionOutcome
@@ -87,21 +88,21 @@ class ABTestingAgent:
         cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
         # Get predictions for both models
-        predictions_a = self.db.query(Prediction).join(
+        predictions_a = self.db.scalars(select(Prediction).join(
             PredictionOutcome,
             Prediction.prediction_id == PredictionOutcome.prediction_id
-        ).filter(
+        ).where(
             Prediction.model_version == model_a,
             Prediction.created_at >= cutoff
-        ).all()
+        )).all()
 
-        predictions_b = self.db.query(Prediction).join(
+        predictions_b = self.db.scalars(select(Prediction).join(
             PredictionOutcome,
             Prediction.prediction_id == PredictionOutcome.prediction_id
-        ).filter(
+        ).where(
             Prediction.model_version == model_b,
             Prediction.created_at >= cutoff
-        ).all()
+        )).all()
 
         if len(predictions_a) < 20 or len(predictions_b) < 20:
             return {
@@ -157,11 +158,11 @@ class ABTestingAgent:
         if predictions:
             outcomes = {
                 row.prediction_id: row
-                for row in self.db.query(PredictionOutcome).filter(
+                for row in self.db.scalars(select(PredictionOutcome).where(
                     PredictionOutcome.prediction_id.in_(
                         [pred.prediction_id for pred in predictions]
                     )
-                ).all()
+                )).all()
             }
 
         for pred in predictions:
@@ -284,9 +285,9 @@ class ABTestingAgent:
             Statistics
         """
         # Get unique model pairs
-        model_pairs = self.db.query(
+        model_pairs = self.db.execute(select(
             Prediction.model_version
-        ).distinct().limit(limit).all()
+        ).distinct().limit(limit)).all()
 
         if len(model_pairs) < 2:
             logger.warning("Not enough models for A/B testing")

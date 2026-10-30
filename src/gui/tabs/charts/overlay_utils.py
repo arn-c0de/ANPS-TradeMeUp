@@ -43,13 +43,14 @@ def flatten_overlay_items(tab_overlays: dict):
 
 def load_overlays_from_db():
     """Load all chart overlays from database."""
+    from sqlalchemy import select
     from sqlalchemy.orm import Session
 
     from src.models.chart_overlays import ChartOverlay
 
     try:
         with Session(engine) as db:
-            overlays_db = db.query(ChartOverlay).all()
+            overlays_db = db.scalars(select(ChartOverlay)).all()
             logger.info("[DB Load] Found %d overlays in database", len(overlays_db))
 
             overlays_dict = {"tabs": {}}
@@ -78,6 +79,7 @@ def load_overlays_from_db():
 
 def save_overlays_to_db(overlays_data, tabs_data):
     """Save chart overlays to database."""
+    from sqlalchemy import delete
     from sqlalchemy.orm import Session
 
     from src.models.chart_overlays import ChartOverlay
@@ -97,7 +99,7 @@ def save_overlays_to_db(overlays_data, tabs_data):
         )
 
         with Session(engine) as db:
-            deleted_count = db.query(ChartOverlay).delete()
+            deleted_count = db.execute(delete(ChartOverlay)).rowcount
             logger.info("[DB Save] Deleted %d existing overlays", deleted_count)
 
             overlays = overlays_data.get("tabs", {})

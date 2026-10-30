@@ -4,7 +4,7 @@ Check if EntityMappingAgent is creating NewsEntityMapping entries
 
 import logging
 
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings
@@ -20,11 +20,11 @@ def check_entity_mappings():
     """Check entity mapping status"""
 
     with Session(engine) as db:
-        total_processed = db.query(func.count(ProcessedNews.news_id)).scalar()
-        total_mappings = db.query(func.count(NewsEntityMapping.mapping_id)).scalar()
+        total_processed = db.scalar(select(func.count(ProcessedNews.news_id)))
+        total_mappings = db.scalar(select(func.count(NewsEntityMapping.mapping_id)))
 
         # Count processed news WITH mappings
-        with_mappings = db.query(func.count(func.distinct(NewsEntityMapping.news_id))).scalar()
+        with_mappings = db.scalar(select(func.count(func.distinct(NewsEntityMapping.news_id))))
 
         # Processed news WITHOUT mappings
         without_mappings = total_processed - with_mappings
@@ -41,9 +41,9 @@ def check_entity_mappings():
         # Show sample mappings
         if total_mappings > 0:
             logger.info("Sample Entity Mappings:")
-            samples = db.query(NewsEntityMapping).limit(10).all()
+            samples = db.scalars(select(NewsEntityMapping).limit(10)).all()
             for m in samples:
-                entity = db.query(Entity).filter(Entity.entity_id == m.entity_id).first()
+                entity = db.scalar(select(Entity).where(Entity.entity_id == m.entity_id).limit(1))
                 logger.info(f"  News: {m.news_id[:8]}, Entity: {m.entity_id} ({entity.entity_name if entity else 'Unknown'}), Confidence: {m.confidence}")
 
         logger.info("\n" + "="*70)

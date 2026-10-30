@@ -9,6 +9,7 @@ from pathlib import Path
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, dcc, html
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings as _settings
@@ -604,11 +605,11 @@ def register_callbacks(app):
                     if time_range == "custom" and params.get("start"):
                         cutoff_date = datetime.fromisoformat(params["start"])
                     if time_range == "all":
-                        count_raw = db.query(RawNews).delete()
-                        count_processed = db.query(ProcessedNews).delete()
+                        count_raw = db.execute(delete(RawNews)).rowcount
+                        count_processed = db.execute(delete(ProcessedNews)).rowcount
                     elif cutoff_date:
-                        count_raw = db.query(RawNews).filter(RawNews.created_at >= cutoff_date).delete()
-                        count_processed = db.query(ProcessedNews).filter(ProcessedNews.created_at >= cutoff_date).delete()
+                        count_raw = db.execute(delete(RawNews).where(RawNews.created_at >= cutoff_date)).rowcount
+                        count_processed = db.execute(delete(ProcessedNews).where(ProcessedNews.created_at >= cutoff_date)).rowcount
                     else:
                         count_raw = count_processed = 0
                     db.commit()
@@ -618,22 +619,22 @@ def register_callbacks(app):
                     time_range = params.get("range")
                     cutoff_date = _range_cutoff(time_range)
                     if time_range == "all":
-                        count = db.query(Prediction).delete()
+                        count = db.execute(delete(Prediction)).rowcount
                     elif cutoff_date:
-                        count = db.query(Prediction).filter(Prediction.created_at >= cutoff_date).delete()
+                        count = db.execute(delete(Prediction).where(Prediction.created_at >= cutoff_date)).rowcount
                     else:
                         count = 0
                     db.commit()
                     activity_logger.log_activity(f"Deleted {count} predictions", "INFO")
                     pred_msg = dbc.Alert(f"Successfully deleted {count} predictions", color="success", dismissable=True)
                 elif action == "clear_all":
-                    db.query(Prediction).delete()
-                    db.query(ImpactScore).delete()
-                    db.query(NewsEntityMapping).delete()
-                    db.query(Entity).delete()
-                    db.query(DataQualityScore).delete()
-                    db.query(ProcessedNews).delete()
-                    db.query(RawNews).delete()
+                    db.execute(delete(Prediction))
+                    db.execute(delete(ImpactScore))
+                    db.execute(delete(NewsEntityMapping))
+                    db.execute(delete(Entity))
+                    db.execute(delete(DataQualityScore))
+                    db.execute(delete(ProcessedNews))
+                    db.execute(delete(RawNews))
                     db.commit()
                     activity_logger.log_activity("DATABASE CLEARED - All data deleted", "WARNING")
                     all_msg = dbc.Alert("Database cleared! All data has been deleted.", color="danger", dismissable=True)

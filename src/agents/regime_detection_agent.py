@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import yfinance as yf
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.models.analysis import MarketRegime
@@ -319,9 +320,9 @@ class RegimeDetectionAgent:
 
     def get_current_regime(self) -> MarketRegime | None:
         """Get most recent regime from database."""
-        return self.db.query(MarketRegime).order_by(
+        return self.db.scalar(select(MarketRegime).order_by(
             MarketRegime.timestamp.desc()
-        ).first()
+        ).limit(1))
 
     def process_batch(self, limit: int = 1) -> dict:
         """Process market regime detection."""
@@ -343,16 +344,16 @@ class RegimeDetectionAgent:
     def get_statistics(self) -> dict:
         """Get regime statistics."""
 
-        total_regimes = self.db.query(MarketRegime).count()
+        total_regimes = self.db.scalar(select(func.count()).select_from(MarketRegime))
 
         # Most recent regime
         current = self.get_current_regime()
 
         # Regime distribution (last 30 days)
         thirty_days_ago = datetime.now(UTC) - timedelta(days=30)
-        recent_regimes = self.db.query(MarketRegime).filter(
+        recent_regimes = self.db.scalars(select(MarketRegime).where(
             MarketRegime.timestamp >= thirty_days_ago
-        ).all()
+        )).all()
 
         # Count regime types
         vol_counts = {}

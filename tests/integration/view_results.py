@@ -6,7 +6,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, select
 
 from src.models.analysis import ImpactScore, MarketRegime
 from src.models.data_quality import DataQualityScore
@@ -27,18 +27,18 @@ def main():
     # 1. Data Ingestion Results
     print("📥 1. DATA INGESTION")
     print("-" * 80)
-    total_articles = db.query(func.count(RawNews.news_id)).scalar()
-    by_source = db.query(
+    total_articles = db.scalar(select(func.count(RawNews.news_id)))
+    by_source = db.execute(select(
         RawNews.source,
         func.count(RawNews.news_id).label('count')
-    ).group_by(RawNews.source).all()
+    ).group_by(RawNews.source)).all()
 
     print(f"   Total Articles: {total_articles}")
     for source, count in by_source:
         print(f"   - {source}: {count}")
 
     # Show latest articles
-    latest = db.query(RawNews).order_by(desc(RawNews.published_at)).limit(5).all()
+    latest = db.scalars(select(RawNews).order_by(desc(RawNews.published_at)).limit(5)).all()
     print("\n   Latest 5 Articles:")
     for article in latest:
         print(f"   • {article.title[:70]}... ({article.source})")
@@ -46,20 +46,20 @@ def main():
     # 2. Quality Assessment
     print("\n📋 2. DATA QUALITY ASSESSMENT")
     print("-" * 80)
-    total_assessed = db.query(func.count(DataQualityScore.news_id)).scalar()
-    avg_quality = db.query(func.avg(DataQualityScore.quality_score)).scalar()
+    total_assessed = db.scalar(select(func.count(DataQualityScore.news_id)))
+    avg_quality = db.scalar(select(func.avg(DataQualityScore.quality_score)))
 
     # Count quality distribution manually
-    high_quality = db.query(func.count(DataQualityScore.news_id)).filter(
+    high_quality = db.scalar(select(func.count(DataQualityScore.news_id)).where(
         DataQualityScore.quality_score >= 0.8
-    ).scalar()
-    medium_quality = db.query(func.count(DataQualityScore.news_id)).filter(
+    ))
+    medium_quality = db.scalar(select(func.count(DataQualityScore.news_id)).where(
         DataQualityScore.quality_score >= 0.6,
         DataQualityScore.quality_score < 0.8
-    ).scalar()
-    low_quality = db.query(func.count(DataQualityScore.news_id)).filter(
+    ))
+    low_quality = db.scalar(select(func.count(DataQualityScore.news_id)).where(
         DataQualityScore.quality_score < 0.6
-    ).scalar()
+    ))
 
     print(f"   Total Assessed: {total_assessed}")
     print(f"   Average Quality: {avg_quality:.2f}" if avg_quality else "   Average Quality: N/A")
@@ -70,12 +70,12 @@ def main():
     # 3. Content Understanding
     print("\n🧠 3. CONTENT UNDERSTANDING (LLM)")
     print("-" * 80)
-    total_processed = db.query(func.count(ProcessedNews.news_id)).scalar()
+    total_processed = db.scalar(select(func.count(ProcessedNews.news_id)))
 
-    by_event = db.query(
+    by_event = db.execute(select(
         ProcessedNews.event_type,
         func.count(ProcessedNews.news_id).label('count')
-    ).group_by(ProcessedNews.event_type).all()
+    ).group_by(ProcessedNews.event_type)).all()
 
     print(f"   Total Processed: {total_processed}")
     if by_event:
@@ -85,10 +85,10 @@ def main():
 
     # Show some analyzed articles
     if total_processed > 0:
-        samples = db.query(ProcessedNews).limit(3).all()
+        samples = db.scalars(select(ProcessedNews).limit(3)).all()
         print("\n   Sample Analysis:")
         for sample in samples:
-            news = db.query(RawNews).filter(RawNews.news_id == sample.news_id).first()
+            news = db.scalar(select(RawNews).where(RawNews.news_id == sample.news_id).limit(1))
             sentiment_val = sample.sentiment.get('overall', 0) if sample.sentiment else 0
             print(f"   • {news.title[:60]}...")
             print(f"     Event: {sample.event_type}, Sentiment: {sentiment_val:.2f}")
@@ -98,13 +98,13 @@ def main():
     # 4. Entity Mapping
     print("\n🏢 4. ENTITY MAPPING")
     print("-" * 80)
-    total_entities = db.query(func.count(Entity.entity_id)).scalar()
-    total_mappings = db.query(func.count(NewsEntityMapping.mapping_id)).scalar()
+    total_entities = db.scalar(select(func.count(Entity.entity_id)))
+    total_mappings = db.scalar(select(func.count(NewsEntityMapping.mapping_id)))
 
-    by_type = db.query(
+    by_type = db.execute(select(
         Entity.entity_type,
         func.count(Entity.entity_id).label('count')
-    ).group_by(Entity.entity_type).all()
+    ).group_by(Entity.entity_type)).all()
 
     print(f"   Total Entities: {total_entities}")
     print(f"   Total Mappings: {total_mappings}")
@@ -115,7 +115,7 @@ def main():
 
     # Show top entities
     if total_entities > 0:
-        top_entities = db.query(Entity).limit(5).all()
+        top_entities = db.scalars(select(Entity).limit(5)).all()
         print("\n   Top Entities:")
         for entity in top_entities:
             print(f"   • {entity.entity_name} ({entity.entity_type})")
@@ -123,7 +123,7 @@ def main():
     # 5. Market Regime
     print("\n🌡️  5. MARKET REGIME DETECTION")
     print("-" * 80)
-    latest_regime = db.query(MarketRegime).order_by(desc(MarketRegime.created_at)).first()
+    latest_regime = db.scalar(select(MarketRegime).order_by(desc(MarketRegime.created_at)).limit(1))
     if latest_regime:
         print("   Current Regime:")
         regime_data = latest_regime.regime
@@ -136,12 +136,12 @@ def main():
     # 6. Impact Scores
     print("\n⚡ 6. IMPACT SCORING")
     print("-" * 80)
-    total_impacts = db.query(func.count(ImpactScore.score_id)).scalar()
-    avg_impact = db.query(func.avg(ImpactScore.impact_score)).scalar()
+    total_impacts = db.scalar(select(func.count(ImpactScore.score_id)))
+    avg_impact = db.scalar(select(func.avg(ImpactScore.impact_score)))
 
-    high_impact = db.query(func.count(ImpactScore.score_id)).filter(
+    high_impact = db.scalar(select(func.count(ImpactScore.score_id)).where(
         ImpactScore.impact_score >= 0.7
-    ).scalar()
+    ))
 
     print(f"   Total Impact Scores: {total_impacts}")
     if avg_impact:
@@ -150,21 +150,21 @@ def main():
 
     # Show top impact news
     if total_impacts > 0:
-        top_impacts = db.query(ImpactScore).order_by(
+        top_impacts = db.scalars(select(ImpactScore).order_by(
             desc(ImpactScore.impact_score)
-        ).limit(5).all()
+        ).limit(5)).all()
         print("\n   Top Impact News:")
         for impact in top_impacts:
-            news = db.query(RawNews).filter(RawNews.news_id == impact.news_id).first()
+            news = db.scalar(select(RawNews).where(RawNews.news_id == impact.news_id).limit(1))
             if news:
                 print(f"   • {news.title[:60]}... (Impact: {impact.impact_score:.2f})")
 
     # 7. Predictions
     print("\n🎯 7. PREDICTIONS")
     print("-" * 80)
-    total_predictions = db.query(func.count(Prediction.prediction_id)).scalar()
+    total_predictions = db.scalar(select(func.count(Prediction.prediction_id)))
 
-    avg_confidence = db.query(func.avg(Prediction.confidence)).scalar()
+    avg_confidence = db.scalar(select(func.avg(Prediction.confidence)))
 
     print(f"   Total Predictions: {total_predictions}")
     if avg_confidence:
@@ -172,12 +172,12 @@ def main():
 
     # Show latest predictions
     if total_predictions > 0:
-        latest_preds = db.query(Prediction).order_by(
+        latest_preds = db.scalars(select(Prediction).order_by(
             desc(Prediction.created_at)
-        ).limit(5).all()
+        ).limit(5)).all()
         print("\n   Latest Predictions:")
         for pred in latest_preds:
-            entity = db.query(Entity).filter(Entity.entity_id == pred.entity_id).first()
+            entity = db.scalar(select(Entity).where(Entity.entity_id == pred.entity_id).limit(1))
             if entity:
                 # Get direction from probabilities
                 probs = pred.direction_probabilities or {}

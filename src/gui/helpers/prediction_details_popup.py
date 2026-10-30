@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 import dash_bootstrap_components as dbc
 from dash import html
-from sqlalchemy import and_, desc
+from sqlalchemy import and_, desc, select
 from sqlalchemy.orm import Session, defer, joinedload
 
 from src.models.analysis import ImpactScore
@@ -284,9 +284,9 @@ def _resolve_performance(db: Session, pred: Prediction, entity: Entity | None,
 
 def _load_latest_simulation(db: Session, prediction_id) -> TradingSimulation | None:
     """Load the most recent trading simulation for a prediction, if any."""
-    simulation = db.query(TradingSimulation).filter(
+    simulation = db.scalar(select(TradingSimulation).where(
         TradingSimulation.prediction_id == prediction_id
-    ).order_by(desc(TradingSimulation.created_at)).first()
+    ).order_by(desc(TradingSimulation.created_at)).limit(1))
 
     logger.info(f"🧪 Checking simulation for {prediction_id}")
     logger.info(f"   Found simulation: {simulation is not None}")
@@ -327,7 +327,7 @@ def _build_news_section(db: Session, pred: Prediction):
 
     # OPTIMIZED: Combine 3 separate queries into single JOIN query
     # This reduces 3 database roundtrips to just 1
-    news_data = db.query(
+    news_data = db.execute(select(
         RawNews, ProcessedNews, ImpactScore
     ).outerjoin(
         ProcessedNews,
@@ -338,9 +338,9 @@ def _build_news_section(db: Session, pred: Prediction):
             ImpactScore.news_id == RawNews.news_id,
             ImpactScore.entity_id == pred.entity_id
         )
-    ).options(defer(ProcessedNews.embedding)).filter(
+    ).options(defer(ProcessedNews.embedding)).where(
         RawNews.news_id == news_id
-    ).first()
+    ).limit(1)).first()
 
     # Unpack results
     raw_news, processed, impact = news_data if news_data else (None, None, None)
@@ -1127,11 +1127,11 @@ def get_prediction_details(engine, prediction_id, load_performance=False, portfo
         with Session(engine) as db:
             # OPTIMIZED: Get prediction with eager loading for entity in single query
             # This eliminates N+1 query problem by using JOINs
-            pred = db.query(Prediction).options(
+            pred = db.scalar(select(Prediction).options(
                 joinedload(Prediction.entity)
-            ).filter(
+            ).where(
                 Prediction.prediction_id == prediction_id
-            ).first()
+            ).limit(1))
 
             if not pred:
                 return "Error", dbc.Alert("Prediction not found", color="danger"), None

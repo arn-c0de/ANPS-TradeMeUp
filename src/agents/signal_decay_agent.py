@@ -3,7 +3,7 @@ import logging
 import math
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from src.models.analysis import ImpactScore, SignalDecayModel
@@ -100,9 +100,9 @@ class SignalDecayAgent:
         # Fetch article to get event type
         from src.models.processed_news import ProcessedNews
 
-        processed = db.query(ProcessedNews).filter(
+        processed = db.scalar(select(ProcessedNews).where(
             ProcessedNews.news_id == news_id
-        ).first()
+        ).limit(1))
 
         event_type = processed.event_type if processed else 'default'
 
@@ -166,18 +166,18 @@ class SignalDecayAgent:
 
         with get_scoped_session() as db:
             # Fetch decay model
-            decay_model = db.query(SignalDecayModel).filter(
+            decay_model = db.scalar(select(SignalDecayModel).where(
                 SignalDecayModel.news_id == news_id
-            ).first()
+            ).limit(1))
 
             if not decay_model:
                 logger.warning(f"No decay model found for {news_id}")
                 return None
 
             # Fetch news to get published time
-            article = db.query(RawNews).filter(
+            article = db.scalar(select(RawNews).where(
                 RawNews.news_id == news_id
-            ).first()
+            ).limit(1))
 
             if not article:
                 return None
@@ -210,14 +210,14 @@ class SignalDecayAgent:
 
         with get_scoped_session() as db:
             # Find impact scores without decay models
-            impact_scores = db.query(ImpactScore).outerjoin(
+            impact_scores = db.scalars(select(ImpactScore).outerjoin(
                 SignalDecayModel,
                 ImpactScore.news_id == SignalDecayModel.news_id
-            ).filter(
+            ).where(
                 SignalDecayModel.news_id.is_(None)
             ).order_by(
                 ImpactScore.created_at.desc()
-            ).limit(limit).all()
+            ).limit(limit)).all()
 
             logger.info(f"Creating decay models for {len(impact_scores)} impact scores")
 
@@ -266,7 +266,7 @@ class SignalDecayAgent:
         from src.models.database import get_scoped_session
 
         with get_scoped_session() as db:
-            total_models = db.query(SignalDecayModel).count()
+            total_models = db.scalar(select(func.count()).select_from(SignalDecayModel))
 
             if total_models == 0:
                 return {
@@ -277,14 +277,14 @@ class SignalDecayAgent:
                 }
 
             # Average half-life
-            avg_half_life = db.query(
+            avg_half_life = db.scalar(select(
                 func.avg(SignalDecayModel.half_life_days)
-            ).scalar() or 0.0
+            )) or 0.0
 
             # Average effective window
-            avg_window = db.query(
+            avg_window = db.scalar(select(
                 func.avg(SignalDecayModel.effective_window_days)
-            ).scalar() or 0.0
+            )) or 0.0
 
             return {
                 'total_models': total_models,
@@ -308,9 +308,9 @@ class SignalDecayAgent:
         with get_scoped_session() as db:
             cutoff = datetime.now(UTC) - timedelta(days=threshold_days)
 
-            deleted = db.query(SignalDecayModel).filter(
+            deleted = db.execute(delete(SignalDecayModel).where(
                 SignalDecayModel.created_at < cutoff
-            ).delete()
+            )).rowcount
 
             logger.info(f"Cleaned up {deleted} stale signal decay models")
 

@@ -3,7 +3,7 @@ import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 from src.models.database import SessionLocal
 from src.models.entities import Entity, NewsEntityMapping
@@ -56,12 +56,12 @@ class MetaStrategyAgent:
 
                 # Select prediction and outcome together: the previous version
                 # joined to filter, then re-queried the outcome once per row.
-                rows = db.query(Prediction, PredictionOutcome).join(
+                rows = db.execute(select(Prediction, PredictionOutcome).join(
                     PredictionOutcome,
                     Prediction.prediction_id == PredictionOutcome.prediction_id
-                ).filter(
+                ).where(
                     Prediction.created_at >= cutoff
-                ).all()
+                )).all()
 
             if not rows:
                 # Default equal weights
@@ -158,12 +158,12 @@ class MetaStrategyAgent:
             with SessionLocal() as db:
                 cutoff = datetime.now(UTC) - timedelta(hours=ENSEMBLE_LOOKBACK_HOURS)
 
-                model_predictions = db.query(Prediction).filter(
+                model_predictions = db.scalars(select(Prediction).where(
                     Prediction.entity_id == entity_id,
                     Prediction.horizon == horizon,
                     Prediction.created_at >= cutoff,
                     Prediction.model_version != ENSEMBLE_MODEL_VERSION,
-                ).all()
+                )).all()
 
                 if not model_predictions:
                     logger.warning(f"No predictions found for {entity_id}")
@@ -223,18 +223,18 @@ class MetaStrategyAgent:
 
         try:
             with SessionLocal() as db:
-                top_entities = db.query(
+                top_entities = db.execute(select(
                     NewsEntityMapping.entity_id
                 ).join(
                     Entity,
                     NewsEntityMapping.entity_id == Entity.entity_id
-                ).filter(
+                ).where(
                     Entity.entity_type == 'company'
                 ).group_by(
                     NewsEntityMapping.entity_id
                 ).order_by(
                     func.count(NewsEntityMapping.mapping_id).desc()
-                ).limit(limit).all()
+                ).limit(limit)).all()
 
             logger.info(f"Creating ensemble predictions for {len(top_entities)} entities")
 
@@ -260,9 +260,9 @@ class MetaStrategyAgent:
         """Get meta-strategy statistics."""
         try:
             with SessionLocal() as db:
-                ensemble_count = db.query(Prediction).filter(
+                ensemble_count = db.scalar(select(func.count()).select_from(Prediction).where(
                     Prediction.model_version == ENSEMBLE_MODEL_VERSION
-                ).count()
+                ))
 
             return {
                 'ensemble_predictions': ensemble_count,

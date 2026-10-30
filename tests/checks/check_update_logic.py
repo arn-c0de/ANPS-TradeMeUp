@@ -1,5 +1,6 @@
 """Test if update logic works correctly"""
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.database import SessionLocal
@@ -12,7 +13,7 @@ with Session(engine) as db:
     from src.services.prediction_performance_service import prediction_performance_service
 
     # Find a prediction that already has performance data
-    outcome = db.query(PredictionOutcome).first()
+    outcome = db.scalar(select(PredictionOutcome).limit(1))
 
     if outcome:
         print("✓ Found existing outcome:")
@@ -21,14 +22,14 @@ with Session(engine) as db:
         print(f"  Old Timestamp: {outcome.evaluation_timestamp}")
 
         # Get the prediction
-        pred = db.query(Prediction).filter(
+        pred = db.scalar(select(Prediction).where(
             Prediction.prediction_id == outcome.prediction_id
-        ).first()
+        ).limit(1))
 
         if pred:
-            entity = db.query(Entity).filter(
+            entity = db.scalar(select(Entity).where(
                 Entity.entity_id == pred.entity_id
-            ).first()
+            ).limit(1))
 
             if entity:
                 print(f"\n🔄 Recalculating performance for {entity.entity_name}...")
@@ -48,9 +49,9 @@ with Session(engine) as db:
                         print("\n✅ Update successful!")
 
                         # Verify the update
-                        updated = db.query(PredictionOutcome).filter(
+                        updated = db.scalar(select(PredictionOutcome).where(
                             PredictionOutcome.prediction_id == outcome.prediction_id
-                        ).first()
+                        ).limit(1))
 
                         print(f"  Updated Return: {updated.actual_return}%")
                         print(f"  Updated Timestamp: {updated.evaluation_timestamp}")

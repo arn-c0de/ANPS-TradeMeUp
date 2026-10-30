@@ -12,6 +12,7 @@ import math
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.analysis import ImpactScore, MarketRegime, SurpriseScore
@@ -169,9 +170,9 @@ class ImpactScoringAgent:
     def _get_current_regime(self, db: Session) -> dict:
         """Get current market regime."""
         # Get most recent regime
-        regime = db.query(MarketRegime).order_by(
+        regime = db.scalar(select(MarketRegime).order_by(
             MarketRegime.timestamp.desc()
-        ).first()
+        ).limit(1))
 
         if regime:
             return regime.regime
@@ -212,9 +213,9 @@ class ImpactScoringAgent:
         Higher values mean larger surprise.
         """
         # Check if surprise score exists
-        surprise = db.query(SurpriseScore).filter(
+        surprise = db.scalar(select(SurpriseScore).where(
             SurpriseScore.news_id == news_id
-        ).first()
+        ).limit(1))
 
         if not surprise:
             return 1.0  # No surprise info, neutral
@@ -377,17 +378,17 @@ class ImpactScoringAgent:
         Returns:
             List of (news_id,) tuples
         """
-        articles = db.query(RawNews.news_id).join(
+        articles = db.execute(select(RawNews.news_id).join(
             NewsEntityMapping,
             RawNews.news_id == NewsEntityMapping.news_id
         ).outerjoin(
             ImpactScore,
             RawNews.news_id == ImpactScore.news_id
-        ).filter(
+        ).where(
             ImpactScore.score_id.is_(None)
         ).group_by(RawNews.news_id).order_by(
             RawNews.published_at.desc()  # Newest first
-        ).limit(limit).all()
+        ).limit(limit)).all()
 
         return articles
 
@@ -410,9 +411,9 @@ class ImpactScoringAgent:
         """
         try:
             # Get all entities mapped to this news
-            mappings = db.query(NewsEntityMapping).filter(
+            mappings = db.scalars(select(NewsEntityMapping).where(
                 NewsEntityMapping.news_id == news_id
-            ).all()
+            )).all()
 
             if not mappings:
                 logger.debug(f"No entity mappings found for news {news_id}")
@@ -478,23 +479,23 @@ class ImpactScoringAgent:
         """
         try:
             # Fetch required data
-            news = db.query(RawNews).filter(RawNews.news_id == news_id).first()
+            news = db.scalar(select(RawNews).where(RawNews.news_id == news_id).limit(1))
             if not news:
                 logger.warning(f"News {news_id} not found")
                 return None
 
-            processed = db.query(ProcessedNews).filter(
+            processed = db.scalar(select(ProcessedNews).where(
                 ProcessedNews.news_id == news_id
-            ).first()
+            ).limit(1))
             if not processed:
                 logger.warning(f"Processed news {news_id} not found")
                 return None
 
-            quality = db.query(DataQualityScore).filter(
+            quality = db.scalar(select(DataQualityScore).where(
                 DataQualityScore.news_id == news_id
-            ).first()
+            ).limit(1))
 
-            entity = db.query(Entity).filter(Entity.entity_id == entity_id).first()
+            entity = db.scalar(select(Entity).where(Entity.entity_id == entity_id).limit(1))
             if not entity:
                 logger.warning(f"Entity {entity_id} not found")
                 return None
@@ -592,22 +593,22 @@ class ImpactScoringAgent:
         from sqlalchemy import func
 
         with get_scoped_session() as db:
-            total_scores = db.query(ImpactScore).count()
+            total_scores = db.scalar(select(func.count()).select_from(ImpactScore))
 
             # Average impact by time horizon
-            by_horizon = db.query(
+            by_horizon = db.execute(select(
                 ImpactScore.time_horizon,
                 func.avg(ImpactScore.impact_score).label('avg_score'),
                 func.count(ImpactScore.score_id).label('count')
-            ).group_by(ImpactScore.time_horizon).all()
+            ).group_by(ImpactScore.time_horizon)).all()
 
             # High impact scores (>= 0.7)
-            high_impact_count = db.query(ImpactScore).filter(
+            high_impact_count = db.scalar(select(func.count()).select_from(ImpactScore).where(
                 ImpactScore.impact_score >= 0.7
-            ).count()
+            ))
 
             # Top impactful scores (news_id, entity_id, score)
-            top_scores = db.query(ImpactScore).order_by(ImpactScore.impact_score.desc()).limit(5).all()
+            top_scores = db.scalars(select(ImpactScore).order_by(ImpactScore.impact_score.desc()).limit(5)).all()
             top_impactful = [
                 {
                     'news_id': str(s.news_id),

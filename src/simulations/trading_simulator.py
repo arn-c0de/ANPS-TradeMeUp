@@ -4,7 +4,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.models.analysis import MarketRegime
@@ -139,7 +139,7 @@ class TradingSimulationEngine:
         # Order by timestamp, the regime's own effective time and the indexed
         # column. created_at is the insert time; ordering by it could pick a
         # different regime than the rest of the pipeline sees.
-        return db.query(MarketRegime).order_by(MarketRegime.timestamp.desc()).first()
+        return db.scalar(select(MarketRegime).order_by(MarketRegime.timestamp.desc()).limit(1))
 
     def _regime_liquidity_stress(self, regime: MarketRegime | None) -> float:
         if not regime or not isinstance(regime.regime, dict):
@@ -620,9 +620,9 @@ class TradingSimulationEngine:
         # FALLBACK: Check PredictionOutcome table if live data unavailable
         if actual_return_pct is None:
             from src.models.predictions import PredictionOutcome
-            outcome = db.query(PredictionOutcome).filter(
+            outcome = db.scalar(select(PredictionOutcome).where(
                 PredictionOutcome.prediction_id == prediction.prediction_id
-            ).first()
+            ).limit(1))
             if outcome and outcome.actual_return is not None:
                 actual_return_pct = outcome.actual_return
                 logger.info(f"Using saved PredictionOutcome for {entity.entity_id}: {actual_return_pct:.2f}%")
@@ -923,9 +923,9 @@ class TradingSimulationEngine:
 
         for prediction in predictions:
             try:
-                entity = db.query(Entity).filter(
+                entity = db.scalar(select(Entity).where(
                     Entity.entity_id == prediction.entity_id
-                ).first()
+                ).limit(1))
                 if not entity:
                     logger.debug(
                         "No entity %s for prediction %s",
@@ -959,18 +959,18 @@ class TradingSimulationEngine:
     @staticmethod
     def _find_simulation(db: Session, prediction_id) -> TradingSimulation | None:
         """Return the stored simulation for a prediction, if any."""
-        return db.query(TradingSimulation).filter(
+        return db.scalar(select(TradingSimulation).where(
             TradingSimulation.prediction_id == prediction_id
-        ).first()
+        ).limit(1))
 
     def process_batch(self, limit: int = 50, lookback_days: int = 7) -> dict:
         """Simulate trades for recent predictions."""
         cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
         with get_scoped_session() as db:
-            predictions = db.query(Prediction).filter(
+            predictions = db.scalars(select(Prediction).where(
                 Prediction.created_at >= cutoff
-            ).order_by(Prediction.created_at.desc()).limit(limit).all()
+            ).order_by(Prediction.created_at.desc()).limit(limit)).all()
 
             if not predictions:
                 return self._empty_stats()
@@ -982,9 +982,10 @@ class TradingSimulationEngine:
         with get_scoped_session() as db:
             # One grouped scan instead of four full-table COUNTs.
             counts = dict(
-                db.query(TradingSimulation.decision, func.count())
-                .group_by(TradingSimulation.decision)
-                .all()
+                db.execute(
+                    select(TradingSimulation.decision, func.count())
+                    .group_by(TradingSimulation.decision)
+                ).all()
             )
 
             return {
@@ -998,9 +999,9 @@ class TradingSimulationEngine:
         """Delete a simulation by ID."""
         try:
             with get_scoped_session() as db:
-                simulation = db.query(TradingSimulation).filter(
+                simulation = db.scalar(select(TradingSimulation).where(
                     TradingSimulation.simulation_id == simulation_id
-                ).first()
+                ).limit(1))
                 if simulation:
                     db.delete(simulation)
                     db.commit()
@@ -1016,23 +1017,23 @@ class TradingSimulationEngine:
         """Refresh/recalculate a simulation by ID."""
         try:
             with get_scoped_session() as db:
-                simulation = db.query(TradingSimulation).filter(
+                simulation = db.scalar(select(TradingSimulation).where(
                     TradingSimulation.simulation_id == simulation_id
-                ).first()
+                ).limit(1))
                 if not simulation:
                     logger.warning(f"Simulation {simulation_id} not found")
                     return False
 
-                prediction = db.query(Prediction).filter(
+                prediction = db.scalar(select(Prediction).where(
                     Prediction.prediction_id == simulation.prediction_id
-                ).first()
+                ).limit(1))
                 if not prediction:
                     logger.warning(f"Prediction {simulation.prediction_id} not found")
                     return False
 
-                entity = db.query(Entity).filter(
+                entity = db.scalar(select(Entity).where(
                     Entity.entity_id == prediction.entity_id
-                ).first()
+                ).limit(1))
                 if not entity:
                     logger.warning(f"Entity {prediction.entity_id} not found")
                     return False
@@ -1056,26 +1057,26 @@ class TradingSimulationEngine:
     ) -> dict:
         """Create simulations from specific predictions or filters."""
         with get_scoped_session() as db:
-            query = db.query(Prediction)
+            stmt = select(Prediction)
 
             if prediction_ids:
-                query = query.filter(Prediction.prediction_id.in_(prediction_ids))
+                stmt = stmt.where(Prediction.prediction_id.in_(prediction_ids))
             else:
                 if entity_filter:
-                    query = query.filter(Prediction.entity_id.in_(entity_filter))
+                    stmt = stmt.where(Prediction.entity_id.in_(entity_filter))
                     logger.info(f"Filtering by entities: {entity_filter}")
                 if horizon_filter and horizon_filter != "all":
-                    query = query.filter(Prediction.horizon == horizon_filter)
+                    stmt = stmt.where(Prediction.horizon == horizon_filter)
                     logger.info(f"Filtering by horizon: {horizon_filter}")
                 if date_range and len(date_range) == 2:
                     start, end = date_range
                     if start:
-                        query = query.filter(Prediction.created_at >= start)
+                        stmt = stmt.where(Prediction.created_at >= start)
                     if end:
-                        query = query.filter(Prediction.created_at <= end)
+                        stmt = stmt.where(Prediction.created_at <= end)
                     logger.info(f"Filtering by date range: {start} to {end}")
 
-            predictions = query.order_by(Prediction.created_at.desc()).limit(limit).all()
+            predictions = db.scalars(stmt.order_by(Prediction.created_at.desc()).limit(limit)).all()
 
             logger.info(f"Found {len(predictions)} predictions matching filters (limit: {limit})")
 

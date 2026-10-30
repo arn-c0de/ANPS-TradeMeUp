@@ -1,5 +1,7 @@
 """Check what these persistently failing articles are about"""
 
+from sqlalchemy import select
+
 from src.models.database import SessionLocal
 from src.models.raw_news import RawNews
 
@@ -14,7 +16,7 @@ failing_ids = [
 ]
 
 for news_id in failing_ids[:3]:  # Check first 3
-    article = db.query(RawNews).filter(RawNews.news_id == news_id).first()
+    article = db.scalar(select(RawNews).where(RawNews.news_id == news_id).limit(1))
     if article:
         print(f"\n{'='*70}")
         print(f"Title: {article.title[:100]}")

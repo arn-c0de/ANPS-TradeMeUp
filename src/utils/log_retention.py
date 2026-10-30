@@ -9,7 +9,7 @@ LOG_RETENTION_HOURS = 24
 def prune_system_logs() -> None:
     """Delete expired logs and keep the table below the max row target."""
     try:
-        from sqlalchemy import func, text
+        from sqlalchemy import delete, func, select, text
 
         from src.models.database import SessionLocal
         from src.models.system_logs import SystemLog
@@ -17,11 +17,13 @@ def prune_system_logs() -> None:
         cutoff = datetime.now(UTC) - timedelta(hours=LOG_RETENTION_HOURS)
 
         with SessionLocal() as db:
-            db.query(SystemLog).filter(SystemLog.timestamp < cutoff).delete(
-                synchronize_session=False
+            db.execute(
+                delete(SystemLog)
+                .where(SystemLog.timestamp < cutoff)
+                .execution_options(synchronize_session=False)
             )
 
-            total = db.query(func.count(SystemLog.log_id)).scalar() or 0
+            total = db.scalar(select(func.count(SystemLog.log_id))) or 0
             excess = total - MAX_SYSTEM_LOG_ROWS
             if excess > 0:
                 db.execute(

@@ -4,7 +4,7 @@ Check ImpactScore and SurpriseScore tables - these are needed for predictions
 
 import logging
 
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings
@@ -21,8 +21,8 @@ def check_analysis_tables():
 
     with Session(engine) as db:
         # Count scores
-        total_impact = db.query(func.count(ImpactScore.score_id)).scalar()
-        total_surprise = db.query(func.count(SurpriseScore.surprise_id)).scalar()
+        total_impact = db.scalar(select(func.count(ImpactScore.score_id)))
+        total_surprise = db.scalar(select(func.count(SurpriseScore.surprise_id)))
 
         logger.info("="*70)
         logger.info("📊 ANALYSIS SCORES")
@@ -34,15 +34,15 @@ def check_analysis_tables():
         # Show some impact scores
         if total_impact > 0:
             logger.info("Sample ImpactScores:")
-            samples = db.query(ImpactScore).limit(10).all()
+            samples = db.scalars(select(ImpactScore).limit(10)).all()
             for s in samples:
-                entity = db.query(Entity).filter(Entity.entity_id == s.entity_id).first()
+                entity = db.scalar(select(Entity).where(Entity.entity_id == s.entity_id).limit(1))
                 logger.info(f"  News: {s.news_id}, Entity: {s.entity_id} ({entity.entity_name if entity else 'Unknown'}), Score: {s.impact_score}")
 
         # Show surprise scores
         if total_surprise > 0:
             logger.info("\nSample SurpriseScores:")
-            samples = db.query(SurpriseScore).limit(10).all()
+            samples = db.scalars(select(SurpriseScore).limit(10)).all()
             for s in samples:
                 logger.info(f"  News: {s.news_id}, Metric: {s.metric}, Surprise: {s.surprise_normalized}, Expected: {s.expected_reaction}")
 

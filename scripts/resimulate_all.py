@@ -25,7 +25,7 @@ from threading import Lock
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from src.models.database import engine, get_scoped_session
@@ -82,9 +82,9 @@ def _resimulate_single(sim_data: tuple) -> dict:
             sim_engine = TradingSimulationEngine()
 
             # Load simulation with relationships
-            sim = db.query(TradingSimulation).options(
+            sim = db.scalar(select(TradingSimulation).options(
                 joinedload(TradingSimulation.prediction).joinedload(Prediction.entity)
-            ).filter(TradingSimulation.simulation_id == sim_id).first()
+            ).where(TradingSimulation.simulation_id == sim_id).limit(1))
 
             if not sim:
                 logger.warning(f"⚠️ Simulation {sim_id} not found, skipping")
@@ -159,7 +159,7 @@ def resimulate_all(db: Session, limit: int = None, workers: int = 4) -> dict:
     logger.info("🔍 Finding all existing trading simulations...")
 
     # Find all simulations with their predictions and entities
-    query = db.query(TradingSimulation).join(
+    stmt = select(TradingSimulation).join(
         Prediction,
         TradingSimulation.prediction_id == Prediction.prediction_id
     ).options(
@@ -167,9 +167,9 @@ def resimulate_all(db: Session, limit: int = None, workers: int = 4) -> dict:
     ).order_by(TradingSimulation.created_at.desc())
 
     if limit:
-        query = query.limit(limit)
+        stmt = stmt.limit(limit)
 
-    simulations = query.all()
+    simulations = db.scalars(stmt).all()
     total = len(simulations)
 
     logger.info(f"🧪 Found {total} simulations to recalculate")
@@ -289,7 +289,7 @@ def main():
     try:
         with Session(engine) as db:
             # Get total counts
-            total_simulations = db.query(func.count(TradingSimulation.simulation_id)).scalar() or 0
+            total_simulations = db.scalar(select(func.count(TradingSimulation.simulation_id))) or 0
 
             logger.info("📊 Current Status:")
             logger.info(f"   - Total Simulations: {total_simulations}")

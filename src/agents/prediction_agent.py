@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 import xgboost as xgb
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings
@@ -400,10 +401,10 @@ class PredictionAgent:
         with get_scoped_session() as db:
             try:
                 # Get impact score for this news
-                impact = db.query(ImpactScore).filter(
+                impact = db.scalar(select(ImpactScore).where(
                     ImpactScore.news_id == news_id,
                     ImpactScore.entity_id == entity_id
-                ).first()
+                ).limit(1))
 
                 if not impact:
                     logger.warning(f"No impact score found for {entity_id}/{news_id}")
@@ -551,12 +552,12 @@ class PredictionAgent:
         # Use configurable threshold (default 0.4, can be lowered to 0.3 for more predictions)
         min_impact_threshold = settings.min_prediction_impact_threshold
 
-        impact_scores = db.query(ImpactScore).filter(
+        impact_scores = db.scalars(select(ImpactScore).where(
             ImpactScore.impact_score >= min_impact_threshold,  # Only significant impact
             ImpactScore.created_at >= cutoff_date  # Recent only
         ).order_by(
             ImpactScore.created_at.desc()  # Newest first
-        ).limit(limit * 5).all()  # Get more candidates for filtering
+        ).limit(limit * 5)).all()  # Get more candidates for filtering
 
         if not impact_scores:
             logger.info(f"No high-impact scores found (impact >= {min_impact_threshold})")
@@ -597,11 +598,11 @@ class PredictionAgent:
         if not entity_ids:
             return {}
 
-        rows = db.query(
+        rows = db.execute(select(
             Prediction.entity_id,
             Prediction.horizon,
             Prediction.related_news_ids,
-        ).filter(Prediction.entity_id.in_(entity_ids)).all()
+        ).where(Prediction.entity_id.in_(entity_ids))).all()
 
         covered: dict[tuple, set] = {}
         for entity_id, horizon, related_news_ids in rows:
@@ -636,7 +637,7 @@ class PredictionAgent:
         """
         try:
             # Check if entity exists
-            entity = db.query(Entity).filter(Entity.entity_id == entity_id).first()
+            entity = db.scalar(select(Entity).where(Entity.entity_id == entity_id).limit(1))
             if not entity:
                 logger.warning(f"Entity {entity_id} not found")
                 return None
@@ -706,19 +707,19 @@ class PredictionAgent:
         from sqlalchemy import func
 
         with get_scoped_session() as db:
-            total_predictions = db.query(Prediction).count()
+            total_predictions = db.scalar(select(func.count()).select_from(Prediction))
 
             # Count by horizon
-            by_horizon = db.query(
+            by_horizon = db.execute(select(
                 Prediction.horizon,
                 func.count(Prediction.prediction_id).label('count'),
                 func.avg(Prediction.confidence).label('avg_confidence')
-            ).group_by(Prediction.horizon).all()
+            ).group_by(Prediction.horizon)).all()
 
             # High confidence predictions (>= 0.7)
-            high_confidence = db.query(Prediction).filter(
+            high_confidence = db.scalar(select(func.count()).select_from(Prediction).where(
                 Prediction.confidence >= 0.7
-            ).count()
+            ))
 
             return {
                 'total_predictions': total_predictions,

@@ -10,6 +10,7 @@ from time import sleep
 import feedparser
 import requests
 from bs4 import BeautifulSoup
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -359,21 +360,21 @@ class IngestionAgent:
 
     def get_statistics(self) -> dict:
         """Get ingestion statistics."""
-        total_articles = self.db.query(RawNews).count()
+        from sqlalchemy import func
+        total_articles = self.db.scalar(select(func.count()).select_from(RawNews))
 
         # Get count by source
-        from sqlalchemy import func
-        by_source = self.db.query(
+        by_source = self.db.execute(select(
             RawNews.source,
             func.count(RawNews.news_id).label('count')
-        ).group_by(RawNews.source).all()
+        ).group_by(RawNews.source)).all()
 
         # Get recent articles (last 24 hours)
         from datetime import timedelta
         yesterday = utc_now() - timedelta(days=1)
-        recent_count = self.db.query(RawNews).filter(
+        recent_count = self.db.scalar(select(func.count()).select_from(RawNews).where(
             RawNews.fetched_at >= yesterday
-        ).count()
+        ))
 
         return {
             'total_articles': total_articles,

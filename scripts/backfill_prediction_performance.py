@@ -17,7 +17,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from src.models.database import engine
@@ -48,19 +48,19 @@ def backfill_prediction_outcomes(db: Session, limit: int = None) -> dict:
     logger.info("🔍 Finding predictions without performance data...")
 
     # Find predictions without outcomes
-    query = db.query(Prediction).outerjoin(
+    stmt = select(Prediction).outerjoin(
         PredictionOutcome,
         Prediction.prediction_id == PredictionOutcome.prediction_id
-    ).filter(
+    ).where(
         PredictionOutcome.prediction_id.is_(None)
     ).options(
         joinedload(Prediction.entity)
     ).order_by(Prediction.created_at.desc())
 
     if limit:
-        query = query.limit(limit)
+        stmt = stmt.limit(limit)
 
-    predictions_without_outcomes = query.all()
+    predictions_without_outcomes = db.scalars(stmt).all()
     total = len(predictions_without_outcomes)
 
     logger.info(f"📊 Found {total} predictions without performance data")
@@ -150,19 +150,19 @@ def backfill_simulations(db: Session, limit: int = None) -> dict:
     logger.info("🔍 Finding predictions without simulations...")
 
     # Find predictions without simulations
-    query = db.query(Prediction).outerjoin(
+    stmt = select(Prediction).outerjoin(
         TradingSimulation,
         Prediction.prediction_id == TradingSimulation.prediction_id
-    ).filter(
+    ).where(
         TradingSimulation.prediction_id.is_(None)
     ).options(
         joinedload(Prediction.entity)
     ).order_by(Prediction.created_at.desc())
 
     if limit:
-        query = query.limit(limit)
+        stmt = stmt.limit(limit)
 
-    predictions_without_sims = query.all()
+    predictions_without_sims = db.scalars(stmt).all()
     total = len(predictions_without_sims)
 
     logger.info(f"🧪 Found {total} predictions without simulations")
@@ -242,9 +242,9 @@ def main():
     try:
         with Session(engine) as db:
             # Get total counts
-            total_predictions = db.query(func.count(Prediction.prediction_id)).scalar() or 0
-            total_outcomes = db.query(func.count(PredictionOutcome.outcome_id)).scalar() or 0
-            total_simulations = db.query(func.count(TradingSimulation.simulation_id)).scalar() or 0
+            total_predictions = db.scalar(select(func.count(Prediction.prediction_id))) or 0
+            total_outcomes = db.scalar(select(func.count(PredictionOutcome.outcome_id))) or 0
+            total_simulations = db.scalar(select(func.count(TradingSimulation.simulation_id))) or 0
 
             logger.info("📊 Current Status:")
             logger.info(f"   - Total Predictions: {total_predictions}")
@@ -275,8 +275,8 @@ def main():
             logger.info("")
 
             # New totals
-            new_total_outcomes = db.query(func.count(PredictionOutcome.outcome_id)).scalar() or 0
-            new_total_simulations = db.query(func.count(TradingSimulation.simulation_id)).scalar() or 0
+            new_total_outcomes = db.scalar(select(func.count(PredictionOutcome.outcome_id))) or 0
+            new_total_simulations = db.scalar(select(func.count(TradingSimulation.simulation_id))) or 0
 
             logger.info("📈 New Status:")
             logger.info(f"   - Total Predictions: {total_predictions}")

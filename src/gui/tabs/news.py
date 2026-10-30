@@ -4,7 +4,7 @@ News Feed Tab - Browse and Filter News Articles
 
 import dash_bootstrap_components as dbc
 from dash import Input, Output, dcc, html
-from sqlalchemy import desc, distinct
+from sqlalchemy import desc, distinct, select
 from sqlalchemy.orm import Session
 
 from src.gui.utils.callbacks import safe_callback
@@ -86,28 +86,28 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
     """Get news feed with filters"""
     from sqlalchemy.orm import defer
     with Session(engine) as db:
-        query = db.query(RawNews, ProcessedNews).outerjoin(
+        stmt = select(RawNews, ProcessedNews).outerjoin(
             ProcessedNews, RawNews.news_id == ProcessedNews.news_id
         ).options(defer(ProcessedNews.embedding))
 
         # Apply filters
         if sources:
-            query = query.filter(RawNews.source.in_(sources))
+            stmt = stmt.where(RawNews.source.in_(sources))
 
         if events:
-            query = query.filter(ProcessedNews.event_type.in_(events))
+            stmt = stmt.where(ProcessedNews.event_type.in_(events))
 
         # Note: Sentiment filtering done in Python (post-query) due to SQLite JSON limitations
 
         if search and len(search) > 0:
             search_term = f"%{search.lower()}%"
-            query = query.filter(
+            stmt = stmt.where(
                 (RawNews.title.ilike(search_term)) |
                 (RawNews.full_text.ilike(search_term))
             )
 
-        query = query.order_by(desc(RawNews.fetched_at)).limit(500)
-        results = query.all()
+        stmt = stmt.order_by(desc(RawNews.fetched_at)).limit(500)
+        results = db.execute(stmt).all()
 
         # Apply sentiment filter in Python
         if sentiment and results:
@@ -136,9 +136,9 @@ def get_news_feed(engine, sources=None, events=None, sentiment=None, search=None
         impact_scores_dict = {}
         if news_ids:
             try:
-                impact_scores_list = db.query(ImpactScore).filter(
+                impact_scores_list = db.scalars(select(ImpactScore).where(
                     ImpactScore.news_id.in_(news_ids)
-                ).all()
+                )).all()
 
                 # Group by news_id and get max impact score per news
                 # Convert UUIDs to strings for reliable comparison (SQLite stores as strings)
@@ -242,7 +242,7 @@ def register_callbacks(app):
     def update_news_source_options(n):
         try:
             with SessionLocal() as db:
-                sources = db.query(distinct(RawNews.source)).order_by(RawNews.source).all()
+                sources = db.execute(select(distinct(RawNews.source)).order_by(RawNews.source)).all()
                 return [{"label": src[0], "value": src[0]} for src in sources if src[0]]
         except Exception:
             return []

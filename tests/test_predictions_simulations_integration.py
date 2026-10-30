@@ -35,6 +35,8 @@ def test_prediction_details_with_simulation():
     logger.info("="*80)
 
     try:
+        from sqlalchemy import select
+
         from src.gui.tabs.predictions import get_prediction_details
         from src.models.database import get_scoped_session
         from src.models.predictions import Prediction
@@ -42,10 +44,10 @@ def test_prediction_details_with_simulation():
 
         with get_scoped_session() as db:
             # Get a prediction that has a simulation
-            prediction = db.query(Prediction).join(
+            prediction = db.scalar(select(Prediction).join(
                 TradingSimulation,
                 Prediction.prediction_id == TradingSimulation.prediction_id
-            ).first()
+            ).limit(1))
 
             if not prediction:
                 logger.warning("⚠ No predictions with simulations found - skipping test")

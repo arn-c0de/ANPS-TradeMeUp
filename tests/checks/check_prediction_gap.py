@@ -4,7 +4,7 @@ Check why so few predictions are created from processed news
 
 import logging
 
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings
@@ -23,9 +23,9 @@ def check_prediction_gap():
 
     with Session(engine) as db:
         # Get counts
-        total_raw = db.query(func.count(RawNews.news_id)).scalar()
-        total_processed = db.query(func.count(ProcessedNews.news_id)).scalar()
-        total_predictions = db.query(func.count(Prediction.prediction_id)).scalar()
+        total_raw = db.scalar(select(func.count(RawNews.news_id)))
+        total_processed = db.scalar(select(func.count(ProcessedNews.news_id)))
+        total_predictions = db.scalar(select(func.count(Prediction.prediction_id)))
 
         logger.info("="*70)
         logger.info("📊 STATISTICS")
@@ -37,7 +37,7 @@ def check_prediction_gap():
         logger.info("")
 
         # Find processed news WITHOUT predictions
-        processed_with_predictions = db.query(Prediction.related_news_ids).all()
+        processed_with_predictions = db.execute(select(Prediction.related_news_ids)).all()
         news_ids_with_predictions = set()
         for row in processed_with_predictions:
             if row[0]:  # related_news_ids
@@ -46,9 +46,9 @@ def check_prediction_gap():
         logger.info(f"News IDs that have predictions: {len(news_ids_with_predictions)}")
 
         # Get processed news without predictions
-        processed_without_pred = db.query(ProcessedNews).filter(
+        processed_without_pred = db.scalars(select(ProcessedNews).where(
             ~ProcessedNews.news_id.in_(news_ids_with_predictions)
-        ).limit(20).all()
+        ).limit(20)).all()
 
         logger.info("="*70)
         logger.info("🔍 SAMPLE: Processed News WITHOUT Predictions (showing 20)")
@@ -93,13 +93,13 @@ def check_prediction_gap():
         logger.info("📊 CONFIDENCE SCORE DISTRIBUTION")
         logger.info("="*70)
 
-        high_confidence = db.query(func.count(ProcessedNews.news_id)).filter(
+        high_confidence = db.scalar(select(func.count(ProcessedNews.news_id)).where(
             ProcessedNews.confidence >= 0.5
-        ).scalar()
+        ))
 
-        has_confidence = db.query(func.count(ProcessedNews.news_id)).filter(
+        has_confidence = db.scalar(select(func.count(ProcessedNews.news_id)).where(
             ProcessedNews.confidence.isnot(None)
-        ).scalar()
+        ))
 
         logger.info(f"Processed news with confidence >= 0.5: {high_confidence}")
         logger.info(f"Processed news with any confidence: {has_confidence}")
@@ -109,10 +109,10 @@ def check_prediction_gap():
         logger.info("🏢 ENTITY STATISTICS")
         logger.info("="*70)
 
-        total_entities = db.query(func.count(Entity.entity_id)).scalar()
-        company_entities = db.query(func.count(Entity.entity_id)).filter(
+        total_entities = db.scalar(select(func.count(Entity.entity_id)))
+        company_entities = db.scalar(select(func.count(Entity.entity_id)).where(
             Entity.entity_type == 'company'
-        ).scalar()
+        ))
 
         logger.info(f"Total entities in DB: {total_entities}")
         logger.info(f"Company entities: {company_entities}")
@@ -122,13 +122,13 @@ def check_prediction_gap():
         logger.info("🎯 TOP ENTITIES WITH PREDICTIONS")
         logger.info("="*70)
 
-        pred_by_entity = db.query(
+        pred_by_entity = db.execute(select(
             Prediction.entity_id,
             func.count(Prediction.prediction_id).label('count')
-        ).group_by(Prediction.entity_id).order_by(func.count(Prediction.prediction_id).desc()).limit(10).all()
+        ).group_by(Prediction.entity_id).order_by(func.count(Prediction.prediction_id).desc()).limit(10)).all()
 
         for entity_id, count in pred_by_entity:
-            entity = db.query(Entity).filter(Entity.entity_id == entity_id).first()
+            entity = db.scalar(select(Entity).where(Entity.entity_id == entity_id).limit(1))
             entity_name = entity.entity_name if entity else 'Unknown'
             logger.info(f"{entity_id} ({entity_name}): {count} predictions")
 

@@ -11,6 +11,7 @@ import dash
 import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, html
 from dash.exceptions import PreventUpdate
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.gui.utils.callbacks import safe_callback
@@ -404,7 +405,7 @@ def register_callbacks(app):
         news_id = button_id["index"]
         try:
             with Session(_engine) as db:
-                predictions = db.query(Prediction).all()
+                predictions = db.scalars(select(Prediction)).all()
                 matching_prediction = None
                 for pred in predictions:
                     if hasattr(pred, "related_news_ids") and pred.related_news_ids:

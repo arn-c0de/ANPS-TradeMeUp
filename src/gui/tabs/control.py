@@ -15,6 +15,7 @@ from pathlib import Path
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, dcc, html
+from sqlalchemy import select
 
 from src.models.database import SessionLocal
 from src.models.system_logs import SystemLog
@@ -75,16 +76,15 @@ def _has_recent_pipeline_activity(window_seconds: int = _PIPELINE_ACTIVITY_WINDO
 
     try:
         with SessionLocal() as db:
-            entries = (
-                db.query(SystemLog)
-                .filter(
+            entries = db.scalars(
+                select(SystemLog)
+                .where(
                     SystemLog.timestamp >= cutoff,
                     SystemLog.source.in_(["pipeline", "control"]),
                 )
                 .order_by(SystemLog.timestamp.desc())
                 .limit(50)
-                .all()
-            )
+            ).all()
     except Exception:
         entries = []
 

@@ -1,5 +1,5 @@
 """Quick script to check predictions in database"""
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings
@@ -10,15 +10,15 @@ engine = create_engine(settings.database_url)
 
 with Session(engine) as db:
     # Count predictions
-    pred_count = db.query(func.count(Prediction.prediction_id)).scalar()
+    pred_count = db.scalar(select(func.count(Prediction.prediction_id)))
     print(f"Total Predictions: {pred_count}")
 
     if pred_count > 0:
         # Show sample predictions
-        preds = db.query(Prediction).limit(5).all()
+        preds = db.scalars(select(Prediction).limit(5)).all()
         print("\nSample Predictions:")
         for p in preds:
-            entity = db.query(Entity).filter(Entity.entity_id == p.entity_id).first()
+            entity = db.scalar(select(Entity).where(Entity.entity_id == p.entity_id).limit(1))
             print(f"  - {p.prediction_id}: {entity.entity_name if entity else p.entity_id} | {p.horizon} | {p.created_at}")
     else:
         print("\n⚠️ No predictions found in database!")

@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import yfinance as yf
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.database import get_scoped_session
@@ -574,17 +575,17 @@ Respond ONLY with JSON."""
         """
         from src.models.processed_news import ProcessedNews
 
-        articles = db.query(RawNews).join(
+        articles = db.scalars(select(RawNews).join(
             ProcessedNews,
             RawNews.news_id == ProcessedNews.news_id
         ).outerjoin(
             NewsEntityMapping,
             RawNews.news_id == NewsEntityMapping.news_id
-        ).filter(
+        ).where(
             NewsEntityMapping.mapping_id.is_(None)
         ).order_by(
             RawNews.published_at.desc()  # Newest first
-        ).limit(limit).offset(offset).all()
+        ).limit(limit).offset(offset)).all()
 
         return articles
 
@@ -772,9 +773,9 @@ Respond ONLY with JSON."""
             Entity object (not yet committed) or None
         """
         # Check if entity already exists
-        entity = db.query(Entity).filter(
+        entity = db.scalar(select(Entity).where(
             Entity.entity_id == entity_id
-        ).first()
+        ).limit(1))
 
         if entity:
             # Return existing entity
@@ -805,9 +806,9 @@ Respond ONLY with JSON."""
         from src.models.processed_news import ProcessedNews
 
         # Try to get processed version for richer content
-        processed = db.query(ProcessedNews).filter(
+        processed = db.scalar(select(ProcessedNews).where(
             ProcessedNews.news_id == article.news_id
-        ).first()
+        ).limit(1))
 
         # Build content from available sources
         if processed and processed.key_facts:
@@ -862,17 +863,17 @@ Respond ONLY with JSON."""
         from sqlalchemy import func
 
         with get_scoped_session() as db:
-            total_mappings = db.query(NewsEntityMapping).count()
-            total_entities = db.query(Entity).count()
+            total_mappings = db.scalar(select(func.count()).select_from(NewsEntityMapping))
+            total_entities = db.scalar(select(func.count()).select_from(Entity))
 
             # Count by entity type
-            by_type = db.query(
+            by_type = db.execute(select(
                 Entity.entity_type,
                 func.count(Entity.entity_id).label('count')
-            ).group_by(Entity.entity_type).all()
+            ).group_by(Entity.entity_type)).all()
 
             # Top entities
-            top_entities = db.query(
+            top_entities = db.execute(select(
                 NewsEntityMapping.entity_id,
                 Entity.entity_name,
                 func.count(NewsEntityMapping.mapping_id).label('mention_count')
@@ -884,7 +885,7 @@ Respond ONLY with JSON."""
                 Entity.entity_name
             ).order_by(
                 func.count(NewsEntityMapping.mapping_id).desc()
-            ).limit(10).all()
+            ).limit(10)).all()
 
             return {
                 'total_mappings': total_mappings,

@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 import pytest
-from sqlalchemy import desc
+from sqlalchemy import desc, func, select
 
 from src.models.database import get_scoped_session
 from src.models.entities import Entity
@@ -29,9 +29,9 @@ def test_with_latest_predictions():
 
     with get_scoped_session() as db:
         # Get the 10 newest predictions
-        latest_predictions = db.query(Prediction).order_by(
+        latest_predictions = db.scalars(select(Prediction).order_by(
             desc(Prediction.created_at)
-        ).limit(10).all()
+        ).limit(10)).all()
 
         if not latest_predictions:
             print("❌ No predictions found in database!")
@@ -60,9 +60,9 @@ def test_with_latest_predictions():
             stats["total"] += 1
 
             # Get entity
-            entity = db.query(Entity).filter(
+            entity = db.scalar(select(Entity).where(
                 Entity.entity_id == pred.entity_id
-            ).first()
+            ).limit(1))
 
             if not entity:
                 print(f"⚠ Prediction {pred.prediction_id}: No entity found")
@@ -70,9 +70,9 @@ def test_with_latest_predictions():
                 continue
 
             # Check if PredictionOutcome exists
-            outcome = db.query(PredictionOutcome).filter(
+            outcome = db.scalar(select(PredictionOutcome).where(
                 PredictionOutcome.prediction_id == pred.prediction_id
-            ).first()
+            ).limit(1))
 
             # Create/update simulation
             try:
@@ -80,9 +80,9 @@ def test_with_latest_predictions():
 
                 if sim:
                     # Check if this is new or updated
-                    existing = db.query(TradingSimulation).filter(
+                    existing = db.scalar(select(func.count()).select_from(TradingSimulation).where(
                         TradingSimulation.prediction_id == pred.prediction_id
-                    ).count()
+                    ))
 
                     if existing > 1:
                         stats["updated"] += 1
@@ -136,7 +136,7 @@ def test_with_latest_predictions():
         # Test data quality
         print("\n🔍 DATA QUALITY ANALYSIS:")
 
-        all_sims = db.query(TradingSimulation).all()
+        all_sims = db.scalars(select(TradingSimulation)).all()
         if all_sims:
             total_sims = len(all_sims)
             with_actual = sum(1 for s in all_sims if s.actual_return_pct is not None)
@@ -168,7 +168,7 @@ def test_resimulate_functionality():
 
     with get_scoped_session() as db:
         # Get existing simulations
-        existing_sims = db.query(TradingSimulation).limit(5).all()
+        existing_sims = db.scalars(select(TradingSimulation).limit(5)).all()
 
         if not existing_sims:
             print("⚠ No existing simulations to test resimulate functionality")
@@ -181,7 +181,7 @@ def test_resimulate_functionality():
         print("Before Resimulation:")
         print("-" * 80)
         for sim in existing_sims:
-            entity = db.query(Entity).filter(Entity.entity_id == sim.entity_id).first()
+            entity = db.scalar(select(Entity).where(Entity.entity_id == sim.entity_id).limit(1))
             print(f"   {entity.entity_name if entity else sim.entity_id[:20]:<30} | "
                   f"Expected: {sim.expected_return_pct:+6.2f}% | "
                   f"Actual: {sim.actual_return_pct:+6.2f}%" if sim.actual_return_pct is not None else f"Actual: {'N/A':>6} | "
@@ -193,13 +193,13 @@ def test_resimulate_functionality():
 
         for sim in existing_sims:
             try:
-                prediction = db.query(Prediction).filter(
+                prediction = db.scalar(select(Prediction).where(
                     Prediction.prediction_id == sim.prediction_id
-                ).first()
+                ).limit(1))
 
-                entity = db.query(Entity).filter(
+                entity = db.scalar(select(Entity).where(
                     Entity.entity_id == sim.entity_id
-                ).first()
+                ).limit(1))
 
                 if prediction and entity:
                     new_sim = engine.simulate_prediction(db, prediction, entity)
@@ -217,14 +217,14 @@ def test_resimulate_functionality():
 
         # Refresh data
         db.expire_all()
-        existing_sims = db.query(TradingSimulation).filter(
+        existing_sims = db.scalars(select(TradingSimulation).where(
             TradingSimulation.simulation_id.in_([s.simulation_id for s in existing_sims])
-        ).all()
+        )).all()
 
         print("\nAfter Resimulation:")
         print("-" * 80)
         for sim in existing_sims:
-            entity = db.query(Entity).filter(Entity.entity_id == sim.entity_id).first()
+            entity = db.scalar(select(Entity).where(Entity.entity_id == sim.entity_id).limit(1))
             print(f"   {entity.entity_name if entity else sim.entity_id[:20]:<30} | "
                   f"Expected: {sim.expected_return_pct:+6.2f}% | "
                   f"Actual: {sim.actual_return_pct:+6.2f}%" if sim.actual_return_pct is not None else f"Actual: {'N/A':>6} | "

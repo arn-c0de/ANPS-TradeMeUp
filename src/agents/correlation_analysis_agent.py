@@ -3,7 +3,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
-from sqlalchemy import func
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from src.models.entities import Entity, EntityRelationship
@@ -60,15 +60,15 @@ class CorrelationAnalysisAgent:
         # Fetch price data for both entities. The column is `ticker`;
         # filtering on a non-existent `entity_id` raised AttributeError and
         # made every correlation calculation fail.
-        data_1 = db.query(MarketData).filter(
+        data_1 = db.scalars(select(MarketData).where(
             MarketData.ticker == entity_1,
             MarketData.timestamp >= cutoff
-        ).order_by(MarketData.timestamp).all()
+        ).order_by(MarketData.timestamp)).all()
 
-        data_2 = db.query(MarketData).filter(
+        data_2 = db.scalars(select(MarketData).where(
             MarketData.ticker == entity_2,
             MarketData.timestamp >= cutoff
-        ).order_by(MarketData.timestamp).all()
+        ).order_by(MarketData.timestamp)).all()
 
         if len(data_1) < 20 or len(data_2) < 20:
             logger.warning(f"Insufficient data for correlation: {entity_1}, {entity_2}")
@@ -127,10 +127,10 @@ class CorrelationAnalysisAgent:
             List of related entities with correlation scores
         """
         # Get all other entities
-        all_entities = db.query(Entity).filter(
+        all_entities = db.scalars(select(Entity).where(
             Entity.entity_id != entity_id,
             Entity.entity_type == 'company'
-        ).all()
+        )).all()
 
         relationships = []
 
@@ -173,9 +173,9 @@ class CorrelationAnalysisAgent:
             relationships = self.analyze_entity_relationships(db, entity_id, min_correlation=0.4)
 
             # Delete existing relationships
-            db.query(EntityRelationship).filter(
+            db.execute(delete(EntityRelationship).where(
                 EntityRelationship.entity_1 == entity_id
-            ).delete()
+            ))
 
             # Create new relationships
             relationship_objects = []
@@ -267,19 +267,19 @@ class CorrelationAnalysisAgent:
 
         with get_scoped_session() as db:
             # Get top entities by mention count
-            top_entities = db.query(
+            top_entities = db.execute(select(
                 NewsEntityMapping.entity_id,
                 func.count(NewsEntityMapping.mapping_id).label('mentions')
             ).join(
                 Entity,
                 NewsEntityMapping.entity_id == Entity.entity_id
-            ).filter(
+            ).where(
                 Entity.entity_type == 'company'
             ).group_by(
                 NewsEntityMapping.entity_id
             ).order_by(
                 func.count(NewsEntityMapping.mapping_id).desc()
-            ).limit(limit).all()
+            ).limit(limit)).all()
 
             logger.info(f"Analyzing correlations for {len(top_entities)} entities")
 
@@ -316,9 +316,9 @@ class CorrelationAnalysisAgent:
         from src.models.database import get_scoped_session
 
         with get_scoped_session() as db:
-            total_relationships = db.query(EntityRelationship).filter(
+            total_relationships = db.scalar(select(func.count()).select_from(EntityRelationship).where(
                 EntityRelationship.relationship_type == 'correlation'
-            ).count()
+            ))
 
             if total_relationships == 0:
                 return {
@@ -329,22 +329,22 @@ class CorrelationAnalysisAgent:
                 }
 
             # Average correlation strength
-            avg_strength = db.query(
+            avg_strength = db.scalar(select(
                 func.avg(EntityRelationship.strength)
-            ).filter(
+            ).where(
                 EntityRelationship.relationship_type == 'correlation'
-            ).scalar() or 0.0
+            )) or 0.0
 
             # Positive/negative counts
-            positive = db.query(EntityRelationship).filter(
+            positive = db.scalar(select(func.count()).select_from(EntityRelationship).where(
                 EntityRelationship.relationship_type == 'correlation',
                 EntityRelationship.direction == 'positive'
-            ).count()
+            ))
 
-            negative = db.query(EntityRelationship).filter(
+            negative = db.scalar(select(func.count()).select_from(EntityRelationship).where(
                 EntityRelationship.relationship_type == 'correlation',
                 EntityRelationship.direction == 'negative'
-            ).count()
+            ))
 
             return {
                 'total_relationships': total_relationships,

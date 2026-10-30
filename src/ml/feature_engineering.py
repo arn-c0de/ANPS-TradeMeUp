@@ -3,6 +3,7 @@ import logging
 from datetime import UTC, datetime
 
 import pandas as pd
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.analysis import ImpactScore, MarketRegime, SurpriseScore
@@ -52,10 +53,10 @@ class FeatureEngineer:
 
         try:
             # 1. Impact score features
-            impact = self.db.query(ImpactScore).filter(
+            impact = self.db.scalar(select(ImpactScore).where(
                 ImpactScore.news_id == news_id,
                 ImpactScore.entity_id == entity_id
-            ).first()
+            ).limit(1))
 
             if impact:
                 features['impact_score'] = impact.impact_score
@@ -79,9 +80,9 @@ class FeatureEngineer:
                 features['surprise_factor'] = 1.0
 
             # 2. Sentiment features
-            processed = self.db.query(ProcessedNews).filter(
+            processed = self.db.scalar(select(ProcessedNews).where(
                 ProcessedNews.news_id == news_id
-            ).first()
+            ).limit(1))
 
             if processed and processed.sentiment:
                 features['sentiment_overall'] = processed.sentiment.get('overall', 0.0)
@@ -104,9 +105,9 @@ class FeatureEngineer:
                 features['event_macro'] = 0
 
             # 3. Surprise features
-            surprise = self.db.query(SurpriseScore).filter(
+            surprise = self.db.scalar(select(SurpriseScore).where(
                 SurpriseScore.news_id == news_id
-            ).first()
+            ).limit(1))
 
             if surprise and surprise.surprise_normalized is not None:
                 features['has_surprise'] = 1
@@ -118,9 +119,9 @@ class FeatureEngineer:
                 features['surprise_direction'] = 0
 
             # 4. Regime features
-            regime = self.db.query(MarketRegime).filter(
+            regime = self.db.scalar(select(MarketRegime).where(
                 MarketRegime.timestamp <= as_of_date
-            ).order_by(MarketRegime.timestamp.desc()).first()
+            ).order_by(MarketRegime.timestamp.desc()).limit(1))
 
             if regime:
                 reg_data = regime.regime or {}
@@ -199,10 +200,10 @@ class FeatureEngineer:
         skipped_no_label = 0
 
         # Get all impact scores in date range
-        impact_scores = self.db.query(ImpactScore).filter(
+        impact_scores = self.db.scalars(select(ImpactScore).where(
             ImpactScore.created_at >= start_date,
             ImpactScore.created_at <= end_date
-        ).all()
+        )).all()
 
         logger.info(f"Found {len(impact_scores)} impact scores to process")
 

@@ -10,7 +10,7 @@ import dash
 import dash_bootstrap_components as dbc
 from dash import ALL, MATCH, Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
-from sqlalchemy import delete, desc, func
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from src.models.database import engine as _engine
@@ -384,18 +384,18 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
     """Get simulations table with filters and portfolio context."""
     try:
         with Session(engine, expire_on_commit=False) as db:
-            query = db.query(TradingSimulation).options(
+            stmt = select(TradingSimulation).options(
                 joinedload(TradingSimulation.entity)
             ).order_by(desc(TradingSimulation.created_at))
 
             if entity_filter:
-                query = query.filter(TradingSimulation.entity_id.in_(entity_filter))
+                stmt = stmt.where(TradingSimulation.entity_id.in_(entity_filter))
 
             if decision_filter and decision_filter != "all":
-                query = query.filter(TradingSimulation.decision == decision_filter)
+                stmt = stmt.where(TradingSimulation.decision == decision_filter)
 
             if horizon_filter and horizon_filter != "all":
-                query = query.filter(TradingSimulation.horizon == horizon_filter)
+                stmt = stmt.where(TradingSimulation.horizon == horizon_filter)
 
             if date_range and len(date_range) == 2:
                 start, end = date_range
@@ -403,14 +403,14 @@ def get_simulation_table(engine, entity_filter=None, date_range=None, decision_f
                     if isinstance(start, str):
                         start = datetime.fromisoformat(start).date()
                     start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=UTC)
-                    query = query.filter(TradingSimulation.created_at >= start_dt)
+                    stmt = stmt.where(TradingSimulation.created_at >= start_dt)
                 if end:
                     if isinstance(end, str):
                         end = datetime.fromisoformat(end).date()
                     end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=UTC)
-                    query = query.filter(TradingSimulation.created_at <= end_dt)
+                    stmt = stmt.where(TradingSimulation.created_at <= end_dt)
 
-            simulations = query.limit(200).all()
+            simulations = db.scalars(stmt.limit(200)).all()
 
             if not simulations:
                 return dbc.Alert("No simulations match the current filters.", color="info")
@@ -653,7 +653,7 @@ def get_prediction_entity_options(engine, date_range=None):
     try:
         with Session(engine) as db:
             # Base query: get entities with prediction counts
-            query = db.query(
+            stmt = select(
                 Entity,
                 func.count(Prediction.prediction_id).label('pred_count')
             ).join(
@@ -670,17 +670,17 @@ def get_prediction_entity_options(engine, date_range=None):
                 # Filter predictions by date range
                 if start:
                     start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=UTC)
-                    query = query.filter(Prediction.created_at >= start_dt)
+                    stmt = stmt.where(Prediction.created_at >= start_dt)
                 if end:
                     end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=UTC)
-                    query = query.filter(Prediction.created_at <= end_dt)
+                    stmt = stmt.where(Prediction.created_at <= end_dt)
 
             # Group by entity to get counts
-            query = query.group_by(Entity.entity_id, Entity.entity_name).having(
+            stmt = stmt.group_by(Entity.entity_id, Entity.entity_name).having(
                 func.count(Prediction.prediction_id) > 0
             ).order_by(Entity.entity_name)
 
-            results = query.all()
+            results = db.execute(stmt).all()
 
             return [
                 {
@@ -693,9 +693,9 @@ def get_prediction_entity_options(engine, date_range=None):
         # Fallback: return entities without counts if there's an error
         try:
             with Session(engine) as db:
-                entities = db.query(Entity).join(
+                entities = db.scalars(select(Entity).join(
                     Prediction, Prediction.entity_id == Entity.entity_id
-                ).distinct().order_by(Entity.entity_name).all()
+                ).distinct().order_by(Entity.entity_name)).all()
                 return [
                     {"label": f"{e.entity_name} ({e.entity_id})", "value": e.entity_id}
                     for e in entities
@@ -709,13 +709,13 @@ def get_entity_options(engine, date_range=None):
     try:
         with Session(engine) as db:
             # Base query: get entities with simulation counts
-            query = db.query(
+            stmt = select(
                 Entity,
                 func.count(TradingSimulation.simulation_id).label('sim_count')
             ).outerjoin(
                 TradingSimulation,
                 TradingSimulation.entity_id == Entity.entity_id
-            ).filter(Entity.entity_type == "company")
+            ).where(Entity.entity_type == "company")
 
             # Apply date range filter if provided
             if date_range and len(date_range) == 2 and (date_range[0] or date_range[1]):
@@ -726,21 +726,21 @@ def get_entity_options(engine, date_range=None):
                 # Filter simulations by date range
                 if start:
                     start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=UTC)
-                    query = query.filter(TradingSimulation.created_at >= start_dt)
+                    stmt = stmt.where(TradingSimulation.created_at >= start_dt)
                 if end:
                     end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=UTC)
-                    query = query.filter(TradingSimulation.created_at <= end_dt)
+                    stmt = stmt.where(TradingSimulation.created_at <= end_dt)
 
             # Group by entity to get counts
-            query = query.group_by(Entity.entity_id, Entity.entity_name)
+            stmt = stmt.group_by(Entity.entity_id, Entity.entity_name)
 
             # If no date filter, only show entities that have simulations
             if not (date_range and len(date_range) == 2 and (date_range[0] or date_range[1])):
-                query = query.having(func.count(TradingSimulation.simulation_id) > 0)
+                stmt = stmt.having(func.count(TradingSimulation.simulation_id) > 0)
 
-            query = query.order_by(Entity.entity_name)
+            stmt = stmt.order_by(Entity.entity_name)
 
-            results = query.all()
+            results = db.execute(stmt).all()
 
             return [
                 {
@@ -753,7 +753,7 @@ def get_entity_options(engine, date_range=None):
         # Fallback: return entities without counts if there's an error
         try:
             with Session(engine) as db:
-                entities = db.query(Entity).filter(Entity.entity_type == "company").order_by(Entity.entity_name).all()
+                entities = db.scalars(select(Entity).where(Entity.entity_type == "company").order_by(Entity.entity_name)).all()
                 return [
                     {"label": f"{e.entity_name} ({e.entity_id})", "value": e.entity_id}
                     for e in entities
@@ -941,10 +941,10 @@ def register_callbacks(app):
                 raise PreventUpdate
             try:
                 with get_scoped_session() as db:
-                    count = db.query(TradingSimulation).count()
+                    count = db.scalar(select(func.count()).select_from(TradingSimulation))
                     db.execute(delete(TradingSimulation))
                     db.commit()
-                    remaining = db.query(TradingSimulation).count()
+                    remaining = db.scalar(select(func.count()).select_from(TradingSimulation))
                     activity_logger.log_activity(f"Deleted all {count} simulations (remaining: {remaining})", "WARNING")
                 disabled_states = [False] * (len(button_ids) if button_ids else 0)
                 return disabled_states, {
@@ -1064,7 +1064,7 @@ def register_callbacks(app):
 
             with get_scoped_session() as db:
                 # Get all existing simulations
-                simulations = db.query(TradingSimulation).all()
+                simulations = db.scalars(select(TradingSimulation)).all()
                 total = len(simulations)
 
                 if total == 0:
@@ -1083,13 +1083,13 @@ def register_callbacks(app):
                 for sim in simulations:
                     try:
                         # Get the original prediction and entity
-                        prediction = db.query(Prediction).filter(
+                        prediction = db.scalar(select(Prediction).where(
                             Prediction.prediction_id == sim.prediction_id
-                        ).first()
+                        ).limit(1))
 
-                        entity = db.query(Entity).filter(
+                        entity = db.scalar(select(Entity).where(
                             Entity.entity_id == sim.entity_id
-                        ).first()
+                        ).limit(1))
 
                         if prediction and entity:
                             # Resimulate with fresh data

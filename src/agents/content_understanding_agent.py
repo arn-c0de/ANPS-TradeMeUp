@@ -11,6 +11,7 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.database import get_scoped_session
@@ -163,18 +164,18 @@ Respond ONLY with JSON."""
         """
         from src.models.data_quality import DataQualityScore
 
-        articles = db.query(RawNews).join(
+        articles = db.scalars(select(RawNews).join(
             DataQualityScore,
             RawNews.news_id == DataQualityScore.news_id
         ).outerjoin(
             ProcessedNews,
             RawNews.news_id == ProcessedNews.news_id
-        ).filter(
+        ).where(
             DataQualityScore.quality_score >= 0.6,  # Only process decent quality
             ProcessedNews.news_id.is_(None)  # Not yet processed
         ).order_by(
             RawNews.published_at.desc()  # Newest first
-        ).limit(limit).all()
+        ).limit(limit)).all()
 
         return articles
 
@@ -201,9 +202,9 @@ Respond ONLY with JSON."""
             analysis = self._analyze_article(db, article)
 
             # Check if already exists
-            existing = db.query(ProcessedNews).filter(
+            existing = db.scalar(select(ProcessedNews).where(
                 ProcessedNews.news_id == str(article.news_id)
-            ).first()
+            ).limit(1))
 
             if existing:
                 # Update existing record
@@ -362,24 +363,24 @@ Respond ONLY with JSON."""
         from sqlalchemy import Float, func
 
         with get_scoped_session() as db:
-            total_processed = db.query(ProcessedNews).count()
+            total_processed = db.scalar(select(func.count()).select_from(ProcessedNews))
 
             # Count by event type
-            by_event_type = db.query(
+            by_event_type = db.execute(select(
                 ProcessedNews.event_type,
                 func.count(ProcessedNews.news_id).label('count')
-            ).group_by(ProcessedNews.event_type).all()
+            ).group_by(ProcessedNews.event_type)).all()
 
             # Average sentiment
             # PostgreSQL uses ->> operator for JSONB text extraction
-            avg_sentiment = db.query(
+            avg_sentiment = db.scalar(select(
                 func.avg(
                     func.cast(
                         ProcessedNews.sentiment.op('->>')('overall'),
                         Float
                     )
                 )
-            ).scalar()
+            ))
 
             return {
                 'total_processed': total_processed,

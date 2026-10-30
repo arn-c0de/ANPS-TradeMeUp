@@ -2,7 +2,7 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.models.analysis import FactVerification
@@ -62,11 +62,11 @@ class FactVerificationAgent:
         from sqlalchemy.orm import joinedload
 
         # Fetch processed article with news relationship loaded
-        article = db.query(ProcessedNews).options(
+        article = db.scalar(select(ProcessedNews).options(
             joinedload(ProcessedNews.news)
-        ).filter(
+        ).where(
             ProcessedNews.news_id == news_id
-        ).first()
+        ).limit(1))
 
         if not article:
             raise ValueError(f"Processed article {news_id} not found")
@@ -224,14 +224,14 @@ Respond ONLY with JSON."""
 
         with get_scoped_session() as db:
             # Find processed articles without verification
-            articles = db.query(ProcessedNews).outerjoin(
+            articles = db.scalars(select(ProcessedNews).outerjoin(
                 FactVerification,
                 ProcessedNews.news_id == FactVerification.news_id
-            ).filter(
+            ).where(
                 FactVerification.verification_id.is_(None)
             ).order_by(
                 ProcessedNews.processing_timestamp.desc()
-            ).limit(limit).all()
+            ).limit(limit)).all()
 
             logger.info(f"Verifying {len(articles)} articles")
 
@@ -280,7 +280,7 @@ Respond ONLY with JSON."""
         from src.models.database import get_scoped_session
 
         with get_scoped_session() as db:
-            total_verified = db.query(FactVerification).count()
+            total_verified = db.scalar(select(func.count()).select_from(FactVerification))
 
             if total_verified == 0:
                 return {
@@ -291,19 +291,19 @@ Respond ONLY with JSON."""
                 }
 
             # Average credibility
-            avg_cred = db.query(
+            avg_cred = db.scalar(select(
                 func.avg(FactVerification.credibility_score)
-            ).scalar() or 0.0
+            )) or 0.0
 
             # Contradictions count
-            contradictions = db.query(FactVerification).filter(
+            contradictions = db.scalar(select(func.count()).select_from(FactVerification).where(
                 FactVerification.contradictions_found.is_(True)
-            ).count()
+            ))
 
             # High credibility percentage
-            high_cred = db.query(FactVerification).filter(
+            high_cred = db.scalar(select(func.count()).select_from(FactVerification).where(
                 FactVerification.credibility_score >= 0.8
-            ).count()
+            ))
 
             return {
                 'total_verified': total_verified,
@@ -315,9 +315,9 @@ Respond ONLY with JSON."""
 
     def _get_method_breakdown(self, db: Session) -> dict:
         """Get breakdown by verification method."""
-        methods = db.query(
+        methods = db.execute(select(
             FactVerification.verification_method,
             func.count(FactVerification.verification_id).label('count')
-        ).group_by(FactVerification.verification_method).all()
+        ).group_by(FactVerification.verification_method)).all()
 
         return {method: count for method, count in methods}

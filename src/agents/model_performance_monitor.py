@@ -3,6 +3,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.models.predictions import Prediction, PredictionOutcome
@@ -44,13 +45,13 @@ class ModelPerformanceMonitor:
         cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
         # Fetch predictions with outcomes
-        predictions = self.db.query(Prediction).join(
+        predictions = self.db.scalars(select(Prediction).join(
             PredictionOutcome,
             Prediction.prediction_id == PredictionOutcome.prediction_id
-        ).filter(
+        ).where(
             Prediction.model_version == model_version,
             Prediction.created_at >= cutoff
-        ).all()
+        )).all()
 
         if len(predictions) < 5:
             return {
@@ -191,13 +192,13 @@ class ModelPerformanceMonitor:
         by_horizon = {}
 
         for horizon in horizons:
-            predictions = self.db.query(Prediction).join(
+            predictions = self.db.scalars(select(Prediction).join(
                 PredictionOutcome,
                 Prediction.prediction_id == PredictionOutcome.prediction_id
-            ).filter(
+            ).where(
                 Prediction.model_version == model_version,
                 Prediction.horizon == horizon
-            ).limit(100).all()
+            ).limit(100)).all()
 
             if len(predictions) < 5:
                 by_horizon[horizon] = {'error': 'insufficient_data'}
@@ -236,9 +237,9 @@ class ModelPerformanceMonitor:
             return {}
 
         prediction_ids = [pred.prediction_id for pred in predictions]
-        rows = self.db.query(PredictionOutcome).filter(
+        rows = self.db.scalars(select(PredictionOutcome).where(
             PredictionOutcome.prediction_id.in_(prediction_ids)
-        ).all()
+        )).all()
         return {row.prediction_id: row for row in rows}
 
     def process_batch(self, limit: int = 5) -> dict:
@@ -252,7 +253,7 @@ class ModelPerformanceMonitor:
             Statistics
         """
         # Get unique model versions
-        model_versions = self.db.query(Prediction.model_version).distinct().limit(limit).all()
+        model_versions = self.db.execute(select(Prediction.model_version).distinct().limit(limit)).all()
 
         logger.info(f"Analyzing performance for {len(model_versions)} models")
 
@@ -275,7 +276,7 @@ class ModelPerformanceMonitor:
 
     def get_statistics(self) -> dict:
         """Get performance monitoring statistics."""
-        total_models = self.db.query(Prediction.model_version).distinct().count()
+        total_models = self.db.scalar(select(func.count()).select_from(select(Prediction.model_version).distinct().subquery()))
 
         return {
             'total_models': total_models,

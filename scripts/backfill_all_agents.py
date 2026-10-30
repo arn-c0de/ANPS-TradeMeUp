@@ -21,6 +21,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.agents import build_agent
@@ -92,26 +93,26 @@ def print_llm_config():
 # --------------------------------------------------------------------------
 
 def _count_without_quality(db: Session) -> int:
-    return db.query(RawNews).outerjoin(
+    return db.scalar(select(func.count()).select_from(select(RawNews).outerjoin(
         DataQualityScore, RawNews.news_id == DataQualityScore.news_id
-    ).filter(DataQualityScore.news_id.is_(None)).count()
+    ).where(DataQualityScore.news_id.is_(None)).subquery()))
 
 
 def _count_without_content(db: Session) -> int:
-    return db.query(RawNews).join(
+    return db.scalar(select(func.count()).select_from(select(RawNews).join(
         DataQualityScore, RawNews.news_id == DataQualityScore.news_id
-    ).filter(
+    ).where(
         DataQualityScore.quality_score >= MIN_QUALITY_FOR_CONTENT
     ).outerjoin(
         ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-    ).filter(ProcessedNews.news_id.is_(None)).count()
+    ).where(ProcessedNews.news_id.is_(None)).subquery()))
 
 
 def _count_missing(db: Session, related_model) -> int:
     """Count ProcessedNews rows that have no matching row in ``related_model``."""
-    return db.query(ProcessedNews).outerjoin(
+    return db.scalar(select(func.count()).select_from(select(ProcessedNews).outerjoin(
         related_model, ProcessedNews.news_id == related_model.news_id
-    ).filter(related_model.news_id.is_(None)).count()
+    ).where(related_model.news_id.is_(None)).subquery()))
 
 
 def _count_predictable_impacts(db: Session) -> int:
@@ -121,9 +122,9 @@ def _count_predictable_impacts(db: Session) -> int:
     cheap join for "already predicted", and the agent skips what it has already
     handled. The number is used for progress display and the iteration cap.
     """
-    return db.query(ImpactScore).filter(
+    return db.scalar(select(func.count()).select_from(ImpactScore).where(
         ImpactScore.impact_score >= MIN_IMPACT_FOR_PREDICTION
-    ).count()
+    ))
 
 
 # --------------------------------------------------------------------------

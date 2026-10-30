@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from dash import html
-from sqlalchemy import and_, desc, func, or_
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from src.gui.error_handling import handle_db_errors
@@ -83,7 +83,7 @@ def _classify_sentiment(score: float) -> str:
 
 def _query_entity_sentiment_rows(db: Session, start_date, end_date):
     """Fetch (entity_name, entity_id, sentiment, fetched_at) rows with sentiment in range."""
-    query = db.query(
+    stmt = select(
         Entity.entity_name,
         Entity.entity_id,
         ProcessedNews.sentiment,
@@ -94,14 +94,14 @@ def _query_entity_sentiment_rows(db: Session, start_date, end_date):
         RawNews, NewsEntityMapping.news_id == RawNews.news_id
     ).join(
         ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-    ).filter(
+    ).where(
         ProcessedNews.sentiment.isnot(None)
     )
     if start_date:
-        query = query.filter(RawNews.fetched_at >= start_date)
+        stmt = stmt.where(RawNews.fetched_at >= start_date)
     if end_date:
-        query = query.filter(RawNews.fetched_at <= end_date)
-    return query.all()
+        stmt = stmt.where(RawNews.fetched_at <= end_date)
+    return db.execute(stmt).all()
 
 
 # ---------------------------------------------------------------------------
@@ -110,36 +110,36 @@ def _query_entity_sentiment_rows(db: Session, start_date, end_date):
 
 def _count_in_range(db: Session, count_column, timestamp_column, start_date, end_date) -> int:
     """Count rows of one column, optionally restricted to a timestamp range."""
-    query = db.query(func.count(count_column))
+    stmt = select(func.count(count_column))
     if start_date:
-        query = query.filter(timestamp_column >= start_date)
+        stmt = stmt.where(timestamp_column >= start_date)
     if end_date:
-        query = query.filter(timestamp_column <= end_date)
-    return query.scalar() or 0
+        stmt = stmt.where(timestamp_column <= end_date)
+    return db.scalar(stmt) or 0
 
 
 def _count_unique_mentioned_entities(db: Session, start_date=None, end_date=None) -> int:
     """Count distinct entities mentioned in news within the given range."""
-    query = db.query(
+    stmt = select(
         func.count(func.distinct(NewsEntityMapping.entity_id))
     ).join(
         RawNews, NewsEntityMapping.news_id == RawNews.news_id
     )
     if start_date:
-        query = query.filter(RawNews.fetched_at >= start_date)
+        stmt = stmt.where(RawNews.fetched_at >= start_date)
     if end_date:
-        query = query.filter(RawNews.fetched_at <= end_date)
-    return query.scalar() or 0
+        stmt = stmt.where(RawNews.fetched_at <= end_date)
+    return db.scalar(stmt) or 0
 
 
 def _average_quality(db: Session, start_date=None, end_date=None):
     """Average data-quality score within the given range (None when no rows)."""
-    query = db.query(func.avg(DataQualityScore.quality_score))
+    stmt = select(func.avg(DataQualityScore.quality_score))
     if start_date:
-        query = query.filter(DataQualityScore.created_at >= start_date)
+        stmt = stmt.where(DataQualityScore.created_at >= start_date)
     if end_date:
-        query = query.filter(DataQualityScore.created_at <= end_date)
-    return query.scalar()
+        stmt = stmt.where(DataQualityScore.created_at <= end_date)
+    return db.scalar(stmt)
 
 
 def _collect_total_counts(db: Session, start_date, end_date) -> dict:
@@ -187,19 +187,19 @@ def _prediction_performance(db: Session, start_date, end_date) -> tuple:
     Returns:
         Tuple of (average_return_pct, tracked_count).
     """
-    query = db.query(PredictionOutcome).join(
+    stmt = select(PredictionOutcome).join(
         Prediction, PredictionOutcome.prediction_id == Prediction.prediction_id
-    ).filter(
+    ).where(
         PredictionOutcome.actual_return.isnot(None)
     )
     if start_date:
-        query = query.filter(Prediction.created_at >= start_date)
+        stmt = stmt.where(Prediction.created_at >= start_date)
     if end_date:
-        query = query.filter(Prediction.created_at <= end_date)
+        stmt = stmt.where(Prediction.created_at <= end_date)
 
     total_return_pct = 0.0
     tracked_count = 0
-    for outcome in query.all():
+    for outcome in db.scalars(stmt).all():
         try:
             if outcome.actual_return is not None and abs(outcome.actual_return) > 0.001:
                 # actual_return is already stored as a percentage (e.g. -17.03 = -17.03%)
@@ -326,17 +326,17 @@ def get_event_distribution_chart(engine, date_range=None):
     try:
         start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
-            query = db.query(
+            stmt = select(
                 ProcessedNews.event_type,
                 func.count(ProcessedNews.news_id).label('count')
             ).group_by(ProcessedNews.event_type)
 
             if start_date:
-                query = query.filter(ProcessedNews.processing_timestamp >= start_date)
+                stmt = stmt.where(ProcessedNews.processing_timestamp >= start_date)
             if end_date:
-                query = query.filter(ProcessedNews.processing_timestamp <= end_date)
+                stmt = stmt.where(ProcessedNews.processing_timestamp <= end_date)
 
-            event_data = query.all()
+            event_data = db.execute(stmt).all()
 
         if not event_data:
             return {}
@@ -364,12 +364,12 @@ def get_quality_distribution_chart(engine, date_range=None):
     try:
         start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
-            query = db.query(DataQualityScore.quality_score)
+            stmt = select(DataQualityScore.quality_score)
             if start_date:
-                query = query.filter(DataQualityScore.created_at >= start_date)
+                stmt = stmt.where(DataQualityScore.created_at >= start_date)
             if end_date:
-                query = query.filter(DataQualityScore.created_at <= end_date)
-            quality_data = query.all()
+                stmt = stmt.where(DataQualityScore.created_at <= end_date)
+            quality_data = db.execute(stmt).all()
 
         if not quality_data:
             return {}
@@ -396,14 +396,14 @@ def get_sentiment_distribution_chart(engine, date_range=None):
     try:
         start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
-            query = db.query(ProcessedNews.sentiment).filter(
+            stmt = select(ProcessedNews.sentiment).where(
                 ProcessedNews.sentiment.isnot(None)
             )
             if start_date:
-                query = query.filter(ProcessedNews.processing_timestamp >= start_date)
+                stmt = stmt.where(ProcessedNews.processing_timestamp >= start_date)
             if end_date:
-                query = query.filter(ProcessedNews.processing_timestamp <= end_date)
-            sentiments_data = query.all()
+                stmt = stmt.where(ProcessedNews.processing_timestamp <= end_date)
+            sentiments_data = db.execute(stmt).all()
 
         if not sentiments_data:
             return _message_figure("No sentiment data yet<br>Run content analysis")
@@ -444,12 +444,12 @@ def get_impact_distribution_chart(engine, date_range=None):
     try:
         start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
-            query = db.query(ImpactScore.impact_score)
+            stmt = select(ImpactScore.impact_score)
             if start_date:
-                query = query.filter(ImpactScore.created_at >= start_date)
+                stmt = stmt.where(ImpactScore.created_at >= start_date)
             if end_date:
-                query = query.filter(ImpactScore.created_at <= end_date)
-            impact_scores = query.all()
+                stmt = stmt.where(ImpactScore.created_at <= end_date)
+            impact_scores = db.execute(stmt).all()
 
         if not impact_scores:
             return _message_figure("No impact scores yet<br>Run impact analysis")
@@ -493,7 +493,7 @@ def get_top_entities_list(engine, date_range=None):
     try:
         start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
-            query = db.query(
+            stmt = select(
                 Entity.entity_name,
                 Entity.entity_id,
                 func.count(NewsEntityMapping.mapping_id).label('mentions')
@@ -506,16 +506,16 @@ def get_top_entities_list(engine, date_range=None):
             )
 
             if start_date:
-                query = query.filter(RawNews.fetched_at >= start_date)
+                stmt = stmt.where(RawNews.fetched_at >= start_date)
             if end_date:
-                query = query.filter(RawNews.fetched_at <= end_date)
+                stmt = stmt.where(RawNews.fetched_at <= end_date)
 
-            top_entities = query.group_by(
+            top_entities = db.execute(stmt.group_by(
                 Entity.entity_name,
                 Entity.entity_id
             ).order_by(
                 func.count(NewsEntityMapping.mapping_id).desc()
-            ).limit(10).all()
+            ).limit(10)).all()
 
         if not top_entities:
             return html.P("No entities tracked yet", className="text-muted")
@@ -826,7 +826,7 @@ def _query_entity_details(db: Session, search_term: str, sort_column, sort_direc
     if end_date:
         impact_join_conditions.append(ImpactScore.created_at <= end_date)
 
-    query = db.query(
+    stmt = select(
         Entity.entity_name,
         Entity.entity_id,
         Entity.entity_type,
@@ -848,12 +848,12 @@ def _query_entity_details(db: Session, search_term: str, sort_column, sort_direc
     )
 
     if start_date:
-        query = query.filter(RawNews.fetched_at >= start_date)
+        stmt = stmt.where(RawNews.fetched_at >= start_date)
     if end_date:
-        query = query.filter(RawNews.fetched_at <= end_date)
+        stmt = stmt.where(RawNews.fetched_at <= end_date)
 
     if search_term:
-        query = query.filter(
+        stmt = stmt.where(
             or_(
                 Entity.entity_name.ilike(f"%{search_term}%"),
                 Entity.entity_id.ilike(f"%{search_term}%")
@@ -862,12 +862,12 @@ def _query_entity_details(db: Session, search_term: str, sort_column, sort_direc
 
     if sort_column and sort_direction:
         sort_expr = _entity_sort_expression(sort_column)
-        query = query.order_by(sort_expr.asc() if sort_direction == "asc" else sort_expr.desc())
+        stmt = stmt.order_by(sort_expr.asc() if sort_direction == "asc" else sort_expr.desc())
     else:
         # Default sorting: by mentions descending
-        query = query.order_by(func.count(NewsEntityMapping.mapping_id).desc())
+        stmt = stmt.order_by(func.count(NewsEntityMapping.mapping_id).desc())
 
-    return query.limit(50).all()
+    return db.execute(stmt.limit(50)).all()
 
 
 def _entity_table_header(sort_column, sort_direction) -> list:
@@ -992,20 +992,20 @@ def get_news_volume_chart(engine, date_range=None):
         start_date, end_date = _parse_date_range(date_range)
         with Session(engine) as db:
             # Query news counts by date (SQLite-compatible)
-            query = db.query(
+            stmt = select(
                 func.date(RawNews.fetched_at).label('date'),
                 func.count(RawNews.news_id).label('count')
-            ).filter(
+            ).where(
                 RawNews.fetched_at.isnot(None)
             )
             if start_date:
-                query = query.filter(RawNews.fetched_at >= start_date)
+                stmt = stmt.where(RawNews.fetched_at >= start_date)
             if end_date:
-                query = query.filter(RawNews.fetched_at <= end_date)
+                stmt = stmt.where(RawNews.fetched_at <= end_date)
 
-            volume_data = query.group_by(
+            volume_data = db.execute(stmt.group_by(
                 func.date(RawNews.fetched_at)
-            ).order_by('date').all()
+            ).order_by('date')).all()
 
         if not volume_data:
             return _message_figure("No data available yet<br>Run the pipeline to ingest news")
@@ -1043,7 +1043,7 @@ def get_news_volume_chart(engine, date_range=None):
 
 def _query_entity_news(db: Session, entity: Entity):
     """Fetch the 50 most recent news rows mentioning the entity, with context."""
-    return db.query(
+    return db.execute(select(
         RawNews.news_id,
         RawNews.title,
         RawNews.source,
@@ -1064,9 +1064,9 @@ def _query_entity_news(db: Session, entity: Entity):
             ImpactScore.news_id == RawNews.news_id,
             ImpactScore.entity_id == entity.entity_id
         )
-    ).filter(
+    ).where(
         NewsEntityMapping.entity_id == entity.entity_id
-    ).order_by(desc(RawNews.fetched_at)).limit(50).all()
+    ).order_by(desc(RawNews.fetched_at)).limit(50)).all()
 
 
 def _summarize_entity_news(news_mappings) -> tuple:
@@ -1237,7 +1237,7 @@ def get_entity_full_details(engine, entity_name):
     """Get comprehensive entity details for modal display"""
     try:
         with Session(engine) as db:
-            entity = db.query(Entity).filter(Entity.entity_name == entity_name).first()
+            entity = db.scalar(select(Entity).where(Entity.entity_name == entity_name).limit(1))
             if not entity:
                 return "Entity not found", html.P("No data available", className="text-muted")
 
@@ -1325,9 +1325,9 @@ def _tracked_stocks_for_index(engine, index_data: dict, entity_symbols: dict) ->
             continue
 
         with Session(engine) as db:
-            pred_count = db.query(func.count(Prediction.prediction_id)).filter(
+            pred_count = db.scalar(select(func.count(Prediction.prediction_id)).where(
                 Prediction.entity_id == entity.entity_id
-            ).scalar()
+            ))
 
         if pred_count > 0:
             tracked_stocks.append({
@@ -1380,7 +1380,7 @@ def get_index_trends(engine):
 
         # Get entities from database that match stocks in indices
         with Session(engine) as db:
-            all_entities = db.query(Entity).all()
+            all_entities = db.scalars(select(Entity)).all()
             entity_symbols = {e.entity_name: e for e in all_entities}
 
         index_displays = []
@@ -1517,14 +1517,14 @@ def get_stock_predictions_detail(engine, stock_symbol):
 
     try:
         with Session(engine) as db:
-            entity = db.query(Entity).filter(Entity.entity_name == stock_symbol).first()
+            entity = db.scalar(select(Entity).where(Entity.entity_name == stock_symbol).limit(1))
             if not entity:
                 return f"{stock_symbol} - Not Found", html.P("Stock not found in database", className="text-muted")
 
             # Limit to the 5 most recent predictions for performance
-            predictions = db.query(Prediction).filter(
+            predictions = db.scalars(select(Prediction).where(
                 Prediction.entity_id == entity.entity_id
-            ).order_by(desc(Prediction.created_at)).limit(5).all()
+            ).order_by(desc(Prediction.created_at)).limit(5)).all()
 
             if not predictions:
                 return f"{stock_symbol} - No Predictions", html.P("No predictions found for this stock", className="text-muted")
@@ -1532,9 +1532,9 @@ def get_stock_predictions_detail(engine, stock_symbol):
             pred_cards = []
             for pred in predictions:
                 try:
-                    outcome = db.query(PredictionOutcome).filter(
+                    outcome = db.scalar(select(PredictionOutcome).where(
                         PredictionOutcome.prediction_id == pred.prediction_id
-                    ).first()
+                    ).limit(1))
 
                     # Always load live prices for this modal (limited to 5 predictions)
                     perf_data = _format_saved_performance(pred, entity, outcome, load_live_prices=True)

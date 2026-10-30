@@ -1,7 +1,7 @@
 """
 Quick test to verify modal shows saved performance without refetching
 """
-from sqlalchemy import desc
+from sqlalchemy import desc, select
 
 from src.gui.tabs import predictions
 from src.models.database import SessionLocal
@@ -12,10 +12,10 @@ engine = SessionLocal().get_bind()
 # Get a prediction that has outcome data
 with SessionLocal() as db:
     # Find a prediction with saved outcome
-    pred_with_outcome = db.query(Prediction).join(
+    pred_with_outcome = db.scalar(select(Prediction).join(
         PredictionOutcome,
         Prediction.prediction_id == PredictionOutcome.prediction_id
-    ).order_by(desc(PredictionOutcome.evaluation_timestamp)).first()
+    ).order_by(desc(PredictionOutcome.evaluation_timestamp)).limit(1))
 
     if not pred_with_outcome:
         print("❌ No predictions with saved outcomes found")
@@ -25,9 +25,9 @@ with SessionLocal() as db:
     print(f"✅ Found prediction with outcome: {pred_with_outcome.prediction_id}")
 
     # Get the outcome to show what's saved
-    outcome = db.query(PredictionOutcome).filter(
+    outcome = db.scalar(select(PredictionOutcome).where(
         PredictionOutcome.prediction_id == pred_with_outcome.prediction_id
-    ).first()
+    ).limit(1))
 
     print("📊 Saved performance:")
     print(f"   - Return: {(outcome.actual_return or 0) * 100:.2f}%")

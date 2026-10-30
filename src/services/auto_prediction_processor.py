@@ -11,6 +11,7 @@ Can be called after new predictions are created to ensure they are fully process
 import logging
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from src.models.predictions import Prediction
@@ -47,12 +48,12 @@ class AutoPredictionProcessor:
         logger.info(f"🔄 Updating all predictions for entity: {entity_id}")
 
         # Find all predictions for this entity
-        predictions = db.query(Prediction).filter(
+        predictions = db.scalars(select(Prediction).where(
             Prediction.entity_id == entity_id
         ).options(
             joinedload(Prediction.entity),
             joinedload(Prediction.outcome)
-        ).all()
+        )).unique().all()
 
         if not predictions:
             logger.warning(f"No predictions found for entity: {entity_id}")
@@ -138,14 +139,14 @@ class AutoPredictionProcessor:
         logger.info(f"🔍 Looking for predictions created after {cutoff_time.strftime('%Y-%m-%d %H:%M')}")
 
         # Find recent predictions
-        query = db.query(Prediction).filter(
+        stmt = select(Prediction).where(
             Prediction.created_at >= cutoff_time
         ).options(
             joinedload(Prediction.entity),
             joinedload(Prediction.outcome)
         ).order_by(Prediction.created_at.desc())
 
-        predictions = query.all()
+        predictions = db.scalars(stmt).unique().all()
         total_found = len(predictions)
 
         logger.info(f"📊 Found {total_found} recent predictions")
@@ -199,9 +200,9 @@ class AutoPredictionProcessor:
                         logger.warning(f"⚠️ Error calculating performance: {e}")
 
                 # Check if simulation already exists
-                existing_sim = db.query(TradingSimulation).filter(
+                existing_sim = db.scalar(select(TradingSimulation).where(
                     TradingSimulation.prediction_id == pred.prediction_id
-                ).first()
+                ).limit(1))
 
                 if not existing_sim or force_recalculate:
                     logger.info(f"🧪 Creating simulation for {entity.entity_name} ({pred.horizon})...")
@@ -266,11 +267,11 @@ class AutoPredictionProcessor:
 
         for pred_id in prediction_ids:
             try:
-                pred = db.query(Prediction).filter(
+                pred = db.scalar(select(Prediction).where(
                     Prediction.prediction_id == pred_id
                 ).options(
                     joinedload(Prediction.entity)
-                ).first()
+                ).limit(1))
 
                 if not pred:
                     logger.warning(f"⚠️ Prediction {pred_id} not found")

@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import psutil
+from sqlalchemy import func, select
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -292,15 +293,15 @@ class ContinuousPipeline:
         try:
             with SessionLocal() as db:
                 request = (
-                    db.query(SystemLog)
-                    .filter(
+                    db.scalar(select(SystemLog)
+                    .where(
                         SystemLog.source == "control",
                         SystemLog.component == "continuous_pipeline",
                         SystemLog.message == "STOP_REQUEST",
                         SystemLog.timestamp >= self.started_at_utc,
                     )
                     .order_by(SystemLog.timestamp.desc())
-                    .first()
+                    .limit(1))
                 )
         except Exception as exc:
             logger.debug(f"Failed to read external stop request: {exc}")
@@ -487,30 +488,30 @@ class ContinuousPipeline:
 
         def missing_for(db, related_model):
             """ProcessedNews rows with no matching row in ``related_model``."""
-            return db.query(ProcessedNews).outerjoin(
+            return db.scalar(select(func.count()).select_from(select(ProcessedNews).outerjoin(
                 related_model, ProcessedNews.news_id == related_model.news_id
-            ).filter(related_model.news_id.is_(None)).count()
+            ).where(related_model.news_id.is_(None)).subquery()))
 
         try:
             with SessionLocal() as db:
-                unassessed = db.query(RawNews).filter(
+                unassessed = db.scalar(select(func.count()).select_from(RawNews).where(
                     RawNews.quality_score.is_(None)
-                ).count()
+                ))
 
                 # Quality-checked RawNews that has not been through NLP yet.
-                unanalyzed = db.query(RawNews).filter(
+                unanalyzed = db.scalar(select(func.count()).select_from(select(RawNews).where(
                     RawNews.quality_score.is_not(None)
                 ).outerjoin(
                     ProcessedNews, RawNews.news_id == ProcessedNews.news_id
-                ).filter(ProcessedNews.news_id.is_(None)).count()
+                ).where(ProcessedNews.news_id.is_(None)).subquery()))
 
                 # Predictions reference articles through a JSON array, so there
                 # is no join to count them directly. Estimate instead: each
                 # high-impact score should yield one prediction per horizon.
-                high_impact = db.query(ImpactScore).filter(
+                high_impact = db.scalar(select(func.count()).select_from(ImpactScore).where(
                     ImpactScore.impact_score >= MIN_IMPACT_FOR_PREDICTION
-                ).count()
-                existing_predictions = db.query(Prediction).count()
+                ))
+                existing_predictions = db.scalar(select(func.count()).select_from(Prediction))
                 unpredicted = max(
                     0, high_impact * len(PREDICTION_HORIZONS) - existing_predictions
                 )

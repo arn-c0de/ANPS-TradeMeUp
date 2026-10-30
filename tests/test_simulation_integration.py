@@ -11,6 +11,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import delete, select
 
 from src.models.database import get_scoped_session
 from src.models.entities import Entity
@@ -35,26 +36,26 @@ def _purge_test_entity(db, entity_id: str) -> None:
 
     prediction_ids = [
         row[0] for row in
-        db.query(Prediction.prediction_id).filter(
+        db.execute(select(Prediction.prediction_id).where(
             Prediction.entity_id == entity_id
-        ).all()
+        )).all()
     ]
 
     # Delete children before parents: the foreign keys are not ON DELETE CASCADE.
     if prediction_ids:
-        db.query(TradingSimulation).filter(
+        db.execute(delete(TradingSimulation).where(
             TradingSimulation.prediction_id.in_(prediction_ids)
-        ).delete(synchronize_session=False)
-        db.query(PredictionOutcome).filter(
+        ).execution_options(synchronize_session=False))
+        db.execute(delete(PredictionOutcome).where(
             PredictionOutcome.prediction_id.in_(prediction_ids)
-        ).delete(synchronize_session=False)
-        db.query(Prediction).filter(
+        ).execution_options(synchronize_session=False))
+        db.execute(delete(Prediction).where(
             Prediction.prediction_id.in_(prediction_ids)
-        ).delete(synchronize_session=False)
+        ).execution_options(synchronize_session=False))
 
-    db.query(Entity).filter(Entity.entity_id == entity_id).delete(
+    db.execute(delete(Entity).where(Entity.entity_id == entity_id).execution_options(
         synchronize_session=False
-    )
+    ))
     db.commit()
 
 
@@ -188,9 +189,9 @@ def test_date_range_simulation():
 
     with get_scoped_session() as db:
         # Find real predictions in the database
-        old_predictions = db.query(Prediction).filter(
+        old_predictions = db.scalars(select(Prediction).where(
             Prediction.created_at < datetime.now(UTC) - timedelta(days=1)
-        ).limit(3).all()
+        ).limit(3)).all()
 
         if not old_predictions:
             print("⚠ No historical predictions found - skipping date range test")

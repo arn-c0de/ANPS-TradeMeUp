@@ -4,6 +4,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.analysis import SurpriseScore
@@ -251,13 +252,13 @@ class SurpriseQuantificationAgent:
             List of surprise analysis results
         """
         # Fetch article and processed data
-        news = db.query(RawNews).filter(RawNews.news_id == news_id).first()
+        news = db.scalar(select(RawNews).where(RawNews.news_id == news_id).limit(1))
         if not news:
             raise ValueError(f"News {news_id} not found")
 
-        processed = db.query(ProcessedNews).filter(
+        processed = db.scalar(select(ProcessedNews).where(
             ProcessedNews.news_id == news_id
-        ).first()
+        ).limit(1))
 
         # Only analyze earnings-related news
         if not processed or processed.event_type not in ['earnings', 'guidance']:
@@ -265,10 +266,10 @@ class SurpriseQuantificationAgent:
             return []
 
         # Get entities
-        mappings = db.query(NewsEntityMapping).filter(
+        mappings = db.scalars(select(NewsEntityMapping).where(
             NewsEntityMapping.news_id == news_id,
             NewsEntityMapping.exposure_type == 'direct'
-        ).all()
+        )).all()
 
         if not mappings:
             logger.debug(f"No direct entity mappings for {news_id}")
@@ -429,18 +430,18 @@ class SurpriseQuantificationAgent:
 
         with get_scoped_session() as db:
             # Find earnings news without surprise scores
-            articles = db.query(RawNews.news_id).join(
+            articles = db.execute(select(RawNews.news_id).join(
                 ProcessedNews,
                 RawNews.news_id == ProcessedNews.news_id
             ).outerjoin(
                 SurpriseScore,
                 RawNews.news_id == SurpriseScore.news_id
-            ).filter(
+            ).where(
                 ProcessedNews.event_type.in_(['earnings', 'guidance']),
                 SurpriseScore.surprise_id.is_(None)
             ).order_by(
                 RawNews.published_at.desc()  # Newest first
-            ).limit(limit).all()
+            ).limit(limit)).all()
 
             logger.info(f"Processing {len(articles)} articles for surprise quantification")
 
@@ -487,30 +488,30 @@ class SurpriseQuantificationAgent:
         from src.models.database import get_scoped_session
 
         with get_scoped_session() as db:
-            total_surprises = db.query(SurpriseScore).count()
+            total_surprises = db.scalar(select(func.count()).select_from(SurpriseScore))
 
             # Count by metric
-            by_metric = db.query(
+            by_metric = db.execute(select(
                 SurpriseScore.metric,
                 func.count(SurpriseScore.surprise_id).label('count')
-            ).group_by(SurpriseScore.metric).all()
+            ).group_by(SurpriseScore.metric)).all()
 
             # Average surprise magnitude
-            avg_surprise = db.query(
+            avg_surprise = db.scalar(select(
                 func.avg(func.abs(SurpriseScore.surprise_normalized))
-            ).scalar()
+            ))
 
             # Largest surprises
-            top_surprises = db.query(
+            top_surprises = db.execute(select(
                 SurpriseScore.news_id,
                 SurpriseScore.metric,
                 SurpriseScore.surprise_normalized,
                 SurpriseScore.expected_reaction
-            ).filter(
+            ).where(
                 SurpriseScore.surprise_normalized.isnot(None)
             ).order_by(
                 func.abs(SurpriseScore.surprise_normalized).desc()
-            ).limit(10).all()
+            ).limit(10)).all()
 
             return {
                 'total_surprises': total_surprises,

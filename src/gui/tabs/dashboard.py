@@ -12,7 +12,7 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.graph_objects as go
 from dash import Input, Output, State, dcc, html
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from src.gui.utils.callbacks import safe_callback
@@ -311,50 +311,50 @@ def get_metrics(engine):
             logger.debug(f"Dashboard time windows - Now: {now}, Hour ago: {hour_ago}, Day ago: {day_ago}")
 
             # Total counts
-            total_news = db.query(func.count(RawNews.news_id)).scalar() or 0
-            total_processed = db.query(func.count(ProcessedNews.news_id)).scalar() or 0
-            total_predictions = db.query(func.count(Prediction.prediction_id)).scalar() or 0
-            total_surprises = db.query(func.count(SurpriseScore.surprise_id)).scalar() or 0
-            total_fact_checks = db.query(func.count(FactVerification.verification_id)).scalar() or 0
+            total_news = db.scalar(select(func.count(RawNews.news_id))) or 0
+            total_processed = db.scalar(select(func.count(ProcessedNews.news_id))) or 0
+            total_predictions = db.scalar(select(func.count(Prediction.prediction_id))) or 0
+            total_surprises = db.scalar(select(func.count(SurpriseScore.surprise_id))) or 0
+            total_fact_checks = db.scalar(select(func.count(FactVerification.verification_id))) or 0
             try:
-                total_simulations = db.query(func.count(TradingSimulation.simulation_id)).scalar() or 0
+                total_simulations = db.scalar(select(func.count(TradingSimulation.simulation_id))) or 0
             except Exception:
                 total_simulations = 0
 
             # Debug: Check latest timestamps
-            latest_news = db.query(RawNews.fetched_at).order_by(RawNews.fetched_at.desc()).first()
+            latest_news = db.execute(select(RawNews.fetched_at).order_by(RawNews.fetched_at.desc()).limit(1)).first()
             if latest_news:
                 logger.debug(f"Latest news timestamp: {latest_news[0]}, Type: {type(latest_news[0])}, TZ: {latest_news[0].tzinfo if latest_news[0] else None}")
 
             # Hourly increments
-            news_1h = db.query(func.count(RawNews.news_id)).filter(RawNews.fetched_at >= hour_ago).scalar() or 0
-            processed_1h = db.query(func.count(ProcessedNews.news_id)).filter(ProcessedNews.processing_timestamp >= hour_ago).scalar() or 0
-            predictions_1h = db.query(func.count(Prediction.prediction_id)).filter(Prediction.created_at >= hour_ago).scalar() or 0
+            news_1h = db.scalar(select(func.count(RawNews.news_id)).where(RawNews.fetched_at >= hour_ago)) or 0
+            processed_1h = db.scalar(select(func.count(ProcessedNews.news_id)).where(ProcessedNews.processing_timestamp >= hour_ago)) or 0
+            predictions_1h = db.scalar(select(func.count(Prediction.prediction_id)).where(Prediction.created_at >= hour_ago)) or 0
 
             logger.debug(f"Dashboard counts - News 1h: {news_1h}, Processed 1h: {processed_1h}, Predictions 1h: {predictions_1h}")
-            surprises_1h = db.query(func.count(SurpriseScore.surprise_id)).filter(SurpriseScore.created_at >= hour_ago).scalar() or 0
-            fact_checks_1h = db.query(func.count(FactVerification.verification_id)).filter(FactVerification.verified_at >= hour_ago).scalar() or 0
+            surprises_1h = db.scalar(select(func.count(SurpriseScore.surprise_id)).where(SurpriseScore.created_at >= hour_ago)) or 0
+            fact_checks_1h = db.scalar(select(func.count(FactVerification.verification_id)).where(FactVerification.verified_at >= hour_ago)) or 0
             try:
-                simulations_1h = db.query(func.count(TradingSimulation.simulation_id)).filter(
+                simulations_1h = db.scalar(select(func.count(TradingSimulation.simulation_id)).where(
                     TradingSimulation.created_at >= hour_ago
-                ).scalar() or 0
+                )) or 0
             except Exception:
                 simulations_1h = 0
 
             # Daily increments
-            news_24h = db.query(func.count(RawNews.news_id)).filter(RawNews.fetched_at >= day_ago).scalar() or 0
-            processed_24h = db.query(func.count(ProcessedNews.news_id)).filter(ProcessedNews.processing_timestamp >= day_ago).scalar() or 0
-            predictions_24h = db.query(func.count(Prediction.prediction_id)).filter(Prediction.created_at >= day_ago).scalar() or 0
-            surprises_24h = db.query(func.count(SurpriseScore.surprise_id)).filter(SurpriseScore.created_at >= day_ago).scalar() or 0
-            fact_checks_24h = db.query(func.count(FactVerification.verification_id)).filter(FactVerification.verified_at >= day_ago).scalar() or 0
+            news_24h = db.scalar(select(func.count(RawNews.news_id)).where(RawNews.fetched_at >= day_ago)) or 0
+            processed_24h = db.scalar(select(func.count(ProcessedNews.news_id)).where(ProcessedNews.processing_timestamp >= day_ago)) or 0
+            predictions_24h = db.scalar(select(func.count(Prediction.prediction_id)).where(Prediction.created_at >= day_ago)) or 0
+            surprises_24h = db.scalar(select(func.count(SurpriseScore.surprise_id)).where(SurpriseScore.created_at >= day_ago)) or 0
+            fact_checks_24h = db.scalar(select(func.count(FactVerification.verification_id)).where(FactVerification.verified_at >= day_ago)) or 0
             try:
-                simulations_24h = db.query(func.count(TradingSimulation.simulation_id)).filter(
+                simulations_24h = db.scalar(select(func.count(TradingSimulation.simulation_id)).where(
                     TradingSimulation.created_at >= day_ago
-                ).scalar() or 0
+                )) or 0
             except Exception:
                 simulations_24h = 0
 
-            avg_quality = db.query(func.avg(DataQualityScore.quality_score)).scalar()
+            avg_quality = db.scalar(select(func.avg(DataQualityScore.quality_score)))
             avg_quality = round(avg_quality, 2) if avg_quality else 0
 
         # Show different layout depending on whether data exists
@@ -416,7 +416,7 @@ def get_recent_news(engine, limit=50):
     """Get recent news table with configurable limit"""
     try:
         with Session(engine) as db:
-            recent = db.query(RawNews).order_by(desc(RawNews.fetched_at)).limit(limit).all()
+            recent = db.scalars(select(RawNews).order_by(desc(RawNews.fetched_at)).limit(limit)).all()
 
             if not recent:
                 return html.P("No news available. Run Agent 1 (Ingestion) to fetch news.", className="text-muted")
@@ -454,7 +454,7 @@ def get_market_regime(engine):
         with Session(engine) as db:
             # timestamp, not created_at: the rest of the pipeline picks the
             # current regime by effective time, and the index is on timestamp.
-            regime = db.query(MarketRegime).order_by(desc(MarketRegime.timestamp)).first()
+            regime = db.scalar(select(MarketRegime).order_by(desc(MarketRegime.timestamp)).limit(1))
 
             if not regime:
                 return html.Div([
@@ -637,16 +637,16 @@ def get_top_performers(engine, timeframe='24h', limit=10):
             }
 
             # Query simulations with eager loading (including prediction outcomes)
-            query = db.query(TradingSimulation).options(
+            stmt = select(TradingSimulation).options(
                 joinedload(TradingSimulation.entity),
                 joinedload(TradingSimulation.prediction).joinedload(Prediction.outcome)
-            ).filter(
+            ).where(
                 TradingSimulation.created_at >= cutoff,
                 TradingSimulation.decision != 'hold',  # Only active positions
                 TradingSimulation.expected_return_pct.isnot(None)
             )
 
-            simulations = query.all()
+            simulations = db.scalars(stmt).unique().all()
 
             # Filter for validity based on prediction date + horizon
             valid_sims = []
@@ -828,12 +828,11 @@ def _get_server_log_lines(limit: int):
         from src.models.system_logs import SystemLog
 
         with Session(engine) as db:
-            db_rows = (
-                db.query(SystemLog)
+            db_rows = db.scalars(
+                select(SystemLog)
                 .order_by(SystemLog.timestamp.desc())
                 .limit(limit)
-                .all()
-            )
+            ).all()
         if db_rows:
             timestamps = [row.timestamp for row in db_rows if row.timestamp]
             if timestamps:

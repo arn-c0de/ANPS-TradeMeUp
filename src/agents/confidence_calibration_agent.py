@@ -3,6 +3,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+from sqlalchemy import select
 
 from src.models.database import SessionLocal
 from src.models.predictions import Prediction, PredictionOutcome
@@ -84,12 +85,12 @@ class ConfidenceCalibrationAgent:
         """
         cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
-        predictions = db.query(Prediction).join(
+        predictions = db.scalars(select(Prediction).join(
             PredictionOutcome,
             Prediction.prediction_id == PredictionOutcome.prediction_id
-        ).filter(
+        ).where(
             Prediction.created_at >= cutoff
-        ).all()
+        )).all()
 
         if len(predictions) < MIN_PREDICTIONS_FOR_CALIBRATION:
             logger.warning("Insufficient predictions for calibration")
@@ -100,11 +101,11 @@ class ConfidenceCalibrationAgent:
         # selected them.
         outcomes = {
             row.prediction_id: row
-            for row in db.query(PredictionOutcome).filter(
+            for row in db.scalars(select(PredictionOutcome).where(
                 PredictionOutcome.prediction_id.in_(
                     [pred.prediction_id for pred in predictions]
                 )
-            ).all()
+            )).all()
         }
 
         scored = []
@@ -218,9 +219,9 @@ class ConfidenceCalibrationAgent:
 
         try:
             with SessionLocal() as db:
-                predictions = db.query(Prediction).order_by(
+                predictions = db.scalars(select(Prediction).order_by(
                     Prediction.created_at.desc()
-                ).limit(limit).all()
+                ).limit(limit)).all()
 
                 logger.info(f"Recalibrating {len(predictions)} predictions")
 

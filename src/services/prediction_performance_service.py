@@ -6,6 +6,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.entities import Entity
@@ -225,9 +226,9 @@ class PredictionPerformanceService:
 
         for pred in predictions:
             # Get entity
-            entity = db_session.query(Entity).filter(
+            entity = db_session.scalar(select(Entity).where(
                 Entity.entity_id == pred.entity_id
-            ).first()
+            ).limit(1))
 
             if not entity:
                 continue
@@ -348,9 +349,9 @@ class PredictionPerformanceService:
             logger.info(f"💾 Saving to DB: prediction_id={prediction_id}, actual_return={actual_return_value}, is_correct={is_correct_value}")
 
             # Check if outcome already exists
-            existing = db_session.query(PredictionOutcome).filter(
+            existing = db_session.scalar(select(PredictionOutcome).where(
                 PredictionOutcome.prediction_id == prediction_id
-            ).first()
+            ).limit(1))
 
             if existing:
                 # Update existing - use proper SQLAlchemy update
@@ -409,17 +410,17 @@ class PredictionPerformanceService:
         with Session(engine) as db:
             try:
                 # Get prediction and entity
-                prediction = db.query(Prediction).filter(
+                prediction = db.scalar(select(Prediction).where(
                     Prediction.prediction_id == prediction_id
-                ).first()
+                ).limit(1))
 
                 if not prediction:
                     logger.warning(f"Prediction {prediction_id} not found")
                     return {"status": "error", "error": "Prediction not found"}
 
-                entity = db.query(Entity).filter(
+                entity = db.scalar(select(Entity).where(
                     Entity.entity_id == prediction.entity_id
-                ).first()
+                ).limit(1))
 
                 if not entity:
                     logger.warning(f"Entity {prediction.entity_id} not found")

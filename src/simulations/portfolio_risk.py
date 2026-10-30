@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 
 import numpy as np
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.entities import Entity
@@ -68,18 +69,18 @@ class PortfolioRiskCalculator:
             PortfolioRiskMetrics with aggregated risk data
         """
         # Query simulations
-        query = db.query(TradingSimulation)
+        stmt = select(TradingSimulation)
 
         if active_only:
-            query = query.filter(TradingSimulation.decision.in_(["buy", "sell"]))
+            stmt = stmt.where(TradingSimulation.decision.in_(["buy", "sell"]))
 
         if horizon_filter:
-            query = query.filter(TradingSimulation.horizon == horizon_filter)
+            stmt = stmt.where(TradingSimulation.horizon == horizon_filter)
 
         if min_confidence > 0:
-            query = query.filter(TradingSimulation.confidence >= min_confidence)
+            stmt = stmt.where(TradingSimulation.confidence >= min_confidence)
 
-        simulations = query.all()
+        simulations = db.scalars(stmt).all()
 
         if not simulations:
             return self._empty_metrics()
@@ -241,7 +242,7 @@ class PortfolioRiskCalculator:
                 continue
 
             # Get entity to determine sector
-            entity = db.query(Entity).filter(Entity.entity_id == sim.entity_id).first()
+            entity = db.scalar(select(Entity).where(Entity.entity_id == sim.entity_id).limit(1))
             if not entity:
                 continue
 
