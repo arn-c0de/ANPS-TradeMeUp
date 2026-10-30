@@ -61,14 +61,7 @@ class TestEntityExtractionBudget:
             news_id="n1", title="Acme beats", full_text=long_body
         )
 
-        class _FakeQuery:
-            def filter(self, *a, **k):
-                return self
-
-            def first(self):
-                return None
-
-        db = types.SimpleNamespace(query=lambda *a, **k: _FakeQuery())
+        db = types.SimpleNamespace(scalar=lambda *a, **k: None)
 
         agent._extract_entities(db, article)
 
@@ -92,17 +85,7 @@ class TestFactVerificationSkipsEmptyArticles:
         return agent
 
     def _db_returning(self, article):
-        class _FakeQuery:
-            def options(self, *a, **k):
-                return self
-
-            def filter(self, *a, **k):
-                return self
-
-            def first(self):
-                return article
-
-        return types.SimpleNamespace(query=lambda *a, **k: _FakeQuery())
+        return types.SimpleNamespace(scalar=lambda *a, **k: article)
 
     @pytest.mark.parametrize("key_facts", [None, [], "not-a-list"])
     def test_no_claims_means_no_llm_call(self, key_facts):
