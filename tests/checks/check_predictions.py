@@ -3,10 +3,11 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings
+from src.models.database import normalize_database_url
 from src.models.entities import Entity
 from src.models.predictions import Prediction
 
-engine = create_engine(settings.database_url)
+engine = create_engine(normalize_database_url(settings.database_url))
 
 with Session(engine) as db:
     # Count predictions

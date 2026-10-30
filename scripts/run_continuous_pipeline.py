@@ -495,12 +495,12 @@ class ContinuousPipeline:
         try:
             with SessionLocal() as db:
                 unassessed = db.scalar(select(func.count()).select_from(RawNews).where(
-                    RawNews.quality_score.is_(None)
+                    ~RawNews.quality_score.any()
                 ))
 
                 # Quality-checked RawNews that has not been through NLP yet.
                 unanalyzed = db.scalar(select(func.count()).select_from(select(RawNews).where(
-                    RawNews.quality_score.is_not(None)
+                    RawNews.quality_score.any()
                 ).outerjoin(
                     ProcessedNews, RawNews.news_id == ProcessedNews.news_id
                 ).where(ProcessedNews.news_id.is_(None)).subquery()))

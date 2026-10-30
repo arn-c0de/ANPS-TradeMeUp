@@ -8,13 +8,14 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings
+from src.models.database import normalize_database_url
 from src.models.entities import Entity, NewsEntityMapping
 from src.models.processed_news import ProcessedNews
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-engine = create_engine(settings.database_url)
+engine = create_engine(normalize_database_url(settings.database_url))
 
 def check_entity_mappings():
     """Check entity mapping status"""
@@ -44,7 +45,7 @@ def check_entity_mappings():
             samples = db.scalars(select(NewsEntityMapping).limit(10)).all()
             for m in samples:
                 entity = db.scalar(select(Entity).where(Entity.entity_id == m.entity_id).limit(1))
-                logger.info(f"  News: {m.news_id[:8]}, Entity: {m.entity_id} ({entity.entity_name if entity else 'Unknown'}), Confidence: {m.confidence}")
+                logger.info(f"  News: {str(m.news_id)[:8]}, Entity: {m.entity_id} ({entity.entity_name if entity else 'Unknown'}), Confidence: {m.confidence}")
 
         logger.info("\n" + "="*70)
         logger.info("🔍 DIAGNOSIS")

@@ -3,8 +3,9 @@
 from sqlalchemy import create_engine, text
 
 from src.config.settings import settings
+from src.models.database import normalize_database_url
 
-engine = create_engine(settings.database_url)
+engine = create_engine(normalize_database_url(settings.database_url))
 
 with engine.connect() as conn:
     # Get sample of articles without entity mappings
@@ -54,7 +55,8 @@ with engine.connect() as conn:
     print(f"Total Sample: {len(articles)}")
     print(f"Non-Financial (Crosswords/Podcasts): {len(non_financial)}")
     print(f"Likely Financial: {len(articles) - len(non_financial)}")
-    print(f"Percentage Financial: {(len(articles) - len(non_financial)) / len(articles) * 100:.1f}%")
+    if articles:
+        print(f"Percentage Financial: {(len(articles) - len(non_financial)) / len(articles) * 100:.1f}%")
 
     if non_financial:
         print(f"\n⚠️ NON-FINANCIAL ARTICLES ({len(non_financial)}):")

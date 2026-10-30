@@ -9,12 +9,13 @@ from sqlalchemy.orm import Session
 
 from src.config.settings import settings
 from src.models.analysis import ImpactScore, SurpriseScore
+from src.models.database import normalize_database_url
 from src.models.entities import Entity
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-engine = create_engine(settings.database_url)
+engine = create_engine(normalize_database_url(settings.database_url))
 
 def check_analysis_tables():
     """Check why ImpactScore and SurpriseScore are missing"""

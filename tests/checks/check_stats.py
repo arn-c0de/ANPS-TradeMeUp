@@ -20,7 +20,7 @@ print("=" * 60)
 print("DATABASE STATISTICS")
 print("=" * 60)
 print(f"RawNews Total:              {db.scalar(select(func.count()).select_from(RawNews))}")
-print(f"RawNews with quality_score: {db.scalar(select(func.count()).select_from(RawNews).where(RawNews.quality_score.is_not(None)))}")
+print(f"RawNews with quality_score: {db.scalar(select(func.count()).select_from(RawNews).where(RawNews.quality_score.any()))}")
 print(f"ProcessedNews:              {db.scalar(select(func.count()).select_from(ProcessedNews))}")
 print(f"Entities:                   {db.scalar(select(func.count()).select_from(Entity))}")
 print(f"EntityMappings:             {db.scalar(select(func.count()).select_from(NewsEntityMapping))}")
@@ -32,7 +32,7 @@ print("=" * 60)
 
 # Check what's blocking the pipeline
 unprocessed = db.scalar(select(func.count()).select_from(select(RawNews).where(
-    RawNews.quality_score.is_not(None)
+    RawNews.quality_score.any()
 ).outerjoin(
     ProcessedNews, RawNews.news_id == ProcessedNews.news_id
 ).where(ProcessedNews.news_id.is_(None)).subquery()))

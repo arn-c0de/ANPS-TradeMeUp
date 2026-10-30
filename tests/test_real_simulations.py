@@ -228,7 +228,7 @@ def test_resimulate_functionality():
             print(f"   {entity.entity_name if entity else sim.entity_id[:20]:<30} | "
                   f"Expected: {sim.expected_return_pct:+6.2f}% | "
                   f"Actual: {sim.actual_return_pct:+6.2f}%" if sim.actual_return_pct is not None else f"Actual: {'N/A':>6} | "
-                  f"Updated: {sim.updated_at}")
+                  f"Updated: {sim.created_at}")
 
         print(f"\n✅ Resimulated: {updated}/{len(existing_sims)} | Errors: {errors}")
 
