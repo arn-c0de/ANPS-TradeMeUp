@@ -33,7 +33,14 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501"]
+# N806/N803: `X`, `X_train` etc. follow the scikit-learn naming convention.
+ignore = ["E501", "N803", "N806"]
+
+[tool.ruff.lint.per-file-ignores]
+# Standalone scripts and tests put the project root on sys.path before
+# importing from src, so their imports cannot all sit at the top.
+"scripts/**" = ["E402"]
+"tests/**" = ["E402"]
 
 [tool.black]
 line-length = 100

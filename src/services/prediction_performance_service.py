@@ -3,22 +3,10 @@ Prediction Performance Service
 Tracks and validates predictions against actual market data
 """
 import logging
-import warnings
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
-
-# Suppress yfinance warnings
-warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
-warnings.filterwarnings('ignore', category=DeprecationWarning, module='yfinance')
-warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
-try:
-    from pandas.errors import Pandas4Warning
-    warnings.filterwarnings('ignore', category=Pandas4Warning)
-except ImportError:
-    pass
-
-import uuid
 
 from src.models.entities import Entity
 from src.models.predictions import Prediction, PredictionOutcome
@@ -27,6 +15,9 @@ from src.utils.prediction_math import (
     get_expected_return_pct,
     get_predicted_direction,
 )
+from src.utils.warning_filters import silence_third_party_warnings
+
+silence_third_party_warnings()
 
 logger = logging.getLogger(__name__)
 

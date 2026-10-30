@@ -122,7 +122,7 @@ def create_layout():
                                 dbc.Label("Level", className="small text-muted mb-1"),
                                 dcc.Dropdown(
                                     id="logs-level-filter",
-                                    options=[{"label": l, "value": l} for l in _LEVELS],
+                                    options=[{"label": level, "value": level} for level in _LEVELS],
                                     value="all",
                                     clearable=False,
                                 )

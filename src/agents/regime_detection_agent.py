@@ -1,17 +1,17 @@
 """Agent 5: Market Regime Detection Agent."""
 import logging
 import uuid
-import warnings
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy.orm import Session
-
-warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
 import numpy as np
 import yfinance as yf
+from sqlalchemy.orm import Session
 
 from src.models.analysis import MarketRegime
 from src.utils.json_helpers import clean_numpy_types
+from src.utils.warning_filters import silence_third_party_warnings
+
+silence_third_party_warnings()
 
 logger = logging.getLogger(__name__)
 

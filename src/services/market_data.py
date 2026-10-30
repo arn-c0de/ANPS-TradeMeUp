@@ -2,21 +2,6 @@
 Live Market Data Provider
 Fetches real-time stock market data from various sources
 """
-import warnings
-
-warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
-warnings.filterwarnings('ignore', category=DeprecationWarning, module='yfinance')
-warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
-try:
-    from pandas.errors import Pandas4Warning
-    warnings.filterwarnings('ignore', category=Pandas4Warning)
-except ImportError:
-    pass
-# Suppress yfinance's own logging
-import logging as yf_logging
-
-yf_logging.getLogger('yfinance').setLevel(yf_logging.ERROR)
-
 import logging
 import threading
 import time
@@ -24,6 +9,10 @@ from datetime import datetime
 
 import pandas as pd
 import yfinance as yf
+
+from src.utils.warning_filters import silence_third_party_warnings
+
+silence_third_party_warnings()
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +42,7 @@ class MarketDataProvider:
         self._global_min_interval = 0.05  # 50ms between any requests
 
         # Suppress yfinance logging
-        yf_logging.getLogger('yfinance').setLevel(yf_logging.CRITICAL)
+        logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
         # Common stock symbols for quick search
         self.common_symbols = {

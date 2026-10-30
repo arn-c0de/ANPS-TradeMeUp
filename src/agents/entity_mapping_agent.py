@@ -10,19 +10,19 @@ OPTIMIZED VERSION:
 import json
 import logging
 import re
-import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy.orm import Session
-
-warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
 import yfinance as yf
+from sqlalchemy.orm import Session
 
 from src.models.database import get_scoped_session
 from src.models.entities import Entity, NewsEntityMapping
 from src.models.raw_news import RawNews
 from src.services.llm_service import llm_service, truncate_for_prompt
+from src.utils.warning_filters import silence_third_party_warnings
+
+silence_third_party_warnings()
 
 logger = logging.getLogger(__name__)
 

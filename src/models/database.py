@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, declarative_base, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from src.config.settings import settings
 
@@ -42,8 +42,8 @@ engine = create_engine(
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Base class for all models
-Base = declarative_base()
+class Base(DeclarativeBase):
+    """Base class for all models."""
 
 
 def get_db() -> Generator[Session, None, None]:

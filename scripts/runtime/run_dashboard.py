@@ -2,12 +2,7 @@
 
 import os
 import sys
-import warnings
 from pathlib import Path
-
-# Suppress pandas deprecation warnings from yfinance library
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="yfinance")
-warnings.filterwarnings("ignore", message=".*Timestamp.utcnow.*")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))

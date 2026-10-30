@@ -3,28 +3,15 @@ ANPS-TradeMeUp Dashboard - Main Application
 Multi-tab dashboard for monitoring news, predictions, and system health
 """
 
-# Suppress pandas deprecation warnings from yfinance library
 import os
-import warnings
-
-warnings.filterwarnings('ignore', category=DeprecationWarning, module='yfinance')
-warnings.filterwarnings('ignore', message='.*Timestamp.utcnow.*')
-
 
 import dash
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
 from src.config.settings import VERSION
-from src.gui.components import create_navbar
-
-# Attach DB log handler for the GUI process
-try:
-    from src.utils.db_log_handler import attach_db_handler as _attach_db_handler
-    _attach_db_handler(source="gui")
-except Exception:
-    pass
 from src.gui.callbacks import register_charts_callbacks, register_common_callbacks
+from src.gui.components import create_navbar
 from src.gui.helpers.prediction_details_popup import create_prediction_modal
 from src.gui.tabs import (
     charts,
@@ -39,6 +26,16 @@ from src.gui.tabs import (
     testing,
 )
 from src.gui.tabs import settings as settings_tab
+from src.utils.warning_filters import silence_third_party_warnings
+
+silence_third_party_warnings()
+
+# Attach DB log handler for the GUI process
+try:
+    from src.utils.db_log_handler import attach_db_handler as _attach_db_handler
+    _attach_db_handler(source="gui")
+except Exception:
+    pass
 
 # Initialize Dash app with Bootstrap dark theme
 app = dash.Dash(
