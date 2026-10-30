@@ -3,24 +3,25 @@ Settings Tab - System Configuration and Database Management
 """
 
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, dcc, html
-from sqlalchemy import delete
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings as _settings
-from src.models.analysis import ImpactScore
+from src.models.analysis import FactVerification, ImpactScore, SignalDecayModel, SurpriseScore
 from src.models.data_quality import DataQualityScore
 from src.models.database import engine as _engine
 from src.models.database import utc_now
-from src.models.entities import Entity, NewsEntityMapping
-from src.models.predictions import Prediction
+from src.models.entities import Entity, EntityRelationship, NewsEntityMapping
+from src.models.predictions import Prediction, PredictionOutcome
 from src.models.processed_news import ProcessedNews
 from src.models.raw_news import RawNews
+from src.models.trading_simulation import TradingSimulation
 from src.utils.activity_logger import activity_logger
 
 LLM_MODELS = {
@@ -321,6 +322,51 @@ def _range_cutoff(time_range):
     return utc_now() - timedelta(days=days) if days else None
 
 
+def _parse_day(value, end_of_day=False):
+    """Date-picker value ("YYYY-MM-DD" or ISO datetime) as an aware UTC datetime."""
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    if end_of_day and len(value) <= 10:
+        dt += timedelta(days=1)  # date-only end is inclusive
+    return dt
+
+
+# Tables whose rows point at raw_news.news_id / predictions.prediction_id.
+# They have to be emptied first, or PostgreSQL rejects the delete with a
+# foreign-key violation.
+_NEWS_CHILDREN = (DataQualityScore, ProcessedNews, NewsEntityMapping, ImpactScore,
+                  SurpriseScore, SignalDecayModel, FactVerification)
+_PREDICTION_CHILDREN = (PredictionOutcome, TradingSimulation)
+
+
+def _delete_news(db, *conditions):
+    """Delete raw news matching conditions (all if none) plus dependent rows.
+
+    Returns (raw_news_deleted, processed_news_deleted).
+    """
+    news_ids = select(RawNews.news_id).where(*conditions)
+    # Duplicates elsewhere may point at a news item being deleted; keep them.
+    db.execute(update(DataQualityScore)
+               .where(DataQualityScore.duplicate_of.in_(news_ids))
+               .values(duplicate_of=None))
+    count_processed = 0
+    for model in _NEWS_CHILDREN:
+        deleted = db.execute(delete(model).where(model.news_id.in_(news_ids))).rowcount
+        if model is ProcessedNews:
+            count_processed = deleted
+    count_raw = db.execute(delete(RawNews).where(*conditions)).rowcount
+    return count_raw, count_processed
+
+
+def _delete_predictions(db, *conditions):
+    """Delete predictions matching conditions (all if none) plus their outcomes/simulations."""
+    prediction_ids = select(Prediction.prediction_id).where(*conditions)
+    for model in _PREDICTION_CHILDREN:
+        db.execute(delete(model).where(model.prediction_id.in_(prediction_ids)))
+    return db.execute(delete(Prediction).where(*conditions)).rowcount
+
+
 def register_callbacks(app):
     """Register settings tab callbacks."""
 
@@ -602,14 +648,15 @@ def register_callbacks(app):
                 if action == "clear_news":
                     time_range = params.get("range")
                     cutoff_date = _range_cutoff(time_range)
-                    if time_range == "custom" and params.get("start"):
-                        cutoff_date = datetime.fromisoformat(params["start"])
                     if time_range == "all":
-                        count_raw = db.execute(delete(RawNews)).rowcount
-                        count_processed = db.execute(delete(ProcessedNews)).rowcount
+                        count_raw, count_processed = _delete_news(db)
+                    elif time_range == "custom" and params.get("start"):
+                        conditions = [RawNews.created_at >= _parse_day(params["start"])]
+                        if params.get("end"):
+                            conditions.append(RawNews.created_at < _parse_day(params["end"], end_of_day=True))
+                        count_raw, count_processed = _delete_news(db, *conditions)
                     elif cutoff_date:
-                        count_raw = db.execute(delete(RawNews).where(RawNews.created_at >= cutoff_date)).rowcount
-                        count_processed = db.execute(delete(ProcessedNews).where(ProcessedNews.created_at >= cutoff_date)).rowcount
+                        count_raw, count_processed = _delete_news(db, RawNews.created_at >= cutoff_date)
                     else:
                         count_raw = count_processed = 0
                     db.commit()
@@ -619,22 +666,19 @@ def register_callbacks(app):
                     time_range = params.get("range")
                     cutoff_date = _range_cutoff(time_range)
                     if time_range == "all":
-                        count = db.execute(delete(Prediction)).rowcount
+                        count = _delete_predictions(db)
                     elif cutoff_date:
-                        count = db.execute(delete(Prediction).where(Prediction.created_at >= cutoff_date)).rowcount
+                        count = _delete_predictions(db, Prediction.created_at >= cutoff_date)
                     else:
                         count = 0
                     db.commit()
                     activity_logger.log_activity(f"Deleted {count} predictions", "INFO")
                     pred_msg = dbc.Alert(f"Successfully deleted {count} predictions", color="success", dismissable=True)
                 elif action == "clear_all":
-                    db.execute(delete(Prediction))
-                    db.execute(delete(ImpactScore))
-                    db.execute(delete(NewsEntityMapping))
+                    _delete_predictions(db)
+                    _delete_news(db)
+                    db.execute(delete(EntityRelationship))
                     db.execute(delete(Entity))
-                    db.execute(delete(DataQualityScore))
-                    db.execute(delete(ProcessedNews))
-                    db.execute(delete(RawNews))
                     db.commit()
                     activity_logger.log_activity("DATABASE CLEARED - All data deleted", "WARNING")
                     all_msg = dbc.Alert("Database cleared! All data has been deleted.", color="danger", dismissable=True)
