@@ -191,23 +191,22 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
     try:
         # CRITICAL: Use a new connection to ensure we bypass any stale transaction state in the connection pool
         # This is essential for seeing data committed by background workers
-        with engine.connect() as connection:
-            with Session(bind=connection) as db:
-                # If refreshing, expire cache to ensure we get fresh data instead of stale cached objects
-                if refreshing_prediction_id:
-                    logger.info(f"🔄 Expiring session cache before loading predictions (refreshing: {refreshing_prediction_id})")
-                    db.expire_all()
+        with engine.connect() as connection, Session(bind=connection) as db:
+            # If refreshing, expire cache to ensure we get fresh data instead of stale cached objects
+            if refreshing_prediction_id:
+                logger.info(f"🔄 Expiring session cache before loading predictions (refreshing: {refreshing_prediction_id})")
+                db.expire_all()
 
-                # Use eager loading to fetch entity and outcome in single query (fixes N+1 problem)
-                stmt = select(Prediction).options(
-                    joinedload(Prediction.entity),
-                    joinedload(Prediction.outcome)
-                ).join(
-                    Entity, Prediction.entity_id == Entity.entity_id
-                ).order_by(desc(Prediction.created_at))
+            # Use eager loading to fetch entity and outcome in single query (fixes N+1 problem)
+            stmt = select(Prediction).options(
+                joinedload(Prediction.entity),
+                joinedload(Prediction.outcome)
+            ).join(
+                Entity, Prediction.entity_id == Entity.entity_id
+            ).order_by(desc(Prediction.created_at))
 
-                # Filter by selected horizon
-                stmt = stmt.where(Prediction.horizon == horizon)
+            # Filter by selected horizon
+            stmt = stmt.where(Prediction.horizon == horizon)
 
             # Apply filters
             if entity_filter:

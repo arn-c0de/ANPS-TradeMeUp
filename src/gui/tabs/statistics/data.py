@@ -1513,7 +1513,7 @@ def _stock_summary_card(predictions: list, entity: Entity) -> dbc.Card:
 
 def get_stock_predictions_detail(engine, stock_symbol):
     """Get all predictions for a specific stock with performance data"""
-    from src.gui.tabs.predictions import _format_saved_performance
+    from src.gui.helpers.prediction_details_popup import _format_saved_performance
 
     try:
         with Session(engine) as db:
@@ -1535,6 +1535,10 @@ def get_stock_predictions_detail(engine, stock_symbol):
                     outcome = db.scalar(select(PredictionOutcome).where(
                         PredictionOutcome.prediction_id == pred.prediction_id
                     ).limit(1))
+                    # Same rule as the prediction modal: performance is only
+                    # formatted from a saved outcome
+                    if outcome is None or outcome.actual_return is None:
+                        continue
 
                     # Always load live prices for this modal (limited to 5 predictions)
                     perf_data = _format_saved_performance(pred, entity, outcome, load_live_prices=True)
