@@ -172,21 +172,26 @@ class CorrelationAnalysisAgent:
 
             relationships = self.analyze_entity_relationships(db, entity_id, min_correlation=0.4)
 
-            # Delete existing relationships
+            # Replace this entity's existing correlation relationships (other
+            # relationship types, e.g. supply chain, are left alone)
             db.execute(delete(EntityRelationship).where(
-                EntityRelationship.entity_1 == entity_id
+                EntityRelationship.entity_from == entity_id,
+                EntityRelationship.relationship_type == 'correlation'
             ))
 
             # Create new relationships
             relationship_objects = []
             for rel in relationships[:20]:  # Top 20 correlations
                 relationship = EntityRelationship(
-                    entity_1=entity_id,
-                    entity_2=rel['entity_id'],
+                    entity_from=entity_id,
+                    entity_to=rel['entity_id'],
                     relationship_type='correlation',
                     strength=abs(rel['correlation']),
-                    direction='positive' if rel['correlation'] > 0 else 'negative',
-                    metadata={'lookback_days': 90},
+                    # The model has no direction column; it lives in metadata
+                    metadata_={
+                        'lookback_days': 90,
+                        'direction': 'positive' if rel['correlation'] > 0 else 'negative',
+                    },
                     created_at=datetime.now(UTC)
                 )
                 relationship_objects.append(relationship)
@@ -338,12 +343,12 @@ class CorrelationAnalysisAgent:
             # Positive/negative counts
             positive = db.scalar(select(func.count()).select_from(EntityRelationship).where(
                 EntityRelationship.relationship_type == 'correlation',
-                EntityRelationship.direction == 'positive'
+                EntityRelationship.metadata_['direction'].astext == 'positive'
             ))
 
             negative = db.scalar(select(func.count()).select_from(EntityRelationship).where(
                 EntityRelationship.relationship_type == 'correlation',
-                EntityRelationship.direction == 'negative'
+                EntityRelationship.metadata_['direction'].astext == 'negative'
             ))
 
             return {
