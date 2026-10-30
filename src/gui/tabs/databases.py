@@ -13,7 +13,7 @@ from uuid import UUID
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, dcc, html
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, inspect, select, text
 from sqlalchemy.orm import Session
 
 from src.config.settings import VERSION
@@ -90,6 +90,13 @@ _MODEL_COLUMNS: dict[str, frozenset] = {
     for tbl, model in _MODEL_MAP.items()
 }
 
+# Column name -> mapped attribute name. They differ for the "metadata" columns,
+# which are mapped as metadata_ because Model.metadata is SQLAlchemy's MetaData.
+_COLUMN_ATTRS: dict[str, dict[str, str]] = {
+    tbl: {attr.columns[0].name: attr.key for attr in inspect(model).column_attrs}
+    for tbl, model in _MODEL_MAP.items()
+}
+
 # ── JSON helpers ──────────────────────────────────────────────────────────────
 class _DBEncoder(json.JSONEncoder):
     def default(self, obj: Any) -> Any:
@@ -104,8 +111,9 @@ class _DBEncoder(json.JSONEncoder):
 
 def _serialize_row(row) -> dict:
     result = {}
-    for col in row.__table__.columns:
-        val = getattr(row, col.name)
+    for attr in inspect(row).mapper.column_attrs:
+        col = attr.columns[0]
+        val = getattr(row, attr.key)
         if isinstance(val, UUID):
             val = str(val)
         elif isinstance(val, datetime):
@@ -212,7 +220,7 @@ def _get_news_page(page: int) -> tuple[list, int]:
             if news_ids:
                 for nid in news_ids:
                     count = db.execute(text(
-                        "SELECT COUNT(*) FROM predictions WHERE related_news_ids @> :arr::jsonb"
+                        "SELECT COUNT(*) FROM predictions WHERE related_news_ids @> CAST(:arr AS jsonb)"
                     ), {"arr": json.dumps([nid])}).scalar()
                     pred_counts[nid] = count or 0
             data = []
@@ -311,7 +319,7 @@ def _delete_news_cascade(news_id: str, also_delete_predictions: bool) -> tuple[i
         with Session(_engine) as db:
             if also_delete_predictions:
                 pred_ids = db.execute(text(
-                    "SELECT prediction_id FROM predictions WHERE related_news_ids @> :arr::jsonb"
+                    "SELECT prediction_id FROM predictions WHERE related_news_ids @> CAST(:arr AS jsonb)"
                 ), {"arr": json.dumps([news_id])}).fetchall()
                 pred_ids = [str(row[0]) for row in pred_ids]
                 if pred_ids:
@@ -600,7 +608,8 @@ def _execute_import(obj: dict, mode: str,
             try:
                 safe = _coerce_row(row_dict, tbl)
                 with Session(_engine) as db:
-                    instance = model(**safe)
+                    attrs = _COLUMN_ATTRS[tbl]
+                    instance = model(**{attrs[k]: v for k, v in safe.items()})
                     if mode == "merge":
                         db.merge(instance)
                     else:
@@ -1495,13 +1504,12 @@ def register_callbacks(app) -> None:
     # ── history tab ───────────────────────────────────────────────────────────
     @app.callback(
         Output("db-history-table", "children"),
-        [Input("db-tab-history", "value"),
-         Input("db-history-refresh", "n_clicks"),
+        [Input("db-history-refresh", "n_clicks"),
          Input("db-history-clear-status", "children"),
          Input("db-main-tabs", "active_tab")],
         prevent_initial_call=False,
     )
-    def _render_history(_tab, _refresh, _clear, active_main):
+    def _render_history(_refresh, _clear, active_main):
         events = _load_history()
         if not events:
             return html.P("No import/export history yet.", className="text-muted")
