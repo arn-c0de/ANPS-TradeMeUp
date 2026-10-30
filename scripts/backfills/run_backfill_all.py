@@ -28,7 +28,6 @@ def backfill_phase(agent, phase_name: str, batch_size: int = 100):
     logger.info("="*70)
 
     total_processed = 0
-    total_items = 0  # Total items found
     batch_num = 1
     start_time = datetime.now()
 

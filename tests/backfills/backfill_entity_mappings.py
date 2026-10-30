@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 def backfill_entity_mappings(batch_size: int = 100):
     """
     Backfill entity mappings for all processed news without mappings
-    
+
     Args:
         batch_size: Number of articles to process per batch
     """

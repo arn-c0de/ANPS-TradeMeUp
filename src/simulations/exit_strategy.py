@@ -15,7 +15,7 @@ class ExitStrategyCalculator:
     def __init__(self, config: dict):
         """
         Initialize exit strategy calculator with configuration.
-        
+
         Args:
             config: Simulation configuration dictionary
         """
@@ -37,7 +37,7 @@ class ExitStrategyCalculator:
     ) -> dict:
         """
         Calculate comprehensive exit strategy (stop loss and take profit).
-        
+
         Args:
             entry_price: Entry price for the position
             direction: Predicted direction (up/down/flat)
@@ -47,7 +47,7 @@ class ExitStrategyCalculator:
             horizon: Prediction horizon (1d/5d/20d)
             market_data_provider: Provider for market data
             ticker: Stock ticker symbol
-            
+
         Returns:
             Dictionary with stop loss and take profit levels
         """
@@ -113,7 +113,7 @@ class ExitStrategyCalculator:
     ) -> dict:
         """
         Calculate ATR-based stop loss and take profit.
-        
+
         Uses Average True Range to adapt stops to each stock's volatility.
         """
         atr_config = self.sl_tp_config.get("atr_based", {})
@@ -202,11 +202,11 @@ class ExitStrategyCalculator:
     def _calculate_atr(self, hist_data, period: int = 14) -> float | None:
         """
         Calculate Average True Range (ATR).
-        
+
         Args:
             hist_data: DataFrame with High, Low, Close columns
             period: ATR period (default 14 days)
-            
+
         Returns:
             ATR value or None if calculation fails
         """
@@ -246,7 +246,7 @@ class ExitStrategyCalculator:
     ) -> dict:
         """
         Calculate risk-adjusted stop loss and take profit.
-        
+
         Higher risk = tighter stops, lower risk = wider stops.
         """
         risk_config = self.sl_tp_config.get("risk_adjusted", {})
@@ -330,7 +330,7 @@ class ExitStrategyCalculator:
     ) -> dict:
         """
         Calculate simple percentage-based stop loss and take profit.
-        
+
         Fallback method when other methods are unavailable.
         """
         pct_config = self.sl_tp_config.get("percentage_based", {})
@@ -381,7 +381,7 @@ class ExitStrategyCalculator:
     def _apply_penny_stock_adjustments(self, result: dict, entry_price: float) -> dict:
         """
         Apply special adjustments for penny stocks.
-        
+
         Penny stocks need wider stops due to higher volatility and wider spreads.
         """
         penny_config = self.sl_tp_config.get("penny_stock_adjustments", {})

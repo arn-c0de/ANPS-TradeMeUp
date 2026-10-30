@@ -13,19 +13,19 @@ import numpy as np
 def ensure_dict(value: Any, default: dict | None = None) -> dict:
     """
     Ensure a JSONB value is deserialized to a dictionary.
-    
+
     Handles cases where:
     - PostgreSQL JSONB might be returned as string (from SQLite migration)
     - Value is None
     - Value is already a dict
-    
+
     Args:
         value: The value to ensure is a dict (could be str, dict, or None)
         default: Default value to return if value is None or invalid (defaults to {})
-        
+
     Returns:
         Dict: The deserialized dictionary, or default if invalid
-        
+
     Example:
         >>> ensure_dict('{"key": "value"}')
         {'key': 'value'}
@@ -58,19 +58,19 @@ def ensure_dict(value: Any, default: dict | None = None) -> dict:
 def ensure_list(value: Any, default: list | None = None) -> list:
     """
     Ensure a JSONB value is deserialized to a list.
-    
+
     Handles cases where:
     - PostgreSQL JSONB might be returned as string (from SQLite migration)
     - Value is None
     - Value is already a list
-    
+
     Args:
         value: The value to ensure is a list (could be str, list, or None)
         default: Default value to return if value is None or invalid (defaults to [])
-        
+
     Returns:
         List: The deserialized list, or default if invalid
-        
+
     Example:
         >>> ensure_list('[1, 2, 3]')
         [1, 2, 3]
@@ -103,16 +103,16 @@ def ensure_list(value: Any, default: list | None = None) -> list:
 def ensure_json(value: Any, default: Any = None) -> dict | list | Any:
     """
     Ensure a JSONB value is deserialized (dict, list, or other JSON type).
-    
+
     More flexible than ensure_dict or ensure_list - returns whatever JSON type it is.
-    
+
     Args:
         value: The value to ensure is deserialized
         default: Default value to return if value is None or invalid
-        
+
     Returns:
         The deserialized JSON value, or default if invalid
-        
+
     Example:
         >>> ensure_json('{"key": "value"}')
         {'key': 'value'}
@@ -136,16 +136,16 @@ def ensure_json(value: Any, default: Any = None) -> dict | list | Any:
 def to_python_type(value: Any) -> Any:
     """
     Convert numpy types and other non-native types to Python native types.
-    
+
     This is essential for PostgreSQL compatibility, as numpy types like np.float64
     cause SQL errors when passed directly to database queries.
-    
+
     Args:
         value: The value to convert (can be numpy type, None, or native Python type)
-        
+
     Returns:
         The value converted to a Python native type, or None if input is None
-        
+
     Example:
         >>> to_python_type(np.float64(3.14))
         3.14
@@ -183,15 +183,15 @@ def to_python_type(value: Any) -> Any:
 def clean_numpy_types(obj: Any) -> Any:
     """
     Recursively convert numpy types in nested structures to Python native types.
-    
+
     Useful for cleaning JSONB data that might contain numpy types from calculations.
-    
+
     Args:
         obj: The object to clean (can be dict, list, numpy type, or native type)
-        
+
     Returns:
         The object with all numpy types converted to Python native types
-        
+
     Example:
         >>> clean_numpy_types({'a': np.float64(3.14), 'b': [np.int64(1), 2]})
         {'a': 3.14, 'b': [1, 2]}

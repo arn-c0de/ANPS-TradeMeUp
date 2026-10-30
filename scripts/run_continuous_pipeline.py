@@ -182,7 +182,7 @@ class ContinuousPipeline:
     def __init__(self, check_interval: int = 300, max_memory_mb: int = 2048):
         """
         Initialize continuous pipeline
-        
+
         Args:
             check_interval: Seconds between pipeline runs (default: 300 = 5 minutes)
             max_memory_mb: Maximum memory usage in MB before forcing garbage collection
@@ -362,7 +362,7 @@ class ContinuousPipeline:
                     try:
                         self.db = SessionLocal()
                         break
-                    except Exception as db_error:
+                    except Exception:
                         if attempt < max_retries - 1:
                             wait_time = 2 ** attempt
                             logger.warning(f"DB connection failed (attempt {attempt+1}/{max_retries}), retrying in {wait_time}s...")
@@ -375,7 +375,7 @@ class ContinuousPipeline:
                     raise RuntimeError("Database session is None - failed to create connection")
 
                 # Run all pipeline phases
-                new_articles = self._run_pipeline_iteration()
+                self._run_pipeline_iteration()
                 self._check_for_external_stop()
 
                 # Close database session safely
@@ -653,10 +653,10 @@ def main():
 Examples:
   # Run with defaults (5min interval, 2GB memory limit)
   python run_continuous_pipeline.py
-  
+
   # Check every 2 minutes with 4GB memory limit
   python run_continuous_pipeline.py --interval 120 --max-memory 4096
-  
+
   # Aggressive mode (1min checks, 8GB memory)
   python run_continuous_pipeline.py --interval 60 --max-memory 8192
         """

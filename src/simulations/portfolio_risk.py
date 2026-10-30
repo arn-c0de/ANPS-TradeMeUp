@@ -1,7 +1,6 @@
 """Portfolio-level risk aggregation and analysis."""
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
 
 import numpy as np
 from sqlalchemy.orm import Session

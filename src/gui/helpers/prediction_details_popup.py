@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, defer, joinedload
 
 from src.models.analysis import ImpactScore
 from src.models.entities import Entity
-from src.models.predictions import Prediction, PredictionOutcome
+from src.models.predictions import Prediction
 from src.models.processed_news import ProcessedNews
 from src.models.raw_news import RawNews
 from src.models.trading_simulation import TradingSimulation

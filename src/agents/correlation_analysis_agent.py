@@ -1,7 +1,6 @@
 """Agent 5.6: Correlation Analysis Agent - Analyze entity correlations and relationships."""
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import List
 
 import numpy as np
 from sqlalchemy import func
@@ -27,7 +26,7 @@ class CorrelationAnalysisAgent:
     def __init__(self):
         """
         Initialize correlation analysis agent.
-        
+
         Note: Uses scoped sessions internally for better isolation.
         """
         self._correlation_cache = {}

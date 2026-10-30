@@ -385,15 +385,15 @@ class PredictionAgent:
     ) -> Prediction | None:
         """
         Generate a single prediction for an entity based on a news article.
-        
+
         PUBLIC API: Use this for single predictions with auto-commit.
         For batch processing, use process_batch() instead.
-        
+
         Args:
             entity_id: Entity ticker/identifier
             news_id: UUID of news article
             horizon: Prediction horizon ('1d', '5d', '20d')
-            
+
         Returns:
             Prediction object or None if failed
         """

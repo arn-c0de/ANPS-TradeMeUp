@@ -3,7 +3,6 @@ Test script for the enhanced continuous pipeline
 Tests performance monitoring, error recovery, and graceful shutdown
 """
 import sys
-import time
 from pathlib import Path
 
 # Add project root to path

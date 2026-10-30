@@ -18,9 +18,9 @@ def test_imports():
     logger.info("="*80)
 
     try:
-        from src.gui.tabs import predictions, simulations
-        from src.models.predictions import Prediction
-        from src.models.trading_simulation import TradingSimulation
+        from src.gui.tabs import predictions, simulations  # noqa: F401
+        from src.models.predictions import Prediction  # noqa: F401
+        from src.models.trading_simulation import TradingSimulation  # noqa: F401
         logger.info("✓ All imports successful")
         return True
     except Exception as e:

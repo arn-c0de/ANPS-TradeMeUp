@@ -9,7 +9,7 @@ import logging
 import re
 import time
 import uuid
-from typing import Any, List
+from typing import Any
 
 import dash
 import dash_bootstrap_components as dbc

@@ -5,7 +5,7 @@ from sqlalchemy.types import TypeDecorator
 
 class GUID(TypeDecorator):
     """PostgreSQL-native UUID type.
-    
+
     Uses PostgreSQL's native UUID type for optimal performance.
     UUIDs are stored natively without string conversion overhead.
     """

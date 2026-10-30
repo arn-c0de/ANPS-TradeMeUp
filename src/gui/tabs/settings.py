@@ -15,6 +15,7 @@ from src.config.settings import settings as _settings
 from src.models.analysis import ImpactScore
 from src.models.data_quality import DataQualityScore
 from src.models.database import engine as _engine
+from src.models.database import utc_now
 from src.models.entities import Entity, NewsEntityMapping
 from src.models.predictions import Prediction
 from src.models.processed_news import ProcessedNews
@@ -306,6 +307,19 @@ def _env_bool(value) -> str:
     return "true" if bool(value) else "false"
 
 
+_RANGE_DAYS = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
+
+
+def _range_cutoff(time_range):
+    """Timezone-aware cutoff for a preset range, or None for "all"/"custom".
+
+    The created_at columns are timestamptz, so a naive datetime.now() would be
+    read in the database session's time zone and shift the deleted window.
+    """
+    days = _RANGE_DAYS.get(time_range)
+    return utc_now() - timedelta(days=days) if days else None
+
+
 def register_callbacks(app):
     """Register settings tab callbacks."""
 
@@ -586,16 +600,8 @@ def register_callbacks(app):
             with Session(_engine) as db:
                 if action == "clear_news":
                     time_range = params.get("range")
-                    cutoff_date = None
-                    if time_range == "1d":
-                        cutoff_date = datetime.now() - timedelta(days=1)
-                    elif time_range == "7d":
-                        cutoff_date = datetime.now() - timedelta(days=7)
-                    elif time_range == "30d":
-                        cutoff_date = datetime.now() - timedelta(days=30)
-                    elif time_range == "90d":
-                        cutoff_date = datetime.now() - timedelta(days=90)
-                    elif time_range == "custom" and params.get("start"):
+                    cutoff_date = _range_cutoff(time_range)
+                    if time_range == "custom" and params.get("start"):
                         cutoff_date = datetime.fromisoformat(params["start"])
                     if time_range == "all":
                         count_raw = db.query(RawNews).delete()
@@ -610,13 +616,7 @@ def register_callbacks(app):
                     news_msg = dbc.Alert(f"Successfully deleted {count_raw + count_processed} news articles", color="success", dismissable=True)
                 elif action == "clear_predictions":
                     time_range = params.get("range")
-                    cutoff_date = None
-                    if time_range == "1d":
-                        cutoff_date = datetime.now() - timedelta(days=1)
-                    elif time_range == "7d":
-                        cutoff_date = datetime.now() - timedelta(days=7)
-                    elif time_range == "30d":
-                        cutoff_date = datetime.now() - timedelta(days=30)
+                    cutoff_date = _range_cutoff(time_range)
                     if time_range == "all":
                         count = db.query(Prediction).delete()
                     elif cutoff_date:

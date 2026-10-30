@@ -339,10 +339,10 @@ Respond ONLY with JSON."""
     def _find_ticker_by_company_name(self, company_name: str) -> str | None:
         """
         Try to find ticker symbol by searching with company name.
-        
+
         Args:
             company_name: Company name to search for
-            
+
         Returns:
             Ticker symbol if found, None otherwise
         """

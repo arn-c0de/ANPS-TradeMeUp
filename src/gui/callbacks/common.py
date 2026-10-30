@@ -60,5 +60,5 @@ def register_common_callbacks(app):
         now = datetime.now().strftime("%H:%M:%S")
         return html.Div([
             html.Span("● ", className="text-success"),
-            html.Small("Live • Updated %s" % now),
+            html.Small(f"Live • Updated {now}"),
         ])

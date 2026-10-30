@@ -401,7 +401,7 @@ def get_metrics(engine):
                 dbc.Col(metric_card("🧪", "Simulations", total_simulations, "text-primary", simulations_1h, simulations_24h), xs=6, sm=4, md=2),
             ], className="g-2 mb-2")
         ])
-    except Exception as e:
+    except Exception:
         return dbc.Row([
             dbc.Col([
                 dbc.Alert(
@@ -444,7 +444,7 @@ def get_recent_news(engine, limit=50):
             ])),
             html.Tbody(rows)
         ], bordered=True, hover=True, size="sm", className="table-dark")
-    except Exception as e:
+    except Exception:
         return html.P("⚠️ Unable to load recent news. Database may be empty.", className="text-warning")
 
 
@@ -615,7 +615,6 @@ def get_top_performers(engine, timeframe='24h', limit=10):
     try:
         with Session(engine, expire_on_commit=False) as db:
             # Use timezone-aware datetime for PostgreSQL compatibility
-            from datetime import timezone
             now = datetime.now(UTC)
 
             # Calculate timeframe cutoff
@@ -987,7 +986,6 @@ def register_callbacks(app):
         Input("interval-component", "n_intervals"),
     )
     def update_performance_chart(n):
-        from datetime import timezone
         dates = pd.date_range(end=datetime.now(UTC), periods=30, freq="D")
         accuracy = [0.65 + (i % 10) * 0.03 for i in range(30)]
         fig = go.Figure()

@@ -144,10 +144,10 @@ class MarketDataProvider:
     def get_live_price(self, symbol: str) -> dict | None:
         """
         Get current live price for a symbol
-        
+
         Args:
             symbol: Stock ticker (e.g., 'AAPL', 'MSFT')
-            
+
         Returns:
             Dict with price data or None
         """
@@ -352,10 +352,10 @@ class MarketDataProvider:
     def get_multiple_quotes(self, symbols: list[str]) -> dict[str, dict]:
         """
         Get quotes for multiple symbols at once
-        
+
         Args:
             symbols: List of stock tickers
-            
+
         Returns:
             Dict mapping symbol to quote data
         """
@@ -369,7 +369,7 @@ class MarketDataProvider:
     def get_market_indices(self) -> dict[str, dict]:
         """
         Get major market indices
-        
+
         Returns:
             Dict with index data
         """

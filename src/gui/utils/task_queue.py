@@ -9,10 +9,11 @@ import queue
 import threading
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class TaskQueueManager:
     def __init__(self, max_concurrent_tasks: int = 3, max_queue_size: int = 50):
         """
         Initialize task queue manager
-        
+
         Args:
             max_concurrent_tasks: Maximum number of tasks running simultaneously
             max_queue_size: Maximum number of tasks in queue
@@ -155,14 +156,14 @@ class TaskQueueManager:
     ) -> str:
         """
         Add a task to the queue
-        
+
         Args:
             task_type: Type of task (used for grouping and worker assignment)
             function: Function to execute
             *args: Positional arguments for function
             priority: Task priority (higher = executed first)
             **kwargs: Keyword arguments for function
-            
+
         Returns:
             task_id: Unique task identifier
         """
@@ -210,7 +211,7 @@ class TaskQueueManager:
     def _worker(self, task_type: str):
         """
         Worker that processes tasks from queue sequentially
-        
+
         Args:
             task_type: Type of tasks this worker handles
         """
@@ -238,7 +239,7 @@ class TaskQueueManager:
     def _execute_task(self, task: Task):
         """
         Execute a single task
-        
+
         Args:
             task: Task to execute
         """
@@ -410,14 +411,14 @@ def get_task_queue() -> TaskQueueManager:
 def add_gui_task(task_type: str, function: Callable, *args, priority: int = 0, **kwargs) -> str:
     """
     Convenience function to add a GUI task to the queue
-    
+
     Args:
         task_type: Type of task
         function: Function to execute
         *args: Positional arguments
         priority: Task priority
         **kwargs: Keyword arguments
-        
+
     Returns:
         task_id: Unique task identifier
     """

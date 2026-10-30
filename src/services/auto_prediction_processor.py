@@ -10,11 +10,9 @@ Can be called after new predictions are created to ensure they are fully process
 
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import List
 
 from sqlalchemy.orm import Session, joinedload
 
-from src.models.entities import Entity
 from src.models.predictions import Prediction
 from src.models.trading_simulation import TradingSimulation
 from src.services.prediction_performance_service import PredictionPerformanceService
@@ -38,11 +36,11 @@ class AutoPredictionProcessor:
     ) -> dict:
         """
         Update all predictions for a specific entity/ticker with fresh performance data.
-        
+
         Args:
             db: Database session
             entity_id: Entity ID (ticker) to update
-            
+
         Returns:
             dict: Statistics about updated predictions
         """
@@ -126,12 +124,12 @@ class AutoPredictionProcessor:
     ) -> dict:
         """
         Process predictions created in the last N minutes.
-        
+
         Args:
             db: Database session
             lookback_minutes: How far back to look for new predictions
             force_recalculate: If True, recalculate even if data exists
-            
+
         Returns:
             dict: Statistics about processed predictions
         """
@@ -252,11 +250,11 @@ class AutoPredictionProcessor:
     ) -> dict:
         """
         Process specific predictions by ID.
-        
+
         Args:
             db: Database session
             prediction_ids: List of prediction IDs to process
-            
+
         Returns:
             dict: Statistics about processed predictions
         """

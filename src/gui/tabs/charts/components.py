@@ -2,7 +2,6 @@
 Charts Tab - Component Creation Functions
 """
 
-from typing import Optional, Tuple
 
 import dash_bootstrap_components as dbc
 import pandas as pd
@@ -37,7 +36,7 @@ def get_stock_chart_components(
 ) -> tuple[dcc.Graph, dict | None]:
     """
     Get chart graph component and stats data.
-    
+
     Args:
         symbol: Stock ticker symbol
         timeframe: Chart timeframe
@@ -50,7 +49,7 @@ def get_stock_chart_components(
         auto_scroll: Auto-scroll to latest data
         view_state: Saved view state dict
         loaded_data: Optional pre-loaded DataFrame (for infinite scroll)
-        
+
     Returns:
         Tuple of (chart_graph_component, stats_data_dict)
     """

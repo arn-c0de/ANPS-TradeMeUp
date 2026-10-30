@@ -35,7 +35,7 @@ class MetaStrategyAgent:
     def __init__(self):
         """
         Initialize meta-strategy agent.
-        
+
         Note: Uses scoped sessions internally for better isolation.
         """
         self._model_weights = {}

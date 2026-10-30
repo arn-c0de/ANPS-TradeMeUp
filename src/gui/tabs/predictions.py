@@ -418,9 +418,6 @@ def get_predictions_table(engine, entity_filter=None, date_range=None, min_confi
                     ], style={"whiteSpace": "nowrap", "position": "relative"})
                 ], style=row_style, className=row_class if row_class else None))
 
-            # Always disable hover to prevent light background issues
-            enable_hover = False
-
             return dbc.Table([
                 html.Thead(html.Tr([
                     html.Th("Timestamp"),
@@ -726,7 +723,6 @@ def register_callbacks(app):
             risk_adjustment = risk_adjustment if risk_adjustment is not None else 0.3
 
         # If loading live performance, update all predictions for this entity
-        sync_trigger = None
         if load_performance:
             try:
                 with Session(_engine) as db:

@@ -35,7 +35,7 @@ LOAD_AMOUNTS = {
 class ChartDataManager:
     """
     Manages chart data loading and caching for infinite scroll functionality.
-    
+
     Thread-safe implementation with LRU cache for performance.
     Follows patterns from MarketDataProvider for consistency.
     """
@@ -76,11 +76,11 @@ class ChartDataManager:
     def get_initial_data(self, symbol: str, timeframe: str) -> pd.DataFrame | None:
         """
         Load initial chart data based on timeframe.
-        
+
         Args:
             symbol: Stock ticker symbol
             timeframe: Chart timeframe (e.g., '1mo', '1y')
-            
+
         Returns:
             DataFrame with OHLCV data or None if error
         """
@@ -120,30 +120,22 @@ class ChartDataManager:
     def load_more_future(self, symbol: str, timeframe: str, current_latest_date: datetime) -> pd.DataFrame | None:
         """
         Load additional future data after current_latest_date.
-        
+
         Args:
             symbol: Stock ticker symbol
             timeframe: Chart timeframe
             current_latest_date: Current latest date in loaded data
-            
+
         Returns:
             DataFrame with additional future data or None if error/no more data
         """
         try:
-            # Determine how much data to load
-            load_amount = LOAD_AMOUNTS.get(timeframe, timedelta(days=30))
-
             # Ensure current_latest_date is timezone-aware (yfinance data is UTC)
             if current_latest_date.tzinfo is None:
                 current_latest_date = pd.Timestamp(current_latest_date, tz='UTC')
 
-            target_end_date = current_latest_date + load_amount
-
             # Get current time as timezone-aware
             now_utc = pd.Timestamp.now(tz='UTC')
-
-            # Calculate period string for yfinance (from now to target_end_date)
-            days_diff = (target_end_date - now_utc).days
 
             # For future data, we typically want recent data up to now
             # Calculate period from current_latest_date to now
@@ -201,12 +193,12 @@ class ChartDataManager:
     def load_more_historical(self, symbol: str, timeframe: str, current_earliest_date: datetime) -> pd.DataFrame | None:
         """
         Load additional historical data before current_earliest_date.
-        
+
         Args:
             symbol: Stock ticker symbol
             timeframe: Chart timeframe
             current_earliest_date: Current earliest date in loaded data
-            
+
         Returns:
             DataFrame with additional historical data or None if error/no more data
         """
@@ -278,11 +270,11 @@ class ChartDataManager:
     def prepend_data(self, existing_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:
         """
         Prepend new data to existing DataFrame efficiently.
-        
+
         Args:
             existing_df: Existing DataFrame
             new_df: New DataFrame to prepend
-            
+
         Returns:
             Combined DataFrame with new data at the beginning
         """
@@ -306,11 +298,11 @@ class ChartDataManager:
     def append_data(self, existing_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:
         """
         Append new data to existing DataFrame efficiently.
-        
+
         Args:
             existing_df: Existing DataFrame
             new_df: New DataFrame to append
-            
+
         Returns:
             Combined DataFrame with new data at the end
         """
@@ -334,12 +326,12 @@ class ChartDataManager:
     def should_load_more_left(self, visible_left_index: int, total_data_points: int, buffer_size: int = 0) -> bool:
         """
         Determine if more historical data should be loaded based on threshold and buffer zone.
-        
+
         Args:
             visible_left_index: Index of leftmost visible data point
             total_data_points: Total number of loaded data points
             buffer_size: Buffer zone size (number of candles to maintain before visible area)
-            
+
         Returns:
             True if more data should be loaded, False otherwise
         """
@@ -357,12 +349,12 @@ class ChartDataManager:
     def should_load_more_right(self, visible_right_index: int, total_data_points: int, buffer_size: int = 0) -> bool:
         """
         Determine if more future data should be loaded based on threshold and buffer zone.
-        
+
         Args:
             visible_right_index: Index of rightmost visible data point
             total_data_points: Total number of loaded data points
             buffer_size: Buffer zone size (number of candles to maintain after visible area)
-            
+
         Returns:
             True if more data should be loaded, False otherwise
         """
@@ -380,11 +372,11 @@ class ChartDataManager:
     def should_load_more(self, visible_left_index: int, total_data_points: int) -> bool:
         """
         Determine if more data should be loaded based on threshold (legacy method for backward compatibility).
-        
+
         Args:
             visible_left_index: Index of leftmost visible data point
             total_data_points: Total number of loaded data points
-            
+
         Returns:
             True if more data should be loaded, False otherwise
         """
@@ -393,10 +385,10 @@ class ChartDataManager:
     def get_load_amount(self, timeframe: str) -> timedelta:
         """
         Get the load amount for a given timeframe.
-        
+
         Args:
             timeframe: Chart timeframe
-            
+
         Returns:
             timedelta representing how much data to load
         """
@@ -405,11 +397,11 @@ class ChartDataManager:
     def get_cached_data(self, symbol: str, timeframe: str) -> pd.DataFrame | None:
         """
         Get cached data if available.
-        
+
         Args:
             symbol: Stock ticker symbol
             timeframe: Chart timeframe
-            
+
         Returns:
             Cached DataFrame or None
         """
@@ -423,7 +415,7 @@ class ChartDataManager:
     def update_cached_data(self, symbol: str, timeframe: str, df: pd.DataFrame):
         """
         Update cached data with new DataFrame.
-        
+
         Args:
             symbol: Stock ticker symbol
             timeframe: Chart timeframe
@@ -445,11 +437,11 @@ class ChartDataManager:
     def get_cache_metadata(self, symbol: str, timeframe: str) -> dict | None:
         """
         Get metadata for cached data.
-        
+
         Args:
             symbol: Stock ticker symbol
             timeframe: Chart timeframe
-            
+
         Returns:
             Metadata dict or None
         """

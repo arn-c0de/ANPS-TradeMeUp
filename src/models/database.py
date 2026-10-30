@@ -1,6 +1,7 @@
 """Database connection and session management."""
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
@@ -11,7 +12,7 @@ from src.config.settings import settings
 def utc_now():
     """
     Return timezone-aware UTC datetime for PostgreSQL compatibility.
-    
+
     Use this instead of datetime.utcnow() which returns naive datetime.
     PostgreSQL DateTime(timezone=True) columns require timezone-aware datetimes.
     """
@@ -57,7 +58,8 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-def get_scoped_session():
+@contextmanager
+def get_scoped_session() -> Iterator[Session]:
     """
     Context manager for scoped database sessions with automatic transaction management.
 
@@ -69,22 +71,13 @@ def get_scoped_session():
 
     On exception, automatically rolls back transaction.
     Always closes session on exit.
-
-    Returns:
-        Context manager yielding database session
     """
-    from contextlib import contextmanager
-
-    @contextmanager
-    def scoped_session_cm():
-        session = SessionLocal()
-        try:
-            yield session
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-
-    return scoped_session_cm()
+    session = SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

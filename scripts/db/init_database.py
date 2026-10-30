@@ -20,7 +20,7 @@ def init_database():
     try:
         # Import after adding to path
         # Import models to register them
-        from src.models import (
+        from src.models import (  # noqa: F401 - imported to register models on Base
             analysis,
             chart_overlays,
             data_quality,

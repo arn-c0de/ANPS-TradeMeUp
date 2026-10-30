@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)
 def handle_db_errors(default_message="Unable to load data", show_details=True):
     """
     Decorator to handle database errors in GUI functions.
-    
+
     Args:
         default_message: Message to show when error occurs
         show_details: Whether to show error details in UI
-    
+
     Returns:
         Decorated function that handles errors gracefully
     """
@@ -46,14 +46,14 @@ def handle_db_errors(default_message="Unable to load data", show_details=True):
 def create_empty_state(title, message, icon="📭", action_text=None, action_link=None):
     """
     Create a user-friendly empty state component.
-    
+
     Args:
         title: Title of the empty state
         message: Explanatory message
         icon: Emoji icon to display
         action_text: Optional call-to-action text
         action_link: Optional link for the action
-    
+
     Returns:
         Dash component for empty state
     """
@@ -82,11 +82,11 @@ def create_empty_state(title, message, icon="📭", action_text=None, action_lin
 def create_error_boundary(component, fallback_message="An error occurred"):
     """
     Create an error boundary wrapper for a component.
-    
+
     Args:
         component: Component to wrap
         fallback_message: Message to show if component fails
-    
+
     Returns:
         Component with error handling
     """
@@ -103,13 +103,13 @@ def create_error_boundary(component, fallback_message="An error occurred"):
 def safe_query(session, query_func, default=None, log_errors=True):
     """
     Safely execute a database query with error handling.
-    
+
     Args:
         session: Database session
         query_func: Function that performs the query
         default: Default value to return on error
         log_errors: Whether to log errors
-    
+
     Returns:
         Query result or default value on error
     """
@@ -124,11 +124,11 @@ def safe_query(session, query_func, default=None, log_errors=True):
 def format_error_for_display(error, context=""):
     """
     Format an error for user-friendly display.
-    
+
     Args:
         error: Exception object
         context: Optional context string
-    
+
     Returns:
         Formatted error message string
     """
@@ -156,7 +156,7 @@ class DatabaseErrorHandler:
     def __init__(self, default_return=None, log_errors=True, reraise=False):
         """
         Initialize error handler.
-        
+
         Args:
             default_return: Value to return on error
             log_errors: Whether to log errors

@@ -15,9 +15,9 @@ print("Checking PostgreSQL database tables...")
 with engine.connect() as conn:
     # Query PostgreSQL information schema for table list
     result = conn.execute(text("""
-        SELECT table_name 
-        FROM information_schema.tables 
-        WHERE table_schema = 'public' 
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
         AND table_type = 'BASE TABLE'
         ORDER BY table_name
     """))

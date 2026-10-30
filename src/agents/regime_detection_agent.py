@@ -53,7 +53,7 @@ class RegimeDetectionAgent:
     def _get_default_indicators(self) -> dict:
         """
         Return default market indicators when data fetch fails
-        
+
         Returns:
             Dictionary with default market indicators
         """
@@ -342,7 +342,6 @@ class RegimeDetectionAgent:
 
     def get_statistics(self) -> dict:
         """Get regime statistics."""
-        from sqlalchemy import func
 
         total_regimes = self.db.query(MarketRegime).count()
 

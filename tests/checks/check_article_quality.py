@@ -9,7 +9,7 @@ engine = create_engine(settings.database_url)
 with engine.connect() as conn:
     # Get sample of articles without entity mappings
     result = conn.execute(text("""
-        SELECT 
+        SELECT
             rn.title,
             rn.source,
             pn.event_type,

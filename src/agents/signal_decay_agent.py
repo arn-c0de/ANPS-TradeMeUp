@@ -40,7 +40,7 @@ class SignalDecayAgent:
     def __init__(self):
         """
         Initialize signal decay agent.
-        
+
         Note: Uses scoped sessions internally for better isolation.
         """
         pass
@@ -135,7 +135,7 @@ class SignalDecayAgent:
     def model_decay(self, news_id: str, impact_score: float) -> SignalDecayModel:
         """
         Create signal decay model for a news article.
-        
+
         DEPRECATED: Use process_batch() for better performance.
 
         Args:

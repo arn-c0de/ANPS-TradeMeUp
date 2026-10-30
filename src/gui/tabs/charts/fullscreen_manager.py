@@ -5,7 +5,6 @@ This module provides centralized functions for managing fullscreen state,
 reducing code duplication and improving maintainability.
 """
 
-from typing import Tuple
 
 DEFAULT_FULLSCREEN_STATE = {'fullscreen': False}
 
@@ -13,10 +12,10 @@ DEFAULT_FULLSCREEN_STATE = {'fullscreen': False}
 def get_fullscreen_state(fullscreen_data: dict | None) -> bool:
     """
     Safely extract fullscreen state from data dict.
-    
+
     Args:
         fullscreen_data: Dictionary containing fullscreen state, or None
-        
+
     Returns:
         Boolean indicating if fullscreen mode is active
     """
@@ -28,10 +27,10 @@ def get_fullscreen_state(fullscreen_data: dict | None) -> bool:
 def create_fullscreen_state(is_fullscreen: bool) -> dict:
     """
     Create a new fullscreen state dict.
-    
+
     Args:
         is_fullscreen: Boolean indicating desired fullscreen state
-        
+
     Returns:
         Dictionary with fullscreen state
     """
@@ -41,10 +40,10 @@ def create_fullscreen_state(is_fullscreen: bool) -> dict:
 def toggle_fullscreen_state(current_state: dict | None) -> dict:
     """
     Toggle fullscreen state and return new state.
-    
+
     Args:
         current_state: Current fullscreen state dict, or None
-        
+
     Returns:
         New fullscreen state dict with toggled value
     """
@@ -55,10 +54,10 @@ def toggle_fullscreen_state(current_state: dict | None) -> dict:
 def get_container_classname(is_fullscreen: bool) -> str:
     """
     Get CSS classname for container based on fullscreen state.
-    
+
     Args:
         is_fullscreen: Boolean indicating fullscreen state
-        
+
     Returns:
         CSS classname string
     """
@@ -68,10 +67,10 @@ def get_container_classname(is_fullscreen: bool) -> str:
 def get_toggle_button_config(is_fullscreen: bool) -> tuple[str, str]:
     """
     Get toggle button text and color based on state.
-    
+
     Args:
         is_fullscreen: Boolean indicating fullscreen state
-        
+
     Returns:
         Tuple of (button_text, button_color)
     """
@@ -83,10 +82,10 @@ def get_toggle_button_config(is_fullscreen: bool) -> tuple[str, str]:
 def get_exit_button_style(is_fullscreen: bool) -> dict:
     """
     Get exit button style based on fullscreen state.
-    
+
     Args:
         is_fullscreen: Boolean indicating fullscreen state
-        
+
     Returns:
         Dictionary with CSS style properties
     """

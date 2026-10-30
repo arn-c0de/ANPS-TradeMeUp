@@ -5,16 +5,15 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Tuple
 
 
 def get_python_executable() -> str:
     """
     Get the correct Python executable path for the current environment.
-    
+
     Returns:
         str: Path to Python executable
-        
+
     Raises:
         RuntimeError: If Python executable cannot be found
     """
@@ -33,7 +32,7 @@ def get_python_executable() -> str:
 def get_project_root() -> Path:
     """
     Get the project root directory.
-    
+
     Returns:
         Path: Project root directory
     """
@@ -44,10 +43,10 @@ def get_project_root() -> Path:
 def validate_script_path(script_path: str) -> tuple[bool, str]:
     """
     Validate that a script exists and return absolute path.
-    
+
     Args:
         script_path: Relative or absolute path to script
-        
+
     Returns:
         Tuple of (success: bool, path_or_error: str)
     """
@@ -143,10 +142,10 @@ def start_background_process(
 def stop_process(pid: int) -> tuple[bool, str]:
     """
     Stop a running process by PID.
-    
+
     Args:
         pid: Process ID
-        
+
     Returns:
         Tuple of (success: bool, message: str)
     """
@@ -180,10 +179,10 @@ def stop_process(pid: int) -> tuple[bool, str]:
 def check_process_running(pid: int | None) -> bool:
     """
     Check if a process is still running.
-    
+
     Args:
         pid: Process ID (or None)
-        
+
     Returns:
         bool: True if process is running, False otherwise
     """

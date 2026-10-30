@@ -29,7 +29,7 @@ def test_statistics_filter():
 
         # Test 2: Get metrics without filters (all time)
         logger.info("\n[2] Testing metrics without filters...")
-        metrics_all = get_statistics_metrics(engine)
+        get_statistics_metrics(engine)
         logger.info("✓ Metrics loaded successfully (all time)")
 
         # Test 3: Get metrics with date range filter (last 30 days)
@@ -38,7 +38,7 @@ def test_statistics_filter():
         start_date = (now - timedelta(days=30)).date()
         end_date = now.date()
 
-        metrics_30d = get_statistics_metrics(
+        get_statistics_metrics(
             engine,
             date_range=(start_date, end_date),
             granularity="days"
@@ -49,7 +49,7 @@ def test_statistics_filter():
         logger.info("\n[4] Testing metrics with 7-day filter...")
         start_date_7d = (now - timedelta(days=7)).date()
 
-        metrics_7d = get_statistics_metrics(
+        get_statistics_metrics(
             engine,
             date_range=(start_date_7d, end_date),
             granularity="days"

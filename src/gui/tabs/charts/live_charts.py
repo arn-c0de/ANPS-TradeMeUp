@@ -12,14 +12,14 @@ from plotly.subplots import make_subplots
 def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", show_volume: bool = True, show_ma: bool = False) -> go.Figure:
     """
     Create a candlestick chart with optional volume and indicators
-    
+
     Args:
         df: DataFrame with OHLCV data
         symbol: Stock ticker symbol
         title: Chart title
         show_volume: Show volume subplot
         show_ma: Show moving averages (20, 50)
-        
+
     Returns:
         Plotly Figure
     """
@@ -151,12 +151,12 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: str = "", sho
 def create_line_chart(df: pd.DataFrame, symbol: str, column: str = 'Close') -> go.Figure:
     """
     Create a line chart for price movement
-    
+
     Args:
         df: DataFrame with price data
         symbol: Stock ticker symbol
         column: Column to plot
-        
+
     Returns:
         Plotly Figure
     """
@@ -196,11 +196,11 @@ def create_line_chart(df: pd.DataFrame, symbol: str, column: str = 'Close') -> g
 def create_multi_line_chart(data_dict: dict, title: str = "Comparison") -> go.Figure:
     """
     Create multi-line chart for comparing multiple stocks
-    
+
     Args:
         data_dict: Dict mapping symbol to DataFrame
         title: Chart title
-        
+
     Returns:
         Plotly Figure
     """
@@ -244,10 +244,10 @@ def create_multi_line_chart(data_dict: dict, title: str = "Comparison") -> go.Fi
 def create_price_indicator_card(quote_data: dict) -> dict:
     """
     Create data for price indicator card
-    
+
     Args:
         quote_data: Quote data from market_data provider
-        
+
     Returns:
         Dict with formatted data
     """
@@ -280,10 +280,10 @@ def create_price_indicator_card(quote_data: dict) -> dict:
 def create_empty_chart(message: str = "No data available") -> go.Figure:
     """
     Create empty chart with message
-    
+
     Args:
         message: Message to display
-        
+
     Returns:
         Plotly Figure
     """
@@ -313,11 +313,11 @@ def create_empty_chart(message: str = "No data available") -> go.Figure:
 def create_heatmap(data: pd.DataFrame, title: str = "Correlation Heatmap") -> go.Figure:
     """
     Create correlation heatmap
-    
+
     Args:
         data: DataFrame with correlation data
         title: Chart title
-        
+
     Returns:
         Plotly Figure
     """

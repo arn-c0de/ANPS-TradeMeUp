@@ -1,6 +1,5 @@
 """Database models for chart overlays (brackets and breaks)."""
 import uuid
-from datetime import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Float, Index, String
 
@@ -22,7 +21,7 @@ class ChartOverlay(Base):
     color = Column(String(20), nullable=False)  # Hex color code
     visible = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
 
     # Composite index for fast lookups
     __table_args__ = (

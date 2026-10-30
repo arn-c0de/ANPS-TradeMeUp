@@ -1,5 +1,4 @@
 """API endpoints for entities."""
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict

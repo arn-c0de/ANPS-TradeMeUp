@@ -60,7 +60,6 @@ def build_dataset(days: int, horizon: int):
 
 def train(df, feature_names, min_samples: int):
     """Fit the classifier and return (model, metrics)."""
-    import numpy as np
     from xgboost import XGBClassifier
 
     if df.empty:

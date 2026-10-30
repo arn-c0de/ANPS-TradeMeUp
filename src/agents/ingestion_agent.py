@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import sleep
-from typing import List
 
 import feedparser
 import requests
@@ -226,7 +225,7 @@ class IngestionAgent:
             logger.info(f"Saved article: {raw_news.news_id} - {article.title[:50]}")
             return str(raw_news.news_id)
 
-        except IntegrityError as e:
+        except IntegrityError:
             self.db.rollback()
             # Duplicate article (URL or content_hash already exists)
             logger.info(f"Duplicate article skipped: {article.title[:50]} (already in DB)")

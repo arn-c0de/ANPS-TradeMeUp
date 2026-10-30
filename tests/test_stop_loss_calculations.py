@@ -3,7 +3,7 @@ Test stop loss and take profit calculations.
 
 This script validates the exit strategy calculator with various scenarios:
 - Different volatility regimes
-- Different risk scores  
+- Different risk scores
 - Penny stocks and ultra-penny stocks
 - All calculation methods (ATR, risk-adjusted, percentage)
 """

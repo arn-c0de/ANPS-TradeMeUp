@@ -3,7 +3,6 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import List
 
 from sqlalchemy.orm import Session
 
@@ -53,7 +52,7 @@ class SurpriseQuantificationAgent:
     def __init__(self):
         """
         Initialize surprise quantification agent.
-        
+
         Note: Uses scoped sessions internally for better isolation.
         """
         pass
@@ -391,7 +390,7 @@ class SurpriseQuantificationAgent:
     def process_article(self, news_id: str) -> list[SurpriseScore]:
         """
         Process article and save surprise scores.
-        
+
         DEPRECATED: Use process_batch() for better performance.
 
         Args:

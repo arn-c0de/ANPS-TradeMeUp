@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def _convert_to_python_type(value):
     """Convert NumPy/pandas types to Python native types for database compatibility.
-    
+
     PostgreSQL doesn't automatically handle NumPy types, so we need to convert them.
     """
     if value is None:
@@ -222,11 +222,11 @@ class PredictionPerformanceService:
     ) -> dict[str, dict]:
         """
         Get performance for multiple predictions
-        
+
         Args:
             predictions: List of Prediction objects
             db_session: Database session to query entities
-            
+
         Returns:
             Dict mapping prediction_id to performance data
         """
@@ -254,11 +254,11 @@ class PredictionPerformanceService:
     ) -> dict:
         """
         Calculate overall accuracy statistics for a set of predictions
-        
+
         Args:
             predictions: List of predictions
             db_session: Database session
-            
+
         Returns:
             Dict with accuracy metrics
         """
@@ -323,12 +323,12 @@ class PredictionPerformanceService:
     ) -> bool:
         """
         Save prediction performance to PredictionOutcome table
-        
+
         Args:
             prediction_id: Prediction UUID
             performance_data: Performance metrics from get_prediction_performance
             db_session: Database session
-            
+
         Returns:
             True if saved successfully
         """
@@ -407,11 +407,11 @@ class PredictionPerformanceService:
     def calculate_and_save_performance(self, engine, prediction_id: str) -> dict:
         """
         Combined method to calculate and save prediction performance
-        
+
         Args:
             engine: SQLAlchemy engine
             prediction_id: Prediction UUID
-            
+
         Returns:
             Dict with performance metrics
         """

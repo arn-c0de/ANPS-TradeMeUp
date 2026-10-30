@@ -37,11 +37,11 @@ logger = logging.getLogger(__name__)
 def backfill_prediction_outcomes(db: Session, limit: int = None) -> dict:
     """
     Calculate and save performance for predictions without outcomes.
-    
+
     Args:
         db: Database session
         limit: Optional limit on number of predictions to process
-        
+
     Returns:
         dict: Statistics about the backfill operation
     """
@@ -139,11 +139,11 @@ def backfill_prediction_outcomes(db: Session, limit: int = None) -> dict:
 def backfill_simulations(db: Session, limit: int = None) -> dict:
     """
     Create simulations for predictions without simulations.
-    
+
     Args:
         db: Database session
         limit: Optional limit on number of predictions to process
-        
+
     Returns:
         dict: Statistics about the backfill operation
     """

@@ -529,7 +529,7 @@ def format_pipeline_status(status):
 def run_pipeline_command(command_type, options=None):
     """
     Execute pipeline command
-    
+
     Args:
         command_type: 'full', 'quick', 'backfill', 'backfill_selective', or agent name
         options: dict with limit, force, verbose flags, backfill phases, batch_size

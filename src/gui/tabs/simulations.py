@@ -689,7 +689,7 @@ def get_prediction_entity_options(engine, date_range=None):
                 }
                 for entity, pred_count in results
             ]
-    except Exception as e:
+    except Exception:
         # Fallback: return entities without counts if there's an error
         try:
             with Session(engine) as db:
@@ -749,7 +749,7 @@ def get_entity_options(engine, date_range=None):
                 }
                 for entity, sim_count in results
             ]
-    except Exception as e:
+    except Exception:
         # Fallback: return entities without counts if there's an error
         try:
             with Session(engine) as db:

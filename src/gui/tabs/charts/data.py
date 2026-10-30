@@ -2,7 +2,6 @@
 Charts Tab - Data Retrieval Functions
 """
 
-from typing import Optional
 
 import pandas as pd
 
@@ -15,12 +14,12 @@ from src.services.market_data import market_data
 def _fetch_chart_data(symbol: str, timeframe: str, loaded_data: pd.DataFrame | None = None) -> pd.DataFrame | None:
     """
     Fetch chart data, using loaded_data if provided (for infinite scroll).
-    
+
     Args:
         symbol: Stock ticker symbol
         timeframe: Chart timeframe
         loaded_data: Optional pre-loaded DataFrame
-        
+
     Returns:
         DataFrame with OHLCV data or None if error
     """
@@ -46,11 +45,11 @@ def _fetch_chart_data(symbol: str, timeframe: str, loaded_data: pd.DataFrame | N
 def _calculate_stats(df: pd.DataFrame, symbol: str) -> dict | None:
     """
     Calculate statistics from DataFrame.
-    
+
     Args:
         df: DataFrame with OHLCV data
         symbol: Stock ticker symbol
-        
+
     Returns:
         Dictionary with stats or None if error
     """
@@ -80,5 +79,5 @@ def _calculate_stats(df: pd.DataFrame, symbol: str) -> dict | None:
             'color': color,
             'arrow': arrow
         }
-    except Exception as e:
+    except Exception:
         return None

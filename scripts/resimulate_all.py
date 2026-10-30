@@ -47,16 +47,16 @@ progress_lock = Lock()
 def _resimulate_single(sim_data: tuple) -> dict:
     """
     Worker function to resimulate a single trading simulation.
-    
+
     This function is designed to be called by ThreadPoolExecutor workers.
     Each worker creates its own database session and TradingSimulationEngine instance.
-    
+
     With PostgreSQL, database operations can happen truly in parallel, providing
     significant performance improvements over SQLite.
-    
+
     Args:
         sim_data: Tuple of (simulation_id, prediction_id, entity_id, entity_name, horizon, index, total)
-        
+
     Returns:
         dict: Statistics for this simulation {
             'processed': 1,
@@ -144,15 +144,15 @@ def _resimulate_single(sim_data: tuple) -> dict:
 def resimulate_all(db: Session, limit: int = None, workers: int = 4) -> dict:
     """
     Recalculate all existing trading simulations using parallel processing.
-    
+
     With PostgreSQL, this function can efficiently handle many concurrent database
     connections, providing significant performance improvements.
-    
+
     Args:
         db: Database session (used only to fetch simulation list)
         limit: Optional limit on number of simulations to process
         workers: Number of parallel worker threads (default: 4 to avoid yfinance rate limits)
-        
+
     Returns:
         dict: Statistics about the resimulation operation
     """

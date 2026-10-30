@@ -140,7 +140,7 @@ class FactVerificationAgent:
     def verify_article(self, news_id: str) -> FactVerification:
         """
         Verify facts in an article.
-        
+
         DEPRECATED: Use process_batch() for better performance.
 
         Args:

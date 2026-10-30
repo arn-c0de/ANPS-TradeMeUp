@@ -43,7 +43,7 @@ class DataQualityAgent:
     def __init__(self):
         """
         Initialize data quality agent.
-        
+
         Note: Uses scoped sessions internally for better isolation.
         """
         pass
@@ -315,7 +315,7 @@ class DataQualityAgent:
     def process_article(self, news_id: str) -> DataQualityScore:
         """
         Process article and save quality assessment to database.
-        
+
         DEPRECATED: Use process_batch() for better performance.
 
         Args:

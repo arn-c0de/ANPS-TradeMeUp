@@ -2,7 +2,6 @@
 Charts Tab - Utility Functions
 """
 
-from typing import Tuple
 
 import dash_bootstrap_components as dbc
 import pandas as pd
@@ -94,7 +93,7 @@ def _build_chart_figure(
 ) -> 'go.Figure':
     """
     Build Plotly figure from DataFrame.
-    
+
     Args:
         df: DataFrame with OHLCV data
         symbol: Stock ticker symbol
@@ -105,7 +104,7 @@ def _build_chart_figure(
         dragmode: Drag mode ('zoom' or 'pan')
         auto_scroll: Auto-scroll to latest data
         view_state: Saved view state dict
-        
+
     Returns:
         Plotly Figure object
     """
@@ -177,18 +176,17 @@ def update_chart_with_prepended_data(
 ) -> tuple['go.Figure', list]:
     """
     Update chart figure with prepended data while maintaining view position.
-    
+
     Args:
         existing_fig: Existing Plotly figure
         new_df: New DataFrame to prepend
         old_df: Old DataFrame
         old_range: Old x-axis range [left_val, right_val]
         show_volume: Whether volume subplot is shown
-        
+
     Returns:
         Tuple of (updated_figure, new_range)
     """
-    from plotly.graph_objects import Figure
 
     # Calculate offset (how many new data points were added)
     offset = len(new_df)

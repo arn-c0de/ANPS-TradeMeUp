@@ -1,6 +1,5 @@
 """Test if update logic works correctly"""
 
-from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from src.models.database import SessionLocal

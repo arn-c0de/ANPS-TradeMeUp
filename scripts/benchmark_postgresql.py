@@ -95,7 +95,7 @@ def benchmark_dashboard_queries(iterations: int = 10) -> BenchmarkResult:
             start = time.time()
 
             # Get recent predictions with entity info
-            predictions = session.execute(
+            session.execute(
                 select(Prediction, Entity)
                 .join(Entity, Prediction.entity_id == Entity.entity_id)
                 .where(Prediction.created_at > datetime.now(UTC) - timedelta(days=7))
@@ -104,7 +104,7 @@ def benchmark_dashboard_queries(iterations: int = 10) -> BenchmarkResult:
             ).all()
 
             # Get top entities by prediction count
-            top_entities = session.execute(
+            session.execute(
                 select(Entity.entity_id, Entity.entity_name, func.count(Prediction.prediction_id))
                 .join(Prediction, Entity.entity_id == Prediction.entity_id)
                 .group_by(Entity.entity_id, Entity.entity_name)
@@ -138,7 +138,7 @@ def benchmark_prediction_lookups(iterations: int = 100) -> BenchmarkResult:
             start = time.time()
 
             # Lookup prediction by ID with related data
-            prediction = session.execute(
+            session.execute(
                 select(Prediction, Entity)
                 .join(Entity, Prediction.entity_id == Entity.entity_id)
                 .where(Prediction.prediction_id == pred_id)
@@ -172,7 +172,7 @@ def benchmark_vector_similarity(iterations: int = 10) -> BenchmarkResult:
 
             # Find nearest neighbors using cosine distance
             # Note: Requires pgvector extension
-            neighbors = session.execute(text("""
+            session.execute(text("""
                 SELECT news_id, embedding <=> :query_embedding AS distance
                 FROM processed_news
                 WHERE embedding IS NOT NULL
@@ -195,7 +195,7 @@ def benchmark_jsonb_queries(iterations: int = 50) -> BenchmarkResult:
             start = time.time()
 
             # Query using JSONB containment
-            high_confidence = session.execute(text("""
+            session.execute(text("""
                 SELECT prediction_id, entity_id, confidence
                 FROM predictions
                 WHERE direction_probabilities @> '{"up": 0.6}'::jsonb
@@ -203,7 +203,7 @@ def benchmark_jsonb_queries(iterations: int = 50) -> BenchmarkResult:
             """)).all()
 
             # Query sentiment JSON
-            positive_sentiment = session.execute(text("""
+            session.execute(text("""
                 SELECT news_id, sentiment->>'overall' as overall_sentiment
                 FROM processed_news
                 WHERE sentiment @> '{"overall": "positive"}'::jsonb
@@ -228,7 +228,7 @@ def benchmark_concurrent_access(num_workers: int = 10, queries_per_worker: int =
                 start = time.time()
 
                 # Perform a typical query
-                predictions = session.execute(
+                session.execute(
                     select(Prediction)
                     .where(Prediction.created_at > datetime.now(UTC) - timedelta(days=1))
                     .limit(10)
@@ -263,7 +263,7 @@ def benchmark_complex_joins(iterations: int = 20) -> BenchmarkResult:
             start = time.time()
 
             # Complex query joining predictions, entities, and simulations
-            results = session.execute(
+            session.execute(
                 select(
                     Prediction.prediction_id,
                     Prediction.confidence,
