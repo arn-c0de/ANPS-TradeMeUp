@@ -1,11 +1,13 @@
 """API endpoints for entities."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.models.database import get_db
 from src.models.entities import Entity, NewsEntityMapping
+from src.models.raw_news import RawNews
 
 router = APIRouter(prefix="/entities", tags=["entities"])
 
@@ -15,7 +17,8 @@ class EntityResponse(BaseModel):
     entity_id: str
     entity_type: str
     entity_name: str
-    metadata: dict | None = None
+    # The ORM attribute is metadata_: Entity.metadata is SQLAlchemy's MetaData.
+    metadata: dict | None = Field(None, validation_alias="metadata_")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -32,14 +35,14 @@ def list_entities(
     - **entity_type**: Filter by entity type (company, sector, index)
     - **limit**: Maximum number of results
     """
-    query = db.query(Entity)
+    stmt = select(Entity)
 
     if entity_type:
-        query = query.filter(Entity.entity_type == entity_type)
+        stmt = stmt.where(Entity.entity_type == entity_type)
 
-    entities = query.limit(limit).all()
+    entities = db.scalars(stmt.limit(limit)).all()
 
-    return [EntityResponse.from_orm(e) for e in entities]
+    return [EntityResponse.model_validate(e) for e in entities]
 
 
 @router.get("/{entity_id}")
@@ -48,26 +51,26 @@ def get_entity_detail(
     db: Session = Depends(get_db)
 ):
     """Get detailed information for a specific entity."""
-    entity = db.query(Entity).filter(Entity.entity_id == entity_id).first()
+    entity = db.get(Entity, entity_id)
 
     if not entity:
         raise HTTPException(status_code=404, detail="Entity not found")
 
     # Count news mentions
-    mention_count = db.query(NewsEntityMapping).filter(
-        NewsEntityMapping.entity_id == entity_id
-    ).count()
+    mention_count = db.scalar(
+        select(func.count())
+        .select_from(NewsEntityMapping)
+        .where(NewsEntityMapping.entity_id == entity_id)
+    )
 
     # Get recent news
-    from src.models.raw_news import RawNews
-    recent_news = db.query(RawNews).join(
-        NewsEntityMapping,
-        RawNews.news_id == NewsEntityMapping.news_id
-    ).filter(
-        NewsEntityMapping.entity_id == entity_id
-    ).order_by(
-        RawNews.published_at.desc()
-    ).limit(10).all()
+    recent_news = db.scalars(
+        select(RawNews)
+        .join(NewsEntityMapping, RawNews.news_id == NewsEntityMapping.news_id)
+        .where(NewsEntityMapping.entity_id == entity_id)
+        .order_by(RawNews.published_at.desc())
+        .limit(10)
+    ).all()
 
     return {
         "entity_id": entity.entity_id,
@@ -89,29 +92,25 @@ def get_entity_detail(
 @router.get("/statistics/summary")
 def get_entity_statistics(db: Session = Depends(get_db)):
     """Get entity statistics."""
-    from sqlalchemy import func
+    total = db.scalar(select(func.count()).select_from(Entity))
 
-    total = db.query(Entity).count()
-
-    by_type = db.query(
-        Entity.entity_type,
-        func.count(Entity.entity_id).label('count')
-    ).group_by(Entity.entity_type).all()
+    by_type = db.execute(
+        select(Entity.entity_type, func.count(Entity.entity_id).label('count'))
+        .group_by(Entity.entity_type)
+    ).all()
 
     # Top mentioned entities
-    top_entities = db.query(
-        NewsEntityMapping.entity_id,
-        Entity.entity_name,
-        func.count(NewsEntityMapping.mapping_id).label('mentions')
-    ).join(
-        Entity,
-        NewsEntityMapping.entity_id == Entity.entity_id
-    ).group_by(
-        NewsEntityMapping.entity_id,
-        Entity.entity_name
-    ).order_by(
-        func.count(NewsEntityMapping.mapping_id).desc()
-    ).limit(10).all()
+    top_entities = db.execute(
+        select(
+            NewsEntityMapping.entity_id,
+            Entity.entity_name,
+            func.count(NewsEntityMapping.mapping_id).label('mentions'),
+        )
+        .join(Entity, NewsEntityMapping.entity_id == Entity.entity_id)
+        .group_by(NewsEntityMapping.entity_id, Entity.entity_name)
+        .order_by(func.count(NewsEntityMapping.mapping_id).desc())
+        .limit(10)
+    ).all()
 
     return {
         "total_entities": total,

@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.models.database import get_db
@@ -48,34 +49,34 @@ def list_predictions(
     - **end_date**: End date for filtering
     - **limit**: Maximum number of results
     """
-    query = db.query(Prediction)
+    stmt = select(Prediction)
 
     # Apply filters
     if entity_id:
-        query = query.filter(Prediction.entity_id == entity_id)
+        stmt = stmt.where(Prediction.entity_id == entity_id)
 
     if min_confidence > 0:
-        query = query.filter(Prediction.confidence >= min_confidence)
+        stmt = stmt.where(Prediction.confidence >= min_confidence)
 
     if horizon:
-        query = query.filter(Prediction.horizon == horizon)
+        stmt = stmt.where(Prediction.horizon == horizon)
 
     if start_date:
-        query = query.filter(Prediction.timestamp >= start_date)
+        stmt = stmt.where(Prediction.timestamp >= start_date)
 
     if end_date:
-        query = query.filter(Prediction.timestamp <= end_date)
+        stmt = stmt.where(Prediction.timestamp <= end_date)
 
     # Order by timestamp desc and limit
-    predictions = query.order_by(Prediction.timestamp.desc()).limit(limit).all()
+    predictions = db.scalars(stmt.order_by(Prediction.timestamp.desc()).limit(limit)).all()
 
     # Resolve entity names in one query. Looking each one up inside the loop
     # issued up to `limit` extra round trips per request.
     entity_ids = {pred.entity_id for pred in predictions}
     entity_names = dict(
-        db.query(Entity.entity_id, Entity.entity_name)
-        .filter(Entity.entity_id.in_(entity_ids))
-        .all()
+        db.execute(
+            select(Entity.entity_id, Entity.entity_name).where(Entity.entity_id.in_(entity_ids))
+        ).all()
     ) if entity_ids else {}
 
     return [
@@ -102,14 +103,14 @@ def get_prediction(
     db: Session = Depends(get_db)
 ):
     """Get detailed information for a specific prediction."""
-    prediction = db.query(Prediction).filter(
-        Prediction.prediction_id == prediction_id
+    prediction = db.scalars(
+        select(Prediction).where(Prediction.prediction_id == prediction_id)
     ).first()
 
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
 
-    entity = db.query(Entity).filter(Entity.entity_id == prediction.entity_id).first()
+    entity = db.get(Entity, prediction.entity_id)
 
     return PredictionResponse(
         prediction_id=str(prediction.prediction_id),
@@ -127,14 +128,12 @@ def get_prediction(
 @router.get("/statistics/summary")
 def get_statistics(db: Session = Depends(get_db)):
     """Get overall prediction statistics."""
-    from sqlalchemy import func
-
-    total = db.query(Prediction).count()
+    total = db.scalar(select(func.count()).select_from(Prediction))
 
     # Count bullish/bearish. Only the probabilities column is loaded: fetching
     # whole Prediction objects pulled every row of the table (with its JSONB
     # payloads) into memory just to read one field.
-    probability_rows = db.query(Prediction.direction_probabilities).all()
+    probability_rows = db.execute(select(Prediction.direction_probabilities)).all()
 
     bullish = bearish = 0
     for (raw_probabilities,) in probability_rows:
@@ -145,11 +144,13 @@ def get_statistics(db: Session = Depends(get_db)):
             bearish += 1
 
     # Average confidence
-    avg_confidence = db.query(func.avg(Prediction.confidence)).scalar()
+    avg_confidence = db.scalar(select(func.avg(Prediction.confidence)))
 
     # Recent predictions (last 24h)
     yesterday = datetime.now(UTC) - timedelta(days=1)
-    recent = db.query(Prediction).filter(Prediction.timestamp >= yesterday).count()
+    recent = db.scalar(
+        select(func.count()).select_from(Prediction).where(Prediction.timestamp >= yesterday)
+    )
 
     return {
         "total_predictions": total,

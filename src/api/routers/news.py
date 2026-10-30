@@ -3,6 +3,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.data_quality import DataQualityScore
@@ -47,46 +48,44 @@ def list_news(
     - **end_date**: End date for filtering
     - **limit**: Maximum number of results
     """
-    query = db.query(RawNews).join(
-        DataQualityScore,
-        RawNews.news_id == DataQualityScore.news_id,
-        isouter=True
-    ).outerjoin(
-        ProcessedNews,
-        RawNews.news_id == ProcessedNews.news_id
+    stmt = (
+        select(RawNews)
+        .outerjoin(DataQualityScore, RawNews.news_id == DataQualityScore.news_id)
+        .outerjoin(ProcessedNews, RawNews.news_id == ProcessedNews.news_id)
     )
 
     # Apply filters
     if source:
-        query = query.filter(RawNews.source.contains(source))
+        stmt = stmt.where(RawNews.source.contains(source))
 
     if event_type:
-        query = query.filter(ProcessedNews.event_type == event_type)
+        stmt = stmt.where(ProcessedNews.event_type == event_type)
 
     if min_quality > 0:
-        query = query.filter(DataQualityScore.quality_score >= min_quality)
+        stmt = stmt.where(DataQualityScore.quality_score >= min_quality)
 
     if start_date:
-        query = query.filter(RawNews.published_at >= start_date)
+        stmt = stmt.where(RawNews.published_at >= start_date)
 
     if end_date:
-        query = query.filter(RawNews.published_at <= end_date)
+        stmt = stmt.where(RawNews.published_at <= end_date)
 
     # Order by date desc and limit
-    news_items = query.order_by(RawNews.published_at.desc()).limit(limit).all()
+    news_items = db.scalars(stmt.order_by(RawNews.published_at.desc()).limit(limit)).all()
 
     # Fetch quality and processed data for the whole page in two queries.
     # Doing it inside the loop cost two extra round trips per article, so a
     # 100-item page issued 201 queries.
     news_ids = [news.news_id for news in news_items]
     quality_scores = dict(
-        db.query(DataQualityScore.news_id, DataQualityScore.quality_score)
-        .filter(DataQualityScore.news_id.in_(news_ids))
-        .all()
+        db.execute(
+            select(DataQualityScore.news_id, DataQualityScore.quality_score)
+            .where(DataQualityScore.news_id.in_(news_ids))
+        ).all()
     ) if news_ids else {}
     processed_by_id = {
         row.news_id: row
-        for row in db.query(ProcessedNews).filter(ProcessedNews.news_id.in_(news_ids)).all()
+        for row in db.scalars(select(ProcessedNews).where(ProcessedNews.news_id.in_(news_ids)))
     } if news_ids else {}
 
     results = []
@@ -112,18 +111,18 @@ def get_news_detail(
     db: Session = Depends(get_db)
 ):
     """Get detailed information for a specific news article."""
-    news = db.query(RawNews).filter(RawNews.news_id == news_id).first()
+    news = db.scalars(select(RawNews).where(RawNews.news_id == news_id)).first()
 
     if not news:
         raise HTTPException(status_code=404, detail="News article not found")
 
     # Get related data
-    quality = db.query(DataQualityScore).filter(
-        DataQualityScore.news_id == news_id
+    quality = db.scalars(
+        select(DataQualityScore).where(DataQualityScore.news_id == news_id)
     ).first()
 
-    processed = db.query(ProcessedNews).filter(
-        ProcessedNews.news_id == news_id
+    processed = db.scalars(
+        select(ProcessedNews).where(ProcessedNews.news_id == news_id)
     ).first()
 
     return {

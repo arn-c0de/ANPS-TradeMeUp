@@ -48,4 +48,4 @@ jobs:
           OPENAI_API_KEY: test-key
           SECRET_KEY: ci-secret
         run: |
-          pytest tests/test_redaction.py tests/test_api_lifespan_logs.py tests/test_backfill_llm_config.py -q
+          pytest tests/test_redaction.py tests/test_api_lifespan_logs.py tests/test_backfill_llm_config.py tests/test_entity_response.py -q
